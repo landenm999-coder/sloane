@@ -39,6 +39,11 @@ def create_app() -> FastAPI:
         level=getattr(logging, config.log_level.upper(), logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+    # httpx logs every request URL at INFO. Two of ours are credentials: the
+    # Telegram API URL embeds the bot token, and the calendar's secret .ics URL
+    # *is* the credential. Its warnings and errors still come through.
+    for noisy in ("httpx", "httpcore"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
 
     store = Store(config)
     state: dict = {}

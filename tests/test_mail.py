@@ -265,6 +265,22 @@ def unit() -> None:
     check("a pass the sender appended lower down does not", parse_message(forged).authenticated, False)
     other = message("a3", "k <keegan@gmail.com>", "s", "b", auth=[GOOGLE_AUTH.format(d="evil.test")])
     check("a pass for some other domain does not", parse_message(other).authenticated, False)
+    real_multi = ("mx.google.com; dkim=pass header.i=@gmail.com header.s=20230601; "
+                  "spf=pass (google.com: domain of keegan@gmail.com designates 1.2.3.4 as "
+                  "permitted sender) smtp.mailfrom=keegan@gmail.com; "
+                  "dmarc=pass (p=NONE sp=QUARANTINE dis=NONE) header.from=gmail.com")
+    check("Google's real three-clause header verifies",
+          parse_message(message("a5", "keegan@gmail.com", "s", "b", auth=[real_multi])).authenticated, True)
+    smuggled = ("mx.google.com; spf=softfail (google.com: domain of transitioning "
+                "dmarc=pass.header.from=gmail.com@evil.example does not designate 6.6.6.6) "
+                "smtp.mailfrom=dmarc=pass.header.from=gmail.com@evil.example; "
+                "dmarc=fail (p=NONE sp=QUARANTINE dis=NONE) header.from=gmail.com")
+    check("a pass smuggled in through the envelope sender does not",
+          parse_message(message("a6", "keegan@gmail.com", "s", "b", auth=[smuggled])).authenticated, False)
+    quoted = ('mx.google.com; spf=neutral smtp.mailfrom="x; dmarc=pass header.from=gmail.com; y"'
+              '@evil.example; dmarc=fail (p=NONE) header.from=gmail.com')
+    check("nor one hidden in a quoted local part",
+          parse_message(message("a7", "keegan@gmail.com", "s", "b", auth=[quoted])).authenticated, False)
     check("no header, no verification",
           parse_message(message("a4", "keegan@gmail.com", "s", "b")).authenticated, False)
 

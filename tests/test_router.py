@@ -182,6 +182,15 @@ check("tools are switched off", argv[argv.index("--tools") + 1] if "--tools" in 
 check("MCP servers are not loaded", "--strict-mcp-config" in argv, True)
 check("the environment is the scrubbed one", _seen.get("kw", {}).get("env") == _env, True)
 
+# -- request URLs carry credentials; httpx must not log them -------------------
+import logging as _logging
+
+import sloane.main  # noqa: F401 - create_app() runs at import and sets the levels
+
+check("httpx request lines (which carry the bot token) are not logged",
+      _logging.getLogger("httpx").getEffectiveLevel() >= _logging.WARNING, True)
+check("nor httpcore's", _logging.getLogger("httpcore").getEffectiveLevel() >= _logging.WARNING, True)
+
 if FAILURES:
     print(f"FAIL ({len(FAILURES)})")
     for f in FAILURES:

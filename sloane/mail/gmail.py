@@ -117,7 +117,8 @@ def _body(payload: dict) -> str:
     return text[:BODY_LIMIT]
 
 
-_DMARC_PASS = re.compile(r"\bdmarc=pass\b[^;]*\bheader\.from=([A-Za-z0-9.-]+)", re.I)
+_QUOTED = re.compile(r'"(?:[^"\\]|\\.)*"')
+_COMMENT = re.compile(r"\([^()]*\)")
 
 
 def _authenticated(first_auth_results: str, sender: str) -> bool:
@@ -125,13 +126,32 @@ def _authenticated(first_auth_results: str, sender: str) -> bool:
 
     Only the *first* Authentication-Results header counts: Google prepends its
     own, and any further down were written by whoever sent the message.
+
+    Even Google's own header carries sender-chosen text: the SPF clause repeats
+    the envelope sender, which can be a quoted local part holding anything,
+    `dmarc=pass header.from=gmail.com` included. So quoted strings and comments
+    are removed first, the header is split into its `;` clauses, and only the
+    *last* clause whose method is `dmarc` is read -- Google writes it after SPF,
+    so anything smuggled into the SPF clause comes before it, never after.
     """
     value = (first_auth_results or "").strip()
     if not value.lower().startswith("mx.google.com"):
         return False
-    found = _DMARC_PASS.search(value)
     domain = sender.rsplit("@", 1)[-1].lower() if "@" in sender else ""
-    return bool(found and domain and found.group(1).lower().rstrip(".") == domain)
+    if not domain:
+        return False
+    value = _COMMENT.sub(" ", _QUOTED.sub('""', value))
+    dmarc: list[str] | None = None
+    for clause in value.split(";")[1:]:
+        tokens = clause.split()
+        if tokens and tokens[0].lower().startswith("dmarc="):
+            dmarc = tokens
+    if not dmarc or dmarc[0].lower() != "dmarc=pass":
+        return False
+    for token in dmarc[1:]:
+        if token.lower().startswith("header.from="):
+            return token.split("=", 1)[1].lower().rstrip(".") == domain
+    return False
 
 
 def parse_message(raw: dict) -> Message:

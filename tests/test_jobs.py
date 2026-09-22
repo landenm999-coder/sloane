@@ -203,7 +203,12 @@ async def main() -> None:
         check("1-5 is Monday to Friday", fires("45 14 * * 1-5", 5), ["Mon", "Tue", "Wed", "Thu", "Fri"])
         check("0 and 7 are both Sunday", (fires("0 9 * * 0", 1), fires("0 9 * * 7", 1)), (["Sun"], ["Sun"]))
         check("names still work", fires("0 9 * * sat", 1), ["Sat"])
-        check("steps are left alone", fires("0 */12 * * *", 2), ["Sun", "Sun"])
+        check("hour steps are untouched", fires("0 */12 * * *", 2), ["Sun", "Sun"])
+        check("a range from Sunday works", fires("0 9 * * 0-4", 5), ["Sun", "Mon", "Tue", "Wed", "Thu"])
+        check("a weekday step is cron's", fires("0 9 * * 1-5/2", 3), ["Mon", "Wed", "Fri"])
+        check("*/2 counts from Sunday", fires("0 9 * * */2", 4), ["Sun", "Tue", "Thu", "Sat"])
+        check("7 is Sunday in a range", fires("0 9 * * 5-7", 3), ["Sun", "Fri", "Sat"])
+        check("a list mixes", fires("0 9 * * 0,3,6", 3), ["Sun", "Wed", "Sat"])
         check(
             "the morning brief fires at 6:35 local",
             nxt["morning_brief"].astimezone(DEN).strftime("%H:%M"), "06:35",
