@@ -115,6 +115,13 @@ class Settings(BaseSettings):
             if d.strip()
         )
 
+    # --- capture intake -------------------------------------------------------
+    # Bearer token for POST /capture, the one endpoint meant to be reached from
+    # off the box (from the Capture app, over Tailscale). Unset, or shorter than
+    # 32 characters, means the endpoint is off. Generate one with:
+    #   python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+    capture_token: str = ""
+
     # --- telegram ------------------------------------------------------------
     telegram_bot_token: str = ""
     telegram_chat_id: int = 0

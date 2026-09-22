@@ -73,6 +73,13 @@ _LEAD = re.compile(r"^(?:\s|,|:|-|to\b|that\b|me\b|about\b)+", re.I)
 _TRAIL = re.compile(r"(?:\s|,|:|-|\bto\b)+$", re.I)
 
 
+# "Remind me at 5 to call Keegan", as typed, spoken or captured. Group 1 is the
+# rest. Shared by the chat and the Capture intake so both read it the same way.
+REMIND_ME = re.compile(
+    r"^\s*(?:hey\s+)?(?:sloane[,\s]+)?(?:please\s+)?remind\s+me\b[,:]?\s*(.*)$", re.I | re.S
+)
+
+
 @dataclass(frozen=True)
 class Parsed:
     due: datetime

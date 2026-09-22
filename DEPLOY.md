@@ -207,6 +207,43 @@ Approve. Anything from a school address (`SCHOOL_EMAIL_DOMAINS`, default
 Permissions are read + compose only: she can read, draft and send, and has no
 permission that could delete mail.
 
+## 7d. Later: connect Capture (about 10 minutes, once)
+
+Capture posts what you say to `POST /capture`. It is the one endpoint that
+checks a password, and it stays off until you set one.
+
+1. Make a token and put it in `.env`:
+
+   ```bash
+   python3 -c "import secrets; print('CAPTURE_TOKEN=' + secrets.token_urlsafe(32))" >> .env
+   sudo systemctl restart sloane
+   ```
+
+2. Reach the box from your phone **without opening a port**. Install
+   [Tailscale](https://tailscale.com/download) on the box
+   (`curl -fsSL https://tailscale.com/install.sh | sh && sudo tailscale up`) and
+   on your phone, signed in to the same account. Then on the box:
+
+   ```bash
+   sudo tailscale serve --bg 8000
+   ```
+
+   Sloane is now at `https://<box-name>.<your-tailnet>.ts.net`, reachable only by
+   your own devices. **Never use `tailscale funnel`**: that would put her on the
+   public internet.
+
+3. In Capture's settings, enter that URL and the token. Test it from any
+   device on your tailnet:
+
+   ```bash
+   curl -s -X POST https://<box>.<tailnet>.ts.net/capture \
+     -H "Authorization: Bearer $CAPTURE_TOKEN" -H "Content-Type: application/json" \
+     -d '{"text": "remind me in 10 minutes to test capture"}'
+   ```
+
+   Whatever you capture is stored in your own voice, so she can recall it later. A captured
+   "remind me …" becomes a real reminder.
+
 ## 8. Run her
 
 ```bash

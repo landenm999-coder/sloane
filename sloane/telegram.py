@@ -25,6 +25,7 @@ from sloane.agent import Agent
 from sloane.config import Settings, settings as default_settings
 from sloane.contract import Reply
 from sloane.ingest import safe_field
+from sloane.reminders import REMIND_ME
 from sloane.memory.store import Store, remember
 from sloane.providers.base import ProviderError
 from sloane.providers.groq import GroqProvider
@@ -33,8 +34,6 @@ from sloane.voice import Voice
 
 log = logging.getLogger(__name__)
 
-_REMIND_ME = re.compile(r"^\s*(?:hey\s+)?(?:sloane[,\s]+)?(?:please\s+)?remind\s+me\b[,:]?\s*(.*)$",
-                        re.I | re.S)
 
 API = "https://api.telegram.org"
 
@@ -522,7 +521,7 @@ class Bot:
 
         # "Remind me at 5 to call Keegan" -- typed or spoken -- is handled by
         # rules, not the model, so it works when every provider is down.
-        asked = _REMIND_ME.match(body)
+        asked = REMIND_ME.match(body)
         if asked:
             await self.send(chat_id, await self._remind(asked.group(1)))
             return

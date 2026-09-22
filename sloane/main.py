@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
 from sloane.agency import Agency, reminder_action
 from sloane.agent import HARD_LINES, Agent
@@ -31,6 +33,8 @@ from sloane.memory.store import Store
 from sloane.telegram import Bot
 
 log = logging.getLogger(__name__)
+
+MAX_CAPTURE_BYTES = 64_000
 
 
 def create_app() -> FastAPI:
@@ -176,6 +180,22 @@ def create_app() -> FastAPI:
                 for s in report.sources
             ],
         }
+
+    @app.post("/capture")
+    async def capture(request: Request) -> JSONResponse:
+        """Capture's intake. The only endpoint that checks a credential; see capture.py."""
+        from sloane.capture import ingest
+
+        raw = await request.body()
+        if len(raw) > MAX_CAPTURE_BYTES:
+            return JSONResponse({"error": "body too large"}, status_code=413)
+        try:
+            payload = json.loads(raw or b"null")
+        except ValueError:
+            payload = None
+        result = await ingest(store, config, payload, request.headers.get("authorization"),
+                              embedder=state.get("embedder"))
+        return JSONResponse(result.body, status_code=result.status)
 
     @app.get("/jobs")
     async def jobs() -> dict:

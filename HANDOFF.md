@@ -40,6 +40,7 @@ deploying it.
 | Reminders | "remind me at 5 to call Keegan", typed or spoken, or `/remind tomorrow 7am …`. The time comes from a rule-based parser (number words included) and never touches a model. Delivered by an every-minute job; held through quiet hours and marked late; claimed once; retried if the send fails. `/reminders`, `/unremind <n>` | `sloane/reminders.py`, `jobs/briefs.py` `reminders`, `sql/006_reminders.sql` |
 | Canvas alerts | entity_sync compares each assignment before/after (`school/changes.py` `classify`); new-and-future, graded (+score), newly missing, due moved → `school_changes` rows → one rule-rendered message (no model), held through quiet hours, claimed once, retried on send failure; first sync is a silent baseline; `/sync` announces immediately | `sloane/school/changes.py`, `sql/007_school_changes.sql` |
 | Watchdog | `watchdog` job every 30 min: failed/partial jobs, a lane provider failing every call for 3h (Claude-login hint), dead Gmail grant; told after 60 min grace, repeated every 24h, "working again" on recovery; `alerts` table; jobs can now record `partial` | `sloane/jobs/watchdog.py`, `sql/008_watchdog.sql` |
+| Capture intake | `POST /capture` (bearer `CAPTURE_TOKEN` ≥32 chars, constant-time compare; off otherwise; 64 KB body cap; text never logged) → trusted `user` episode `source=capture` dated `captured_at`; "remind me …" → reminder. Reach via `tailscale serve` (DEPLOY §7d). The Capture app side is not built yet | `sloane/capture.py`, `tests/test_capture.py` |
 | Views | `/today`, `/week`: schedule + due + computed conflicts from SQL, no model | `sloane/views.py`, `tests/test_views.py` |
 | Security hardening | `claude -p` runs `--tools ""` `--strict-mcp-config` with a scrubbed env; bot fails closed with no chat id; httpx URL logging off (token/ICS URL); bind 127.0.0.1 unless `BIND_HOST` | various |
 | Ops | Dockerfile (arm64), compose (loopback port, `claude-auth` + `models` volumes), systemd unit, `doctor.py` (checks every credential), `seed_state.py`, `seed_courses.py`, `gmail_auth.py` (stdlib PKCE consent → writes `.env`), `eval.py` (golden questions, real model) | root, `scripts/` |
@@ -47,7 +48,7 @@ deploying it.
 | CI | `test.yml` (py3.12 + pgvector, migrations applied twice), `image.yml` (linux/arm64 build + smoke), Dependabot | `.github/` |
 
 Telegram commands: `/today /week /brief /jobs /sync /inbox /remind /reminders /unremind /trust /revoke /cancel /usage /state /help`, plus plain "remind me …".
-HTTP (loopback only): `/health /usage /state /facts /jobs POST /sync POST /jobs/{name}/run`.
+HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /state /facts /jobs POST /sync POST /jobs/{name}/run`, plus `POST /capture` (token).
 
 ## Invariants (a violation is a bug even if tests pass)
 
@@ -68,9 +69,8 @@ Nothing half-done. (Update this section before stopping if something is.)
 
 ## Backlog (ideas, in priority order)
 
-1. **Capture intake API.** `POST /capture` with a bearer token (`CAPTURE_TOKEN`). Notes and transcripts are stored
-   as Landen-authored episodes, with optional commitment extraction. Needs a documented safe way to expose it
-   (Tailscale or a Cloudflare tunnel), because the API is loopback-only today.
+1. **Capture → Sloane client** (in the capture repo): a settings screen for URL + token, and a POST after each
+   transcription. Sloane's side (`POST /capture`) is done and documented in DEPLOY §7d.
 2. Weekly JSON export of state/commitments/trust to the models volume (a cheap backup; Supabase free tier has no PITR).
 3. Infinite Campus (grades), deliberately out of v1. Needs district credentials, and repeated automated logins can
    lock the account.

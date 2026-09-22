@@ -39,9 +39,10 @@ Total running cost: **$0/mo**, every layer on a free tier.
 | Views | `/today` and `/week` render the schedule, due work and conflicts straight from SQL — no model, so they answer even when every provider is down |
 | Canvas alerts | after each sync, one message for what changed: new assignments, grades (with the score), newly missing, moved due dates. The first sync is a silent baseline; alerts wait out quiet hours |
 | Watchdog | every 30 min, no model: failing or partial jobs, a main/bulk model failing every call (e.g. an expired Claude login — with the fix), a dead Gmail grant. Told after an hour, repeated daily, "✅ working again" when it clears |
+| Capture intake | `POST /capture` with a bearer token: what he says in Capture is stored in his own voice (recallable), and "remind me …" becomes a reminder. Off until `CAPTURE_TOKEN` is set; reached over Tailscale, never a public port |
 | Reminders | "remind me at 5 to call Keegan" — typed or spoken, times read by rules (no model), held through quiet hours |
 | Gmail | triage every 3h in one batched call; replies drafted in his voice, sent only on Approve |
-| HTTP | `/health`, `/usage`, `/state`, `/facts`, `/jobs`, `POST /sync`, `POST /jobs/{name}/run` |
+| HTTP | `/health`, `/usage`, `/state`, `/facts`, `/jobs`, `POST /sync`, `POST /jobs/{name}/run`, `POST /capture` (token) |
 
 Not built: Infinite Campus (deferred — see below).
 
@@ -447,6 +448,7 @@ sloane/
   agency.py      propose → approve/trust → execute; hard lines first
   reminders.py   "at 5", "tomorrow 7am", "in 20 min" → a time, by rules
   views.py       /today and /week from rows, no model
+  capture.py     POST /capture: token auth, his words stored trusted, reminders
   mail/
     gmail.py     OAuth refresh + five REST calls; no delete, no SDK
     inbox.py     batched triage, drafts in his voice, reply/draft actions
