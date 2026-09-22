@@ -1,0 +1,37 @@
+# docker compose up -d
+#
+# Two named volumes carry everything that must survive a rebuild:
+#
+#   claude-auth   the Claude Code CLI login. Without it, every `docker compose
+#                 build` would mean logging in again.
+#   models        the 130 MB bge-small ONNX weights. Without it, every rebuild
+#                 re-downloads them, and a rebuild during a Hugging Face
+#                 outage leaves her with no recall at all.
+
+services:
+  sloane:
+    build: .
+    image: sloane:local
+    container_name: sloane
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Overrides .env so the cache always lands on the volume below.
+      EMBED_CACHE_DIR: /var/lib/sloane/models
+    volumes:
+      - claude-auth:/home/sloane/.claude
+      - models:/var/lib/sloane/models
+    ports:
+      # 127.0.0.1 on purpose. Publishing 8000 would put /facts -- his whole
+      # schedule -- on the public internet, and Docker writes its own iptables
+      # rules that bypass ufw, so "the firewall is on" would not save you.
+      - "127.0.0.1:8000:8000"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  claude-auth:
+  models:

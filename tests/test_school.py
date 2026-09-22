@@ -18,8 +18,9 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from sloane.config import Settings
+from _settings import isolated
 from sloane.ingest import safe_field
 from sloane.memory.store import Store
 from sloane.school import SchoolError
@@ -148,7 +149,7 @@ async def main() -> None:
     port = server.server_port
     threading.Thread(target=server.serve_forever, daemon=True).start()
 
-    config = Settings(
+    config = isolated(
         database_url=os.environ["DATABASE_URL"],
         timezone="America/Denver",
         canvas_base_url=f"http://127.0.0.1:{port}",
@@ -283,7 +284,7 @@ async def main() -> None:
         check("four hours long", (spans[0][1] - spans[0][0]), timedelta(hours=4))
 
         # -- a failing source must not take the others down ------------------
-        broken = Settings(
+        broken = isolated(
             database_url=os.environ["DATABASE_URL"], timezone="America/Denver",
             canvas_base_url=f"http://127.0.0.1:{port}", canvas_token="wrong",
             shift_weeks_ahead=1,

@@ -15,8 +15,9 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from sloane.config import Settings
+from _settings import isolated
 from sloane.memory.store import Store, as_vector, remember
 
 FAILURES: list[str] = []
@@ -53,7 +54,7 @@ async def reset(store: Store) -> None:
 
 
 async def main() -> None:
-    config = Settings(
+    config = isolated(
         database_url=os.environ["DATABASE_URL"],
         timezone="America/Denver",
         recency_half_life_days=14.0,

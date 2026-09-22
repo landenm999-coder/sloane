@@ -1,0 +1,16 @@
+.git
+.github
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+tests/
+*.md
+!README.md
+# seed_state.py reads this one inside the container.
+!state.example.md
+.models/
+.local_cache/

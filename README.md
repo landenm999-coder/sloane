@@ -67,6 +67,10 @@ Three things worth knowing:
 
 ## Setup
 
+> Deploying to a real box? **[DEPLOY.md](DEPLOY.md)** is the full walkthrough —
+> Oracle instance, Docker, migrations, systemd. This section is for running her
+> locally.
+
 ```bash
 pip install -r requirements.txt
 cp .env.example .env          # then fill it in

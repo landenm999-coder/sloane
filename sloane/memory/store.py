@@ -64,7 +64,23 @@ class Store:
             min_size=1,
             max_size=4,  # one ARM core pair; a wide pool buys nothing
             open=False,
-            kwargs={"row_factory": dict_row},
+            # A pooler drops idle connections, and this process sits idle
+            # between a 6:35 AM brief and the next message. Without a check,
+            # the first query after a quiet stretch fails on a dead socket --
+            # which would land as a missed morning brief, not a stack trace.
+            check=AsyncConnectionPool.check_connection,
+            max_idle=180.0,
+            kwargs={
+                "row_factory": dict_row,
+                # Supabase's transaction-mode pooler (port 6543) does not
+                # support prepared statements, and psycopg prepares
+                # automatically after a few executions -- so the app works for
+                # five queries and then fails. Session mode (5432) is fine, but
+                # the failure is silent enough at setup time that it is not
+                # worth leaving to whichever port got pasted. At a few queries
+                # per turn the planning saved is unmeasurable.
+                "prepare_threshold": None,
+            },
         )
         await self._pool.open(wait=True, timeout=10)
 

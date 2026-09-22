@@ -1,0 +1,26 @@
+# Install to /etc/systemd/system/sloane.service, then:
+#   sudo systemctl daemon-reload && sudo systemctl enable --now sloane
+#
+# systemd supervises `docker compose up` in the foreground rather than running
+# it detached, so `systemctl status` reflects the real state and the journal
+# carries the logs.
+
+[Unit]
+Description=Sloane
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/sloane
+ExecStart=/usr/bin/docker compose up
+ExecStop=/usr/bin/docker compose down
+Restart=always
+RestartSec=10
+# The box reboots, the container comes back, and the volumes mean she does not
+# need logging in again.
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target
