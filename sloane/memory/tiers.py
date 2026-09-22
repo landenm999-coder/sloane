@@ -189,6 +189,7 @@ class Context:
     facts: str = ""
     recall: str = ""
     ingested: str = ""
+    now: str = ""
     spent: dict[str, int] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
 
@@ -214,6 +215,8 @@ class Context:
             )
         if self.notes:
             parts.append(_block("NOTES", [f"- {n}" for n in self.notes]))
+        if self.now:
+            parts.append(f"NOW: {self.now} (Landen's local time)")
         parts.append(f"LANDEN:\n{question.strip()}")
         return "\n\n".join(parts)
 

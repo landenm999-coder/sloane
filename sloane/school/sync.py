@@ -16,6 +16,7 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from sloane.config import Settings
 from sloane.memory.store import Store
@@ -202,7 +203,8 @@ async def sync_calendar(store: Store, config: Settings) -> SourceResult:
 
 async def generate_shifts(store: Store, config: Settings) -> SourceResult:
     """Work posts nothing, so the fixed 3-7 PM Mon-Fri rule is materialised."""
-    today = datetime.now(timezone.utc).astimezone().date()
+    # Local, not the container's clock -- see Agent.answer.
+    today = datetime.now(ZoneInfo(config.timezone)).date()
     spans = planned_shifts(
         today,
         config.shift_weeks_ahead,

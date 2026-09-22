@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from sloane.config import Settings, settings as default_settings
 from sloane.contract import Reply, parse
@@ -52,6 +53,16 @@ HARD_LINES: frozenset[tuple[str, str]] = frozenset(
         ("publish", "public"),
     }
 )
+
+
+def _stamp(moment: datetime) -> str:
+    """'Tuesday September 22, 2026, 8:04 PM' -- unambiguous, and portable."""
+    hour = moment.hour % 12 or 12
+    meridiem = "AM" if moment.hour < 12 else "PM"
+    return (
+        f"{moment:%A %B} {moment.day}, {moment:%Y}, "
+        f"{hour}:{moment.minute:02d} {meridiem}"
+    )
 
 
 class HardLineViolation(PermissionError):
@@ -157,7 +168,11 @@ class Agent:
         today: date | None = None,
     ) -> Reply:
         """One turn. Returns a Reply even when the model is unreachable."""
-        when = today or datetime.now().astimezone().date()
+        # Landen's clock, never the container's. Docker runs in UTC, and from
+        # 6 PM to midnight in Parker it is already tomorrow there -- so "what's
+        # due tonight?" at 8 PM would search tomorrow and miss tonight.
+        now_local = datetime.now(ZoneInfo(self._config.timezone))
+        when = today or now_local.date()
 
         tiers, notes = await self._facts(when)
         episodes = await self._recall(question)
@@ -188,6 +203,15 @@ class Agent:
             config=self._config,
         )
         context.notes.extend(notes)
+        # Relative dates ("Friday", "tonight") are only answerable against a
+        # stated now. The Claude CLI happens to inject the date into its own
+        # prompt; Groq and the API do not, and a model guessing today is a
+        # model guessing deadlines.
+        context.now = (
+            _stamp(now_local)
+            if when == now_local.date()
+            else f"{when:%A %B} {when.day}, {when:%Y}"
+        )
 
         prompt = context.to_prompt(question)
         log.info(

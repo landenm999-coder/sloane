@@ -18,6 +18,7 @@ UNIT = [
     "test_embed.py",
     "test_matching.py",
     "test_conflicts.py",
+    "test_agent.py",
 ]
 INTEGRATION = ["test_store.py", "test_school.py", "test_jobs.py"]
 

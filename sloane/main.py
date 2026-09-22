@@ -10,7 +10,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI
 
@@ -161,7 +162,7 @@ def create_app() -> FastAPI:
     @app.get("/facts")
     async def facts(days: int = 7) -> dict:
         """Tier 4 as JSON. What she would answer from, without the model."""
-        today = date.today()
+        today = datetime.now(ZoneInfo(config.timezone)).date()
         horizon = today + timedelta(days=days)
         return {
             "due": [dict(r) for r in await store.assignments_due(today, horizon)],
