@@ -45,7 +45,7 @@ async def main() -> None:
         # -- off unless a real token is set ------------------------------------
         check("unset token: disabled", (await post({"text": "x"}, config=isolated(database_url=url))).status, 503)
         weak = isolated(database_url=url, capture_token="short")
-        check("a short token counts as unset", (await post({"text": "x"}, f"Bearer short", weak)).status, 503)
+        check("a short token counts as unset", (await post({"text": "x"}, "Bearer short", weak)).status, 503)
 
         # -- auth ---------------------------------------------------------------
         check("no header", (await post({"text": "x"}, None)).status, 401)

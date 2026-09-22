@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from collections.abc import Awaitable, Callable
