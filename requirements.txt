@@ -2,7 +2,7 @@
 # each dependency is something that can break a deploy at 11 PM.
 
 fastapi==0.118.0            # /health, /usage, and the process the bot runs in
-uvicorn[standard]==0.37.0   # the ASGI server
+uvicorn[standard]==0.53.0   # the ASGI server
 pydantic-settings==2.11.0   # env -> typed Settings
 psycopg[binary,pool]==3.2.10 # Postgres, with dict_row and an async pool
 httpx==0.28.1               # Telegram and Groq; the only HTTP client
