@@ -1016,6 +1016,63 @@ class Store:
             """
         )
 
+    # -- email (P4) -------------------------------------------------------------
+
+    async def known_emails(self, gmail_ids: Sequence[str]) -> set[str]:
+        """Which of these have already been triaged. Each message is judged once."""
+        if not gmail_ids:
+            return set()
+        rows = await self._fetch(
+            "select gmail_id from emails where gmail_id = any(%s)", (list(gmail_ids),)
+        )
+        return {r["gmail_id"] for r in rows}
+
+    async def record_email(
+        self,
+        *,
+        gmail_id: str,
+        thread_id: str,
+        sender: str,
+        sender_name: str,
+        subject: str,
+        snippet: str,
+        received_at: datetime | None,
+        category: str,
+        why: str,
+    ) -> bool:
+        """True if this call recorded it; False if another run got there first."""
+        row = await self._one(
+            """
+            insert into emails
+              (gmail_id, thread_id, sender, sender_name, subject, snippet,
+               received_at, category, why)
+            values (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            on conflict (gmail_id) do nothing
+            returning id
+            """,
+            (gmail_id, thread_id, sender, sender_name, subject, snippet,
+             received_at, category, why),
+        )
+        return row is not None
+
+    async def link_email_proposal(self, gmail_id: str, proposal_id: str) -> None:
+        await self._exec(
+            "update emails set proposal_id = %s where gmail_id = %s", (proposal_id, gmail_id)
+        )
+
+    async def recent_emails(self, limit: int = 20) -> list[Row]:
+        return await self._fetch(
+            """
+            select e.gmail_id, e.sender, e.sender_name, e.subject, e.category,
+                   e.why, e.received_at, e.triaged_at, p.status as proposal_status
+              from emails e
+              left join proposals p on p.id = e.proposal_id
+             order by e.triaged_at desc
+             limit %s
+            """,
+            (limit,),
+        )
+
     # -- ops ------------------------------------------------------------------
 
     async def log_usage(

@@ -26,6 +26,11 @@ EXTERNAL: dict[str, object] = {
     "telegram_bot_token": "",
     "telegram_chat_id": 0,
     "embed_cache_dir": "",
+    "gmail_client_id": "",
+    "gmail_client_secret": "",
+    "gmail_refresh_token": "",
+    "gmail_token_url": "",
+    "gmail_api_base": "",
 }
 
 

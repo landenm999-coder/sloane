@@ -92,10 +92,7 @@ is wrong, stop and check the error.
 The image carries `psql`, so nothing extra to install:
 
 ```bash
-docker compose run --rm sloane sh -c 'psql "$DATABASE_URL" -f sql/001_init.sql'
-docker compose run --rm sloane sh -c 'psql "$DATABASE_URL" -f sql/002_hybrid_search.sql'
-docker compose run --rm sloane sh -c 'psql "$DATABASE_URL" -f sql/003_school.sql'
-docker compose run --rm sloane sh -c 'psql "$DATABASE_URL" -f sql/004_agency.sql'
+docker compose run --rm sloane sh -c 'for f in sql/*.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f "$f" || exit 1; done'
 ```
 
 > The **single quotes matter**. Double quotes would expand `$DATABASE_URL` in
@@ -103,7 +100,7 @@ docker compose run --rm sloane sh -c 'psql "$DATABASE_URL" -f sql/004_agency.sql
 > container, not exported to your session — and psql would get an empty
 > connection string.
 
-All four are idempotent — re-running them is safe and is how you upgrade later.
+Every migration is idempotent, so this one line is also how you upgrade later: re-run it after any `git pull`.
 
 > If `001` fails on `create extension vector`, enable it first: Supabase →
 > **Database → Extensions** → search `vector` → toggle on.
@@ -166,6 +163,50 @@ then set `PIPER_VOICE=/var/lib/sloane/models/en_US-amy-medium.onnx` in `.env`
 and install the `piper` binary. Without this, when Groq's daily speech allowance
 runs out she simply answers in text.
 
+## 7c. Optional: Gmail (about 10 minutes, once)
+
+She reads unread mail every three hours from 7 AM to 7 PM, sorts it into
+urgent / reply / fyi / ignore, and messages you only when something needs you.
+For up to three of those she writes a reply in your voice and sends it to
+Telegram with **Approve / Edit / Deny** — nothing is sent until you tap
+Approve. Anything from a school address (`SCHOOL_EMAIL_DOMAINS`, default
+`dcsdk12.org`) is never sent by her at all: Approve saves it to your Gmail
+**Drafts** and you press send yourself.
+
+1. **console.cloud.google.com** → create a project (any name, e.g. `sloane`).
+2. **APIs & Services → Library** → search **Gmail API** → **Enable**.
+3. **APIs & Services → OAuth consent screen** (may be called *Google Auth
+   Platform → Branding/Audience*): User type **External**, app name `Sloane`,
+   your email as support and developer contact. Save.
+4. On **Audience**, add yourself as a test user, then click **Publish app** →
+   **In production**. *This matters:* in Testing mode Google kills the token
+   every 7 days. You do not need to submit for verification — it's only you.
+5. **Credentials → Create credentials → OAuth client ID** → Application type
+   **Desktop app** → Create. Copy the client ID and secret into `.env`:
+
+   ```
+   GMAIL_CLIENT_ID=...
+   GMAIL_CLIENT_SECRET=...
+   ```
+
+6. On the box, **outside Docker** (it writes `.env` for you):
+
+   ```bash
+   cd /opt/sloane && python3 scripts/gmail_auth.py
+   ```
+
+   Open the link it prints, pick your account, click *Advanced → Go to Sloane*
+   past the unverified-app warning, allow both permissions. The browser then
+   lands on a `localhost` page that **won't load — that's expected**. Copy that
+   whole address, paste it into the script, done. The token goes into `.env`,
+   never onto the screen.
+
+7. `sudo systemctl restart sloane`, then `doctor.py` — the `gmail` line should
+   say PASS. `/inbox` on Telegram runs a triage right away.
+
+Permissions are read + compose only: she can read, draft and send, and has no
+permission that could delete mail.
+
 ## 8. Run her
 
 ```bash
@@ -194,14 +235,15 @@ docker compose run --rm sloane python scripts/doctor.py
 cd /opt/sloane && git pull
 docker compose build && sudo systemctl restart sloane
 
-# a new migration shipped
-docker compose run --rm sloane sh -c 'psql "$DATABASE_URL" -f sql/00N_whatever.sql'
+# after every pull: apply migrations (idempotent, safe to repeat)
+docker compose run --rm sloane sh -c 'for f in sql/*.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f "$f" || exit 1; done'
 ```
 
 On Telegram: `/remind <text>` runs the approval flow end to end (tap Approve).
 `/trust` shows what she may do without asking. `/brief` gives the morning brief on demand. `/jobs` shows what
 ran and whether it worked. `/sync` pulls Canvas, the calendar and shifts now.
 `/usage` shows model calls in the last day. `/state` shows her durable facts.
+`/inbox` triages new email now.
 
 ---
 
@@ -216,6 +258,8 @@ ran and whether it worked. `/sync` pulls Canvas, the calendar and shifts now.
 | Canvas 401 | Token revoked or expired. Regenerate; district tokens sometimes have a lifetime. |
 | Recall empty, FACTS fine | The embedder never downloaded. `doctor.py --warm`. She still answers from FACTS, and full-text recall still works. |
 | No morning brief | `/jobs` — `deferred` means quiet hours or the budget held it (reason shown); `failed` shows the error; `never` means the scheduler didn't start — check the logs. |
+| `gmail` FAIL: access revoked or expired | The OAuth app is still in **Testing** (7-day tokens), or you removed its access. Publish it (7c step 4) and rerun `scripts/gmail_auth.py`. |
+| No email drafts, triage works | Drafts only go to people who can answer (not `noreply@`), at most three a run, and not once today's scheduled budget is spent. `/jobs` shows the inbox line. |
 | Container restarting | `journalctl -u sloane -n 100`. Usually a malformed `.env` line. |
 
 **Nothing here needs an inbound port.** If you ever find yourself opening one to
@@ -223,9 +267,10 @@ fix something, stop — the answer is somewhere else.
 
 ---
 
-## What this does not do yet
+## What starts on its own
 
-Email triage (P4) is not built yet. The five daily briefs
-start on their own the moment she's running — the first you'll hear is the
-6:35 AM brief. `TELEGRAM_CHAT_ID` must be set or the briefs run and record but
-have nobody to send to; `/jobs` will show that plainly.
+The five daily briefs start the moment she's running — the first you'll hear
+is the 6:35 AM brief. `TELEGRAM_CHAT_ID` must be set or the briefs run and
+record but have nobody to send to; `/jobs` will show that plainly. The inbox
+job runs only once Gmail is set up (7c); until then `/jobs` lists it as
+deferred with the reason `gmail is not configured`.

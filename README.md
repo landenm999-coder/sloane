@@ -3,9 +3,9 @@
 Always-on personal assistant for Landen. Reached by Telegram text and voice
 notes. She runs the day: what's due, what shift, what slipped, what's next.
 
-**P0 (the spine), P1 (memory + school), P2 (rhythm), P3 (voice) and the P4
-trust machinery are built.** Gmail (the rest of P4) is next; see
-[ROADMAP.md](ROADMAP.md).
+**v1 is built: P0 (the spine), P1 (memory + school), P2 (rhythm), P3 (voice)
+and P4 (agency, including Gmail).** What's left is deployment, which only
+Landen can do; see [DEPLOY.md](DEPLOY.md) and [ROADMAP.md](ROADMAP.md).
 
 Total running cost: **$0/mo**, every layer on a free tier.
 
@@ -20,7 +20,7 @@ Total running cost: **$0/mo**, every layer on a free tier.
 
 | | |
 |---|---|
-| Schema | 14 tables, idempotent, `vector(384)` + HNSW cosine index |
+| Schema | 15 tables, idempotent, `vector(384)` + HNSW cosine index |
 | Memory | all four tiers, with per-tier token budgets |
 | Embeddings | `bge-small-en-v1.5`, 384-dim, local, cached on a volume |
 | Retrieval | hybrid: vector + full-text fused with RRF, then aged |
@@ -28,7 +28,7 @@ Total running cost: **$0/mo**, every layer on a free tier.
 | Providers | `claude_code`, `groq`, `anthropic` behind one `Provider` base |
 | Contract | `Reply(speech, detail)` parsed from 5 model-output shapes |
 | Hard lines | 6 pairs, enforced in code before execution |
-| Interface | Telegram long polling: text, voice, buttons; `/brief` `/jobs` `/sync` `/remind` `/trust` `/revoke` `/usage` `/state` |
+| Interface | Telegram long polling: text, voice, buttons; `/brief` `/jobs` `/sync` `/inbox` `/remind` `/trust` `/revoke` `/usage` `/state` |
 | School | Canvas assignments + secret `.ics` calendar, both read-only |
 | Shifts | generated from the fixed 3–7 PM Mon–Fri rule, DST-correct |
 | Sync | `/sync` on Telegram, `POST /sync` over HTTP, `entity_sync` job every 4h |
@@ -36,9 +36,10 @@ Total running cost: **$0/mo**, every layer on a free tier.
 | Conflicts | computed in code and handed to her as findings, every turn |
 | Voice | a voice note in gets a voice note out; text is always the fallback |
 | Agency | every action proposed, approved with buttons, or run under earned trust |
+| Gmail | triage every 3h in one batched call; replies drafted in his voice, sent only on Approve |
 | HTTP | `/health`, `/usage`, `/state`, `/facts`, `/jobs`, `POST /sync`, `POST /jobs/{name}/run` |
 
-Not built: Infinite Campus (deferred — see below), Gmail.
+Not built: Infinite Campus (deferred — see below).
 
 ### Agency (P4)
 
@@ -65,9 +66,39 @@ set, nobody can. Decisions are one atomic SQL transition, so a double-tap or two
 racing callbacks execute once. Button payloads are validated like any other
 input.
 
-The only built-in action today is `/remind <text>` — a reminder to yourself —
-so the whole flow can run end to end before anything with consequences is wired
-to it. `/trust` shows the ledger.
+Three actions are registered: `remind` (`/remind <text>`, a reminder to
+yourself), and the two Gmail ones below — `reply` and `draft`. `/trust` shows
+the ledger.
+
+### Gmail (P4)
+
+`sloane/mail/`: `gmail.py` is the transport (plain REST over httpx, no Google
+SDK); `inbox.py` is the judgement. The `inbox` job runs at :10 past 7, 10, 1, 4
+and 7 o'clock:
+
+1. Unread mail from the last two days, minus promotions/social/updates, minus
+   anything already triaged — every message is judged exactly once.
+2. **One** bulk-lane call triages up to 40: `urgent` · `reply` · `fyi` ·
+   `ignore`, with a reason. The answer is checked against the batch: invented
+   ids and made-up categories are dropped; an unusable answer records nothing,
+   so the mail is retried next run rather than filed as noise.
+3. Bodies are kept as **untrusted** episodes (`source = gmail`) and reach every
+   model inside an `INGESTED` fence.
+4. For up to three that need him, a reply is written in his voice (a few of his
+   own sent emails, quoted threads stripped, are the style guide) and proposed
+   with **Approve / Edit / Deny**. Nothing is sent before Approve.
+5. She tells him only if something is urgent or wants a reply.
+
+**School staff never get an email from her.** Mail from `SCHOOL_EMAIL_DOMAINS`
+(or its subdomains) gets a `draft` proposal — Approve saves it to his Gmail
+Drafts and he sends it. The `reply` action declares what it *really* is: if the
+recipient, the Reply-To, or the original sender is a school address, it is
+`contact → school_staff` and refused before it can be proposed — however the
+action was named, and whatever an email asked for. The executor re-checks, and
+refuses if the recipient differs from the one he approved.
+
+The OAuth scopes are `gmail.readonly` + `gmail.compose`: read, draft, send. No
+scope that could delete. One-time setup is in DEPLOY.md §7c.
 
 ### Voice (P3)
 
@@ -173,10 +204,7 @@ Three things worth knowing:
 ```bash
 pip install -r requirements.txt
 cp .env.example .env          # then fill it in
-psql "$DATABASE_URL" -f sql/001_init.sql
-psql "$DATABASE_URL" -f sql/002_hybrid_search.sql
-psql "$DATABASE_URL" -f sql/003_school.sql
-psql "$DATABASE_URL" -f sql/004_agency.sql
+for f in sql/*.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f "$f"; done
 python scripts/seed_state.py state.example.md
 python scripts/seed_courses.py   # the real semester schedule
 python scripts/doctor.py      # says exactly what is still missing
@@ -196,6 +224,7 @@ providers and the Telegram token, and names the remedy for each failure.
 | [Groq](https://console.groq.com/keys) | `GROQ_API_KEY` | Free: 1K req/day, 200K tok/day; Whisper 2K/day. |
 | Canvas | `CANVAS_TOKEN` | Account → Settings → New Access Token. Reads all coursework; treat as a password. |
 | Google Calendar | `CALENDAR_ICS_URL` | Settings → Integrate calendar → **Secret address in iCal format**. The URL *is* the credential. |
+| [Google Cloud](https://console.cloud.google.com) | `GMAIL_CLIENT_ID/SECRET`, then `scripts/gmail_auth.py` | Optional. Desktop OAuth client; publish the app **In production** or the token dies in 7 days. DEPLOY.md §7c. |
 | Claude Code CLI | `MAIN_PROVIDER=claude_code` | Draws on the Pro subscription, not API credits. |
 | [Anthropic](https://console.anthropic.com) | only after the upgrade | Not needed while on the free tier. |
 
@@ -317,15 +346,18 @@ Six pairs, as a `frozenset` in `sloane/agent.py`, checked by `ensure_allowed()`
 | `contact` | `school_staff` |
 | `publish` | `public` |
 
-The six rows in the `trust` table mirror these for auditing and the future P4
-UI. They are **not** what the check reads: a gate that needs a working database
+Actions are checked twice: on the name they were proposed under, and on what
+they really are (`ActionType.really`) — a `reply` to a teacher is `contact →
+school_staff` whatever it is called.
+
+The six rows in the `trust` table mirror these for auditing and `/trust`. They are **not** what the check reads: a gate that needs a working database
 is a gate that opens when the database is down. Keep the two in step.
 
 ---
 
 ## Testing
 
-There is no CI. Verification is manual and real.
+CI (`.github/workflows/test.yml`) runs all of this on Python 3.12 against a real pgvector Postgres, applying every migration twice to prove they're idempotent. `image.yml` builds the linux/arm64 image the box runs and smoke-tests it.
 
 ```bash
 # unit — no database, no network
@@ -343,6 +375,7 @@ DATABASE_URL=... python tests/test_store.py
 DATABASE_URL=... python tests/test_school.py   # runs a stub Canvas locally
 DATABASE_URL=... python tests/test_jobs.py     # governor, briefs, scheduler — no model
 DATABASE_URL=... python tests/test_agency.py   # ledger, decay, edits, hard lines, races
+DATABASE_URL=... python tests/test_mail.py     # stub Gmail: triage, fencing, approve-only sends
 
 # or all of it
 python tests/run.py
@@ -388,13 +421,13 @@ sloane/
   contract.py    speech/detail parsing, 5 shapes
   router.py      THE UPGRADE LEVER
   agent.py       context assembly to budget, one turn, the hard-line gate
-  telegram.py    long-poll bot: text, voice notes, /usage, /state
-  main.py        FastAPI: /health /usage /state /facts
+  telegram.py    long-poll bot: text, voice notes, buttons, commands
+  main.py        FastAPI: /health /usage /state /facts /jobs /sync
   providers/     claude_code · groq · anthropic_api · tts (groq, piper)
   jobs/
     conflicts.py collisions computed in code, and what they refuse to flag
     governor.py  quiet hours + a budget that defers scheduled work
-    briefs.py    the five daily jobs + reflection
+    briefs.py    the five daily jobs, reflection, sync and inbox
     scheduler.py APScheduler driven by the jobs table, local time
   school/        all read-only
     canvas.py    GET-only Canvas client, Link-header pagination
@@ -404,6 +437,9 @@ sloane/
     sync.py      one pass over every source, per-source failure
   voice.py       WAV → OGG/Opus voice note, budget; never costs a reply
   agency.py      propose → approve/trust → execute; hard lines first
+  mail/
+    gmail.py     OAuth refresh + five REST calls; no delete, no SDK
+    inbox.py     batched triage, drafts in his voice, reply/draft actions
   memory/
     store.py     THE ONLY FILE THAT TALKS SQL
     embed.py     fastembed, 384-dim, local
@@ -413,9 +449,12 @@ sql/
   002_hybrid_search.sql  full-text arm + provenance, idempotent
   003_school.sql   calendar events + the sync job, idempotent
   004_agency.sql   proposals for the approval flow, idempotent
+  005_mail.sql     triaged email + the inbox job, idempotent
 scripts/
   doctor.py      validates every credential
   seed_state.py  tier 1 from a markdown file
   seed_courses.py  the real semester schedule into tier 4
+  gmail_auth.py  one-time Gmail consent; writes the token into .env
+  eval.py        golden questions through the real model, scored in code
 tests/           run.py plus one file per unit
 ```

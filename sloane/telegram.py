@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 import httpx
 
@@ -49,6 +51,8 @@ class Bot:
         self._agent = agent
         self._voice = voice
         self.agency = agency
+        # Set by main once the scheduler exists: runs a named job now.
+        self.run_job: Callable[[str], Awaitable[Any]] | None = None
         self._stt = GroqProvider(self._config)
         self._token = self._config.telegram_bot_token
         self._owner = self._config.telegram_chat_id
@@ -251,6 +255,20 @@ class Bot:
 
         return await self._agent.answer(QUESTIONS["morning_brief"], channel="command:brief")
 
+    async def _inbox(self) -> Reply:
+        """Triage mail now, under the same rules as the scheduled run."""
+        if self.run_job is None:
+            return Reply(speech="The scheduler isn't running, so I can't check mail.", detail="")
+        result = await self.run_job("inbox")
+        if result.reply is not None and result.sent:
+            # The job already delivered its summary to this chat.
+            return Reply(speech="That's everything new in your inbox.", detail=result.reason)
+        if result.reply is not None:
+            return result.reply
+        if not result.ran:
+            return Reply(speech="I didn't check your inbox.", detail=result.reason)
+        return Reply(speech="Nothing new in your inbox needs you.", detail=result.reason)
+
     async def _agency_command(self, name: str, command: str) -> Reply:
         if self.agency is None:
             return Reply(speech="Actions are off: set TELEGRAM_CHAT_ID so I know who approves.", detail="")
@@ -310,6 +328,8 @@ class Bot:
             return await self._agency_command(name, command)
         if name == "jobs":
             return await self._jobs()
+        if name == "inbox":
+            return await self._inbox()
         if name in {"start", "help"}:
             return Reply(
                 speech="I am here. Text me or send a voice note.",
@@ -319,6 +339,7 @@ class Bot:
                     "`/sync` — pull Canvas, the calendar and shifts now\n"
                     "`/brief` — the morning brief, right now\n"
                     "`/jobs` — what ran, and whether it worked\n"
+                    "`/inbox` — triage new email now\n"
                     "`/remind <text>` — a reminder, through the approval flow\n"
                     "`/trust` — what I may do without asking\n"
                     "`/revoke <action> <target>` — make me ask again"

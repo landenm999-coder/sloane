@@ -39,7 +39,7 @@ class Clock:
 async def main() -> None:
     config = isolated(database_url=os.environ["DATABASE_URL"])
     async with Store(config) as store:
-        await store._exec("truncate proposals")
+        await store._exec("truncate proposals cascade")
         await store._exec("delete from trust where not hard_line")
 
         clock, asked, told, ran = Clock(), [], [], []

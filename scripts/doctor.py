@@ -25,6 +25,7 @@ from sloane.router import MAIN_ORDER, build
 EXPECTED_TABLES = {
     "assignments", "commitments", "courses", "episodes", "jobs", "messages",
     "people", "proposals", "shifts", "state", "trust", "usage_log", "working_set", "events",
+    "emails",
 }
 
 PASS, FAIL, SKIP, WARN = "PASS", "FAIL", "SKIP", "WARN"
@@ -62,7 +63,7 @@ async def check_database(config: Settings) -> None:
         found = {r["table_name"] for r in rows}
         missing = EXPECTED_TABLES - found
         if missing:
-            record("schema", FAIL, f"missing {sorted(missing)}. Apply sql/001_init.sql.")
+            record("schema", FAIL, f"missing {sorted(missing)}. Apply every sql/00*.sql in order (all idempotent).")
         else:
             record("schema", PASS, f"{len(EXPECTED_TABLES)} tables present")
 
@@ -205,6 +206,32 @@ async def check_school(config: Settings) -> None:
         record("calendar", FAIL, str(exc))
         return
     record("calendar", PASS, f"{len(events)} events in the sync window")
+
+
+async def check_gmail(config: Settings) -> None:
+    """Refresh the token and read the profile. Proves the grant is alive."""
+    from sloane.mail import MailError
+    from sloane.mail.gmail import GmailClient
+
+    gmail = GmailClient(config)
+    if not gmail.configured:
+        record(
+            "gmail",
+            WARN,
+            "GMAIL_CLIENT_ID/SECRET/REFRESH_TOKEN unset, so no inbox triage. "
+            "See DEPLOY.md → Gmail, then run scripts/gmail_auth.py once.",
+        )
+        return
+    try:
+        profile = await gmail.profile()
+    except MailError as exc:
+        record("gmail", FAIL, str(exc))
+        return
+    domains = ", ".join(config.school_domains) or "none"
+    record(
+        "gmail", PASS,
+        f"authorised for {profile.get('emailAddress', '?')}; school domains: {domains}",
+    )
 
 
 async def check_voice(config: Settings, *, warm: bool) -> None:
@@ -364,6 +391,7 @@ async def main(warm: bool = False) -> int:
     await check_provider(config, config.bulk_provider, "bulk provider", bulk=True)
     await check_fallbacks(config)
     await check_school(config)
+    await check_gmail(config)
     await check_voice(config, warm=warm)
     await check_telegram(config)
 

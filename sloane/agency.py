@@ -3,9 +3,11 @@
 Every action Sloane can take -- a reminder today, an email later -- goes through
 `Agency.propose()`, in this order:
 
-  1. **Hard lines.** `ensure_allowed()` runs first, in code. A hard-line pair is
-     refused and recorded as refused; it never becomes something Landen could
-     approve by mis-tapping, and no streak can ever unlock it.
+  1. **Hard lines.** `ensure_allowed()` runs first, in code -- on the action as
+     named *and* on what it really is (a reply to a teacher is contacting school
+     staff). A hard-line pair is refused and recorded as refused; it never
+     becomes something Landen could approve by mis-tapping, and no streak can
+     ever unlock it.
   2. **Registered?** An action nobody registered an executor for is refused.
      There is no generic "do whatever the model asked" path.
   3. **Trusted?** If this exact (action, target) pair is trusted and in date,
@@ -56,6 +58,10 @@ class ActionType:
     execute: Callable[[str, dict], Awaitable[str]]
     # (payload, his replacement text) -> the edited payload.
     revise: Callable[[dict, str], dict]
+    # What the action *really* is, for the hard-line check. A reply to a
+    # teacher is "contact school_staff" whatever the action is called, and a
+    # hard line that only matched labels could be walked around by renaming.
+    really: Callable[[str, dict], tuple[str, str] | None] | None = None
 
 
 @dataclass
@@ -138,8 +144,13 @@ class Agency:
         action = action.strip().lower()
         target = target.strip().lower()
 
+        kind = self._actions.get(action)
         try:
             ensure_allowed(action, target)
+            if kind is not None and kind.really is not None:
+                underlying = kind.really(target, payload)
+                if underlying is not None:
+                    ensure_allowed(*underlying)
         except HardLineViolation as exc:
             row = await self._store.create_proposal(
                 action=action, target=target, preview=str(exc), payload={},
@@ -148,7 +159,6 @@ class Agency:
             log.warning("refused a hard-line action: %s", exc)
             return Outcome("refused", f"I won't do that: {exc}.", row)
 
-        kind = self._actions.get(action)
         if kind is None:
             row = await self._store.create_proposal(
                 action=action, target=target, preview=f"unregistered action {action}",

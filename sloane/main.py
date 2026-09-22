@@ -20,6 +20,8 @@ from sloane.agent import HARD_LINES, Agent
 from sloane.jobs.briefs import JobContext
 from sloane.jobs.governor import Governor
 from sloane.jobs.scheduler import Scheduler
+from sloane.mail.gmail import GmailClient
+from sloane.mail.inbox import Inbox, draft_action, reply_action
 from sloane.memory.tiers import usage_sink
 from sloane.router import Router
 from sloane.voice import Voice
@@ -67,10 +69,23 @@ def create_app() -> FastAPI:
             log.warning("TELEGRAM_BOT_TOKEN is unset; running without the bot")
 
         # Actions need someone to approve them. No owner chat, no agency.
+        agency: Agency | None = None
         if bot is not None and config.telegram_chat_id:
             agency = Agency(store, config, ask=bot.ask, tell=bot.say)
             agency.register(reminder_action(bot.say))
             bot.agency = agency
+
+        # Gmail reads without asking and never sends without asking. Without an
+        # agency there is nobody to ask, so it triages and drafts nothing.
+        inbox: Inbox | None = None
+        gmail = GmailClient(config)
+        if gmail.configured:
+            if agency is not None:
+                agency.register(reply_action(gmail, config))
+                agency.register(draft_action(gmail))
+            inbox = Inbox(store, config, gmail=gmail, router=router, agency=agency,
+                          embedder=embedder)
+            log.info("gmail configured; inbox job active")
 
         # Briefs go to Landen's chat and nowhere else. Without a chat id there is
         # nobody to send to, so the jobs still run and record, but deliver
@@ -82,10 +97,12 @@ def create_app() -> FastAPI:
 
         ctx = JobContext(
             store=store, agent=agent, governor=Governor(store, config),
-            config=config, send=send,
+            config=config, send=send, inbox=inbox,
         )
         scheduler = Scheduler(ctx)
         state["scheduler"] = scheduler
+        if bot is not None:
+            bot.run_job = scheduler.run
         try:
             await scheduler.start()
         except Exception:  # noqa: BLE001 - no scheduler is bad; no bot is worse

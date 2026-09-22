@@ -21,7 +21,7 @@ consecutive passes find nothing actionable.
 
 ## Remaining
 
-- [ ] **P4 — Gmail.** Read-only triage batched into one bulk call, drafts in his voice, every send through the approval flow. Built and tested against stubs; the one-time OAuth consent is a user step.
+- [x] **P4 — Gmail.** Triage batched into one bulk call, drafts in his voice, every send through the approval flow, school staff drafts-only. Tested end to end against a stub Gmail; the one-time OAuth consent is a user step.
 - [x] Docker image builds for `linux/arm64` in CI and passes a smoke test (imports, `claude` resolves as the non-root user).
 - [x] Eval harness: golden questions through the real model on a seeded day, scored against the exact answers. First run 21/21.
 - [ ] Dependabot PRs triaged: safe ones merged once green; risky ones (major runtime bumps) closed with a reason.
@@ -41,4 +41,4 @@ These are the whole list — everything else is automated.
 1. Create the Oracle ARM instance (`DEPLOY.md` §1).
 2. On the box: clone, `.env`, `docker compose build`, migrations (`DEPLOY.md` §2–5).
 3. Log the Claude CLI in once (`DEPLOY.md` §6).
-4. Gmail OAuth consent, once, when P4 Gmail lands.
+4. Optional: Gmail — a Google Cloud OAuth client and one run of `scripts/gmail_auth.py` (`DEPLOY.md` §7c).

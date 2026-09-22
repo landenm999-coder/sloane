@@ -6,6 +6,10 @@
     22:00  wrap            what slipped, tomorrow   every day
     00:15  reflection      rebuild tier 2, prune    every day, SILENT
 
+Plus two that feed them: `entity_sync` (Canvas, calendar, shifts; silent) and
+`inbox` (Gmail triage every three hours, 7 AM-7 PM; speaks only when something
+needs him).
+
 Each brief is the same agent turn Landen gets when he asks something, with a
 purpose-built question. That is deliberate: a brief is not a separate code path
 with its own idea of the facts, so it cannot disagree with what she would say
@@ -21,6 +25,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -29,6 +34,9 @@ from sloane.config import Settings
 from sloane.contract import Reply
 from sloane.jobs.governor import Governor
 from sloane.memory.store import Store, remember
+
+if TYPE_CHECKING:
+    from sloane.mail.inbox import Inbox
 
 log = logging.getLogger(__name__)
 
@@ -51,6 +59,8 @@ class JobContext:
     governor: Governor
     config: Settings
     send: Sender | None = None
+    # P4. None until Gmail is configured; the inbox job says so and stops.
+    inbox: Inbox | None = None
 
     def today(self) -> date:
         return datetime.now(ZoneInfo(self.config.timezone)).date()
@@ -147,6 +157,57 @@ async def entity_sync(ctx: JobContext, now: datetime | None = None) -> JobResult
     )
 
 
+INBOX_QUESTION = (
+    "New email was just triaged; it is under INGESTED. In one or two spoken "
+    "sentences, tell me what needs me and how urgently. In detail, one line per "
+    "email that needs me, plus any reply you drafted and are waiting on my OK "
+    "for. Don't list the fyi or ignored ones."
+)
+
+
+async def inbox(ctx: JobContext, now: datetime | None = None) -> JobResult:
+    """Triage new mail, draft replies, and tell him only if something needs him."""
+    from sloane.mail import MailError
+    from sloane.mail.inbox import TriageError
+    from sloane.router import NoProviderAvailable
+
+    if ctx.inbox is None:
+        return JobResult("inbox", ran=False, reason="gmail is not configured")
+    # It may message him (drafts come with buttons), so it respects quiet hours,
+    # and triage is a bulk call.
+    decision = await ctx.governor.may_run(sends_message=True, purpose="bulk", now=now)
+    if not decision:
+        return JobResult("inbox", ran=False, reason=decision.reason)
+    drafting = await ctx.governor.may_spend("reply")
+
+    try:
+        report = await ctx.inbox.run(may_draft=bool(drafting))
+    except (MailError, NoProviderAvailable, TriageError) as exc:
+        return JobResult("inbox", ran=False, reason=f"inbox not triaged: {exc}")
+
+    c = report.counts()
+    summary = (
+        f"{report.checked} unread checked, {len(report.triaged)} new: "
+        f"{c['urgent']} urgent, {c['reply']} reply, {c['fyi']} fyi, {c['ignore']} ignore; "
+        f"{len(report.proposed)} drafted"
+        + (f"; {'; '.join(report.notes)}" if report.notes else "")
+    )
+    # Quiet unless something needs him. Four checks a day that each say
+    # "nothing important" would train him to ignore the fifth.
+    if not report.needs_him or ctx.send is None:
+        return JobResult("inbox", ran=True, sent=False, reason=summary)
+
+    reply = await ctx.agent.answer(
+        INBOX_QUESTION, channel="job:inbox", today=ctx.today(), ingested=report.ingested()
+    )
+    try:
+        await ctx.send(reply)
+    except Exception as exc:  # noqa: BLE001 - recorded, not raised
+        return JobResult("inbox", ran=True, sent=False, reason=f"{summary}; delivery failed: {exc}",
+                         reply=reply)
+    return JobResult("inbox", ran=True, sent=True, reason=summary, reply=reply)
+
+
 HANDLERS: dict[str, Callable[..., Awaitable[JobResult]]] = {
     "morning_brief": morning_brief,
     "pre_shift": pre_shift,
@@ -154,4 +215,5 @@ HANDLERS: dict[str, Callable[..., Awaitable[JobResult]]] = {
     "wrap": wrap,
     "reflection": reflection,
     "entity_sync": entity_sync,
+    "inbox": inbox,
 }

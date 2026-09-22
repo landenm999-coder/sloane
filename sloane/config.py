@@ -84,6 +84,38 @@ class Settings(BaseSettings):
     # Shifts are generated, not scraped; this is how far ahead.
     shift_weeks_ahead: int = 6
 
+    # --- gmail (P4) ------------------------------------------------------------
+    # An OAuth "Desktop app" client and a refresh token minted once by
+    # scripts/gmail_auth.py. Scopes: gmail.readonly + gmail.compose -- read and
+    # write drafts/sends, never delete. All three blank means no inbox job.
+    gmail_client_id: str = ""
+    gmail_client_secret: str = ""
+    gmail_refresh_token: str = ""
+    # Overridable so tests can point the client at a local stub.
+    gmail_token_url: str = ""
+    gmail_api_base: str = ""
+    # Mail from these domains (or their subdomains) is school. She may save a
+    # draft reply for him to send; she may never send one herself. That is the
+    # "contact school_staff" hard line, enforced on the address, not the label.
+    school_email_domains: str = "dcsdk12.org"
+    # What counts as new. Promotions, social and bulk updates never reach triage.
+    inbox_query: str = (
+        "is:unread newer_than:2d -category:promotions -category:social -category:updates"
+    )
+    # One bulk call triages up to this many; the rest wait for the next run.
+    inbox_batch: int = 40
+    # Draft replies proposed per run. Each is a main-lane call and a button
+    # press for Landen; more than a few is noise, not help.
+    inbox_max_drafts: int = 3
+
+    @property
+    def school_domains(self) -> tuple[str, ...]:
+        return tuple(
+            d.strip().lower().lstrip("@")
+            for d in self.school_email_domains.split(",")
+            if d.strip()
+        )
+
     # --- telegram ------------------------------------------------------------
     telegram_bot_token: str = ""
     telegram_chat_id: int = 0
