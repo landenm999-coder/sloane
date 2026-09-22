@@ -3,8 +3,8 @@
 Always-on personal assistant for Landen. Reached by Telegram text and voice
 notes. She runs the day: what's due, what shift, what slipped, what's next.
 
-**P0 (the spine) and P1 (memory + school) are built.** Scheduled jobs (P2),
-voice out (P3) and agency (P4) are not; the roadmap is at the bottom.
+**P0 (the spine), P1 (memory + school) and P2 (rhythm) are built.** Voice out
+(P3) and agency (P4) are not; the roadmap is at the bottom.
 
 Total running cost: **$0/mo**, every layer on a free tier.
 
@@ -27,14 +27,56 @@ Total running cost: **$0/mo**, every layer on a free tier.
 | Providers | `claude_code`, `groq`, `anthropic` behind one `Provider` base |
 | Contract | `Reply(speech, detail)` parsed from 5 model-output shapes |
 | Hard lines | 6 pairs, enforced in code before execution |
-| Interface | Telegram long polling: text, voice notes, `/usage`, `/state`, `/sync` |
+| Interface | Telegram long polling: text, voice notes, `/usage`, `/state`, `/sync`, `/brief`, `/jobs` |
 | School | Canvas assignments + secret `.ics` calendar, both read-only |
 | Shifts | generated from the fixed 3–7 PM Mon–Fri rule, DST-correct |
-| Sync | `/sync` on Telegram, `POST /sync` over HTTP, `entity_sync` job |
-| HTTP | `/health`, `/usage`, `/state`, `/facts`, `POST /sync` |
+| Sync | `/sync` on Telegram, `POST /sync` over HTTP, `entity_sync` job every 4h |
+| Rhythm | five daily briefs on a scheduler, quiet hours, a budget that defers |
+| Conflicts | computed in code and handed to her as findings, every turn |
+| HTTP | `/health`, `/usage`, `/state`, `/facts`, `/jobs`, `POST /sync`, `POST /jobs/{name}/run` |
 
-Not built: Infinite Campus, the scheduler, voice replies, Gmail, the trust
-ledger.
+Not built: Infinite Campus (deferred — see below), voice replies, Gmail, the
+trust ledger.
+
+### Rhythm (P2)
+
+| Local time | Job | Speaks? |
+|---|---|---|
+| 06:35 daily | `morning_brief` — the day ahead, conflicts first | yes |
+| 14:45 Mon–Fri | `pre_shift` — anything due during or right after work | yes |
+| 19:05 Mon–Fri | `post_shift` — what is left tonight | yes |
+| 22:00 daily | `wrap` — what slipped, the first thing tomorrow | yes |
+| 00:15 daily | `reflection` — rebuilds tier 2, prunes stale events | **never** |
+| every 4h | `entity_sync` — Canvas, calendar, shifts | never |
+
+The crons live in the `jobs` table as Parker wall-clock and the scheduler runs
+in `TIMEZONE`, so 6:35 stays 6:35 across daylight saving. A brief is the same
+agent turn you get by asking — it cannot disagree with what she'd say directly.
+
+**Conflicts are computed, not noticed.** `sloane/jobs/conflicts.py` finds work
+due during a shift, anything booked inside one, double bookings, and work due in
+the hour after a shift ends — and those findings lead FACTS on every turn, not
+only in briefs. Equally deliberate is what it *refuses* to flag: homework due at
+11:59 PM on a work day, a meeting starting the minute the shift ends, all-day
+markers. `tests/test_conflicts.py` pins both lists; a normal week of shifts plus
+nightly homework must produce zero alerts, because an alert that fires five
+times a week gets ignored by Thursday.
+
+**Quiet hours (midnight–6:30 AM) gate speaking, not running.** The 00:15
+reflection runs inside them on purpose; it just never texts. And a message you
+send is always answered, at any hour — quiet hours stop her *starting* a
+conversation, not replying to one.
+
+**The budget defers scheduled work only**, and says so. `DAILY_JOB_BUDGET`
+caps briefs so a runaway job can't spend the free tier before you ask anything;
+your own questions are never rationed. A held-back brief is recorded as
+`deferred` with its reason, visible in `/jobs`, rather than silently not
+arriving.
+
+**Infinite Campus is deferred, not forgotten.** It needs district credentials,
+can't be exercised outside the district's network, and repeated automated
+logins can lock the account. Canvas already carries assignments; IC would add
+grades. It is not needed for the P2 gate.
 
 ### School sync (P1)
 
@@ -235,10 +277,12 @@ python tests/test_router.py     # degradation and accounting
 python tests/test_tiers.py      # budgets, labelling, timezones
 python tests/test_embed.py      # dimension guard, degradation
 python tests/test_matching.py   # course matching, and what it refuses
+python tests/test_conflicts.py  # should-have-caught-this, and must-not-cry-wolf
 
 # integration — needs a Postgres with pgvector and the schema applied
 DATABASE_URL=... python tests/test_store.py
 DATABASE_URL=... python tests/test_school.py   # runs a stub Canvas locally
+DATABASE_URL=... python tests/test_jobs.py     # governor, briefs, scheduler — no model
 
 # or all of it
 python tests/run.py
@@ -283,6 +327,11 @@ sloane/
   telegram.py    long-poll bot: text, voice notes, /usage, /state
   main.py        FastAPI: /health /usage /state /facts
   providers/     claude_code · groq · anthropic_api, behind base.Provider
+  jobs/
+    conflicts.py collisions computed in code, and what they refuse to flag
+    governor.py  quiet hours + a budget that defers scheduled work
+    briefs.py    the five daily jobs + reflection
+    scheduler.py APScheduler driven by the jobs table, local time
   school/        all read-only
     canvas.py    GET-only Canvas client, Link-header pagination
     calendar.py  secret .ics fetch + RRULE expansion

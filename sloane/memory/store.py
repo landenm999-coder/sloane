@@ -233,16 +233,33 @@ class Store:
                    )
             """
         )
+        # Close a loop unless its assignment still exists *and* is still open.
+        # Phrased as NOT EXISTS on purpose: the obvious "EXISTS ... status <>
+        # 'open'" never closes a loop whose assignment row is gone, and that
+        # loop then haunts every brief forever.
         await self._exec(
             """
             update working_set w
                set closed_at = now()
              where w.closed_at is null
                and w.ref_table = 'assignments'
-               and exists (
+               and not exists (
                      select 1 from assignments a
-                      where a.id = w.ref_id and a.status <> 'open'
+                      where a.id = w.ref_id and a.status = 'open'
                    )
+            """
+        )
+        # A loop's summary is written once; keep it in step with a renamed
+        # assignment so a brief never quotes a title Canvas no longer uses.
+        await self._exec(
+            """
+            update working_set w
+               set summary = 'Assignment due: ' || a.title
+              from assignments a
+             where w.closed_at is null
+               and w.ref_table = 'assignments'
+               and w.ref_id = a.id
+               and w.summary is distinct from 'Assignment due: ' || a.title
             """
         )
         row = await self._one(
@@ -851,6 +868,24 @@ class Store:
             """,
             (hours,),
         )
+
+    async def usage_today(self) -> dict[str, int]:
+        """Calls made so far today, by purpose, counted in local days.
+
+        Local, not UTC: the free tiers Landen is riding reset on their own
+        clocks, but what he cares about is "have I burned today", and today
+        ends at midnight in Parker.
+        """
+        rows = await self._fetch(
+            """
+            select purpose, count(*) as n
+              from usage_log
+             where (at at time zone %(tz)s)::date = (now() at time zone %(tz)s)::date
+             group by purpose
+            """,
+            {"tz": self._config.timezone},
+        )
+        return {r["purpose"]: int(r["n"]) for r in rows}
 
     async def next_update_offset(self) -> int:
         """The Telegram long-poll cursor, derived rather than stored separately.

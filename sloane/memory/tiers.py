@@ -133,6 +133,7 @@ def render_facts(
     commitments: Sequence[Row] = (),
     overdue: Sequence[Row] = (),
     events: Sequence[Row] = (),
+    conflicts: Sequence[str] = (),
     budget: int,
     tz: str = "UTC",
 ) -> tuple[str, int]:
@@ -141,7 +142,10 @@ def render_facts(
     Ordered by how often it answers the question actually being asked, because
     this is the block most likely to be cut short by its budget.
     """
-    lines: list[str] = []
+    # Conflicts lead. They are the one thing in FACTS that is a finding rather
+    # than a record, and the one thing that is useless if the budget truncates
+    # it off the end.
+    lines: list[str] = list(conflicts)
     for a in assignments:
         course = f" [{a['course']}]" if a.get("course") else ""
         lines.append(f"- DUE {_when(a.get('due_at'), tz)}: {a['title']}{course}")
@@ -224,6 +228,7 @@ def assemble(
     commitments: Sequence[Row] = (),
     overdue: Sequence[Row] = (),
     events: Sequence[Row] = (),
+    conflicts: Sequence[str] = (),
     episodes: Sequence[Row] = (),
     ingested: str = "",
     config: Settings | None = None,
@@ -242,6 +247,7 @@ def assemble(
         commitments=commitments,
         overdue=overdue,
         events=events,
+        conflicts=conflicts,
         budget=cfg.budget_entities,
         tz=tz,
     )

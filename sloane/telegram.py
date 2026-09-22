@@ -126,6 +126,33 @@ class Bot:
         report = await sync_all(self._store, self._config)
         return Reply(speech=report.speech(), detail=report.detail())
 
+    async def _brief(self) -> Reply:
+        """The morning brief, on demand.
+
+        Goes straight to the agent rather than through the governor: quiet
+        hours stop her *starting* a conversation at 1 AM, not answering one he
+        started.
+        """
+        from sloane.jobs.briefs import QUESTIONS
+
+        return await self._agent.answer(QUESTIONS["morning_brief"], channel="command:brief")
+
+    async def _jobs(self) -> Reply:
+        rows = await self._store.jobs()
+        lines = ["| job | last run | status |", "|---|---|---|"]
+        failing = 0
+        for r in rows:
+            when = r["last_run_at"].strftime("%a %H:%M") if r.get("last_run_at") else "never"
+            status = r.get("last_status") or "-"
+            if status == "failed":
+                failing += 1
+            lines.append(f"| {r['name']} | {when} | {status} |")
+        speech = (
+            f"{failing} job{'s' if failing != 1 else ''} failed on the last run."
+            if failing else f"{len(rows)} jobs scheduled, none failing."
+        )
+        return Reply(speech=speech, detail="\n".join(lines))
+
     async def _handle_command(self, command: str) -> Reply | None:
         name = command.split()[0].lstrip("/").split("@")[0].lower()
         if name == "usage":
@@ -134,13 +161,19 @@ class Bot:
             return await self._state()
         if name == "sync":
             return await self._sync()
+        if name == "brief":
+            return await self._brief()
+        if name == "jobs":
+            return await self._jobs()
         if name in {"start", "help"}:
             return Reply(
                 speech="I am here. Text me or send a voice note.",
                 detail=(
                     "`/usage` — model calls in the last 24h\n"
                     "`/state` — the durable facts I hold\n"
-                    "`/sync` — pull Canvas, the calendar and shifts now"
+                    "`/sync` — pull Canvas, the calendar and shifts now\n"
+                    "`/brief` — the morning brief, right now\n"
+                    "`/jobs` — what ran, and whether it worked"
                 ),
             )
         return None

@@ -167,6 +167,34 @@ async def main() -> None:
         await store.rebuild_working_set()
         check("rebuilding twice does not duplicate loops", len(await store.get_working_set()), before)
 
+        # A loop must close when its assignment disappears, not only when it
+        # stops being open -- otherwise it haunts every brief forever.
+        await store.upsert_assignment(
+            title="Vanishing worksheet", source="canvas", external_id="c-gone",
+            due_at=datetime.now(UTC) + timedelta(days=2),
+        )
+        await store.rebuild_working_set()
+        check(
+            "an upcoming assignment opens a loop",
+            any("Vanishing worksheet" in w["summary"] for w in await store.get_working_set()),
+            True,
+        )
+        await store.upsert_assignment(
+            title="Renamed worksheet", source="canvas", external_id="c-gone",
+            due_at=datetime.now(UTC) + timedelta(days=2),
+        )
+        await store.rebuild_working_set()
+        summaries = [w["summary"] for w in await store.get_working_set()]
+        check("a renamed assignment renames its loop", any("Renamed worksheet" in x for x in summaries), True)
+        check("and the stale title is gone", any("Vanishing worksheet" in x for x in summaries), False)
+        await store._exec("delete from assignments where external_id = 'c-gone'")
+        await store.rebuild_working_set()
+        check(
+            "a deleted assignment's loop closes",
+            any("Renamed worksheet" in w["summary"] for w in await store.get_working_set()),
+            False,
+        )
+
         # -- tier 3: hybrid recall, and the decay that survives fusion ------
         query = vec(1.0, 0.0)
         now = datetime.now(UTC)

@@ -20,6 +20,7 @@ from datetime import date, datetime, timedelta
 
 from sloane.config import Settings, settings as default_settings
 from sloane.contract import Reply, parse
+from sloane.jobs.conflicts import find as find_conflicts, render as render_conflicts
 from sloane.memory.embed import Embedder, EmbedUnavailable
 from sloane.memory.store import Store, remember
 from sloane.memory.tiers import assemble, usage_sink
@@ -161,6 +162,17 @@ class Agent:
         tiers, notes = await self._facts(when)
         episodes = await self._recall(question)
 
+        # Computed, not inferred. A collision the model happens not to mention
+        # is a missed conflict, and "zero missed" is the P2 gate -- so they are
+        # found in code and handed over as findings.
+        collisions = find_conflicts(
+            assignments=tiers["assignments"],
+            shifts=tiers["shifts"],
+            events=tiers["events"],
+        )
+        if collisions:
+            log.info("%s conflict(s) found for %s", len(collisions), when)
+
         context = assemble(
             state=tiers["state"],
             working_set=tiers["working_set"],
@@ -170,6 +182,7 @@ class Agent:
             courses=tiers["courses"],
             commitments=tiers["commitments"],
             events=tiers["events"],
+            conflicts=render_conflicts(collisions, self._config.timezone),
             episodes=episodes,
             ingested=ingested,
             config=self._config,

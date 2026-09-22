@@ -15,6 +15,9 @@ from datetime import date, timedelta
 from fastapi import FastAPI
 
 from sloane.agent import HARD_LINES, Agent
+from sloane.jobs.briefs import JobContext
+from sloane.jobs.governor import Governor
+from sloane.jobs.scheduler import Scheduler
 from sloane.config import settings
 from sloane.memory.embed import Embedder
 from sloane.memory.store import Store
@@ -46,6 +49,7 @@ def create_app() -> FastAPI:
         asyncio.create_task(embedder.warm())
 
         task: asyncio.Task | None = None
+        bot: Bot | None = None
         if config.telegram_bot_token:
             bot = Bot(store, agent, config)
             state["bot"] = bot
@@ -54,9 +58,29 @@ def create_app() -> FastAPI:
         else:
             log.warning("TELEGRAM_BOT_TOKEN is unset; running without the bot")
 
+        # Briefs go to Landen's chat and nowhere else. Without a chat id there is
+        # nobody to send to, so the jobs still run and record, but deliver
+        # nothing -- which /jobs will show plainly.
+        send = None
+        if bot is not None and config.telegram_chat_id:
+            async def send(reply):  # noqa: ANN001
+                await bot.send(config.telegram_chat_id, reply)
+
+        ctx = JobContext(
+            store=store, agent=agent, governor=Governor(store, config),
+            config=config, send=send,
+        )
+        scheduler = Scheduler(ctx)
+        state["scheduler"] = scheduler
+        try:
+            await scheduler.start()
+        except Exception:  # noqa: BLE001 - no scheduler is bad; no bot is worse
+            log.exception("scheduler failed to start; replies still work")
+
         try:
             yield
         finally:
+            scheduler.stop()
             if task is not None:
                 state["bot"].stop()
                 task.cancel()
@@ -111,6 +135,27 @@ def create_app() -> FastAPI:
                 {"name": s.name, "ok": s.ok, "written": s.written, "detail": s.detail}
                 for s in report.sources
             ],
+        }
+
+    @app.get("/jobs")
+    async def jobs() -> dict:
+        rows = await store.jobs()
+        upcoming = state["scheduler"].next_runs() if "scheduler" in state else {}
+        return {
+            "jobs": [
+                {**dict(r), "next_run": upcoming.get(r["name"])} for r in rows
+            ]
+        }
+
+    @app.post("/jobs/{name}/run")
+    async def run_job(name: str) -> dict:
+        """Run a job now. Loopback only, like everything here."""
+        if "scheduler" not in state:
+            return {"ok": False, "reason": "scheduler is not running"}
+        result = await state["scheduler"].run(name)
+        return {
+            "ok": result.ran, "sent": result.sent, "reason": result.reason,
+            "speech": result.reply.speech if result.reply else None,
         }
 
     @app.get("/facts")

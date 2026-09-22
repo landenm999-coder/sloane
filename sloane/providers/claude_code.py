@@ -22,6 +22,7 @@ class ClaudeCodeProvider(Provider):
     def __init__(self, settings: Settings) -> None:
         self._cli = settings.claude_cli
         self._timeout = settings.claude_cli_timeout
+        self._model = settings.claude_cli_model.strip()
 
     async def complete(
         self,
@@ -41,6 +42,8 @@ class ClaudeCodeProvider(Provider):
             "--append-system-prompt",
             system,
         ]
+        if self._model:
+            argv += ["--model", self._model]
         started = time.monotonic()
         try:
             proc = await asyncio.create_subprocess_exec(

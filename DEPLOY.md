@@ -180,8 +180,9 @@ docker compose build && sudo systemctl restart sloane
 docker compose run --rm sloane sh -c 'psql "$DATABASE_URL" -f sql/00N_whatever.sql'
 ```
 
-On Telegram: `/sync` pulls Canvas, the calendar and shifts now. `/usage` shows
-model calls in the last day. `/state` shows the durable facts she holds.
+On Telegram: `/brief` gives the morning brief on demand. `/jobs` shows what
+ran and whether it worked. `/sync` pulls Canvas, the calendar and shifts now.
+`/usage` shows model calls in the last day. `/state` shows her durable facts.
 
 ---
 
@@ -195,6 +196,7 @@ model calls in the last day. `/state` shows the durable facts she holds.
 | `claude_code` failing, everything else fine | The CLI login expired. Redo step 6. |
 | Canvas 401 | Token revoked or expired. Regenerate; district tokens sometimes have a lifetime. |
 | Recall empty, FACTS fine | The embedder never downloaded. `doctor.py --warm`. She still answers from FACTS, and full-text recall still works. |
+| No morning brief | `/jobs` — `deferred` means quiet hours or the budget held it (reason shown); `failed` shows the error; `never` means the scheduler didn't start — check the logs. |
 | Container restarting | `journalctl -u sloane -n 100`. Usually a malformed `.env` line. |
 
 **Nothing here needs an inbound port.** If you ever find yourself opening one to
@@ -204,6 +206,7 @@ fix something, stop — the answer is somewhere else.
 
 ## What this does not do yet
 
-Scheduled briefs (P2), voice replies (P3) and email triage (P4) are not built.
-The `jobs` table is seeded with the five rhythm jobs and the sync job, but
-nothing runs them on a schedule yet — `/sync` is manual until P2.
+Voice replies (P3) and email triage (P4) are not built. The five daily briefs
+start on their own the moment she's running — the first you'll hear is the
+6:35 AM brief. `TELEGRAM_CHAT_ID` must be set or the briefs run and record but
+have nobody to send to; `/jobs` will show that plainly.

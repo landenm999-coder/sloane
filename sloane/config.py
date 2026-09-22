@@ -30,6 +30,11 @@ class Settings(BaseSettings):
 
     # --- claude code CLI (draws on the Claude Pro subscription, not credits) --
     claude_cli: str = "claude"
+    # Pin the model `claude -p` uses. Empty means the CLI's own default for the
+    # subscription. A heavier model spends Landen's Pro limits faster -- which
+    # is precisely the build plan's trigger for moving to the paid lane -- so
+    # this is opt-in rather than defaulted to the biggest thing available.
+    claude_cli_model: str = ""
     # A hung provider costs Landen this long before the router even tries the
     # next one. Two minutes of silence on a Telegram reply reads as broken, and
     # a fallback chain that slow is barely a fallback. Keep it under a minute;
@@ -103,6 +108,12 @@ class Settings(BaseSettings):
     quiet_start_hour: int = 0
     quiet_end_hour: int = 6
     quiet_end_minute: int = 30
+
+    # Ceilings for *scheduled* work only. A message Landen sends is always
+    # answered -- rationing his own questions would be the wrong failure. These
+    # exist so a runaway job cannot spend the day's free tier before breakfast.
+    daily_job_budget: int = 40
+    daily_bulk_budget: int = 800  # Groq free tier is 1K/day; leave headroom
 
     log_level: str = "INFO"
 
