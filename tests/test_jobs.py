@@ -185,7 +185,8 @@ async def main() -> None:
             "every seeded job is scheduled",
             sorted(sched.registered),
             sorted(["morning_brief", "pre_shift", "post_shift", "wrap",
-                    "reflection", "entity_sync", "inbox", "reminders", "watchdog"]),
+                    "reflection", "entity_sync", "inbox", "reminders", "watchdog",
+                    "weekly_review", "backup"]),
         )
         nxt = sched.next_runs()
 

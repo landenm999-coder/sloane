@@ -1235,6 +1235,32 @@ class Store:
             (hours,),
         )
 
+    # -- weekly review & backup ---------------------------------------------------
+
+    async def school_changes_since(self, since: datetime) -> list[Row]:
+        return await self._fetch(
+            "select kind, title, course, detail, detected_at from school_changes "
+            "where detected_at >= %s order by detected_at",
+            (since,),
+        )
+
+    async def commitments_closed_since(self, since: datetime) -> list[Row]:
+        return await self._fetch(
+            "select what, status, closed_at from commitments where closed_at >= %s order by closed_at",
+            (since,),
+        )
+
+    # Only what cannot be rebuilt from upstream. Canvas, the calendar and shifts
+    # re-sync; these were typed, promised, earned or decided by Landen.
+    BACKUP_TABLES = ("state", "commitments", "people", "courses", "trust", "reminders", "jobs")
+
+    async def export(self) -> dict[str, list[Row]]:
+        out: dict[str, list[Row]] = {}
+        for table in self.BACKUP_TABLES:
+            # Table names come from the constant above, never from input.
+            out[table] = await self._fetch(f"select * from {table}")  # noqa: S608
+        return out
+
     # -- email (P4) -------------------------------------------------------------
 
     async def known_emails(self, gmail_ids: Sequence[str]) -> set[str]:

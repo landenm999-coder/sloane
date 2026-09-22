@@ -138,6 +138,12 @@ class Settings(BaseSettings):
     # so a machine that cannot reach Hugging Face still answers from FACTS.
     embed_required: bool = False
 
+    # --- backups -----------------------------------------------------------------
+    # Where the nightly JSON export goes. Empty means <EMBED_CACHE_DIR>/backups,
+    # which in Docker is the `models` volume, so it survives rebuilds.
+    backup_dir: str = ""
+    backup_keep: int = 14
+
     # --- behaviour -----------------------------------------------------------
     timezone: str = "America/Denver"
     max_reply_tokens: int = 1024

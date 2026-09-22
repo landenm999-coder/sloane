@@ -42,6 +42,7 @@ deploying it.
 | Watchdog | `watchdog` job every 30 min: failed/partial jobs, a lane provider failing every call for 3h (Claude-login hint), dead Gmail grant; told after 60 min grace, repeated every 24h, "working again" on recovery; `alerts` table; jobs can now record `partial` | `sloane/jobs/watchdog.py`, `sql/008_watchdog.sql` |
 | Capture intake | `POST /capture` (bearer `CAPTURE_TOKEN` ≥32 chars, constant-time compare; off otherwise; 64 KB body cap; text never logged) → trusted `user` episode `source=capture` dated `captured_at`; "remind me …" → reminder. Reach via `tailscale serve` (DEPLOY §7d). The Capture app side is not built yet | `sloane/capture.py`, `tests/test_capture.py` |
 | Promises | `/promise <what> [to Name] [by when]` → commitments row (person via `person_id`, due via the reminder parser, "by <day>" = 8 PM that day); `/promises`, `/kept <n>`. Upcoming reminders are now in FACTS too, so briefs and answers mention them | `sloane/promises.py`, `tests/test_promises.py` |
+| Weekly review + backup | `weekly_review` Sunday 19:00 (agent turn with this week's graded/missing/kept record); `backup` 00:30 → JSON of `Store.BACKUP_TABLES` to BACKUP_DIR or `<EMBED_CACHE_DIR>/backups`, atomic write, 14 kept | `jobs/briefs.py`, `sql/009_weekly.sql`, `tests/test_weekly.py` |
 | Views | `/today`, `/week`: schedule + due + computed conflicts from SQL, no model | `sloane/views.py`, `tests/test_views.py` |
 | Security hardening | `claude -p` runs `--tools ""` `--strict-mcp-config` with a scrubbed env; bot fails closed with no chat id; httpx URL logging off (token/ICS URL); bind 127.0.0.1 unless `BIND_HOST` | various |
 | Ops | Dockerfile (arm64), compose (loopback port, `claude-auth` + `models` volumes), systemd unit, `doctor.py` (checks every credential), `seed_state.py`, `seed_courses.py`, `gmail_auth.py` (stdlib PKCE consent → writes `.env`), `eval.py` (golden questions, real model) | root, `scripts/` |
@@ -72,7 +73,7 @@ Nothing half-done. (Update this section before stopping if something is.)
 
 1. **Capture → Sloane client** (in the capture repo): a settings screen for URL + token, and a POST after each
    transcription. Sloane's side (`POST /capture`) is done and documented in DEPLOY §7d.
-2. Weekly JSON export of state/commitments/trust to the models volume (a cheap backup; Supabase free tier has no PITR).
+2. A restore script for the nightly JSON backups (today: the JSON is plain rows; restore is manual).
 3. Infinite Campus (grades), deliberately out of v1. Needs district credentials, and repeated automated logins can
    lock the account.
 4. P5 phone calls, beyond v1.

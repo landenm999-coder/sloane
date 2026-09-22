@@ -281,6 +281,69 @@ async def watchdog(ctx: JobContext, now: datetime | None = None) -> JobResult:
                      reason=f"{present} problem{'s' if present != 1 else ''} present")
 
 
+WEEKLY_QUESTION = (
+    "It's Sunday evening: give me my weekly review. First the week behind -- "
+    "use the record below for what got graded or went missing and which "
+    "promises I kept -- then the week ahead from FACTS: what's due, which days "
+    "are heavy around my shifts, any conflicts, and open promises. End with the "
+    "one thing to start tonight. Keep the spoken part to two sentences."
+)
+
+
+async def weekly_review(ctx: JobContext, now: datetime | None = None) -> JobResult:
+    """Sunday 7 PM: the week behind (from our own records), the week ahead (FACTS)."""
+    from sloane.ingest import safe_field
+
+    decision = await ctx.governor.may_run(sends_message=True, now=now)
+    if not decision:
+        return JobResult("weekly_review", ran=False, reason=decision.reason)
+    zone = ZoneInfo(ctx.config.timezone)
+    since = (now or datetime.now(zone)).astimezone(zone) - timedelta(days=7)
+    changes = await ctx.store.school_changes_since(since)
+    kept = await ctx.store.commitments_closed_since(since)
+    record = [
+        f"- {c['kind'].upper()}: {safe_field(c['title'], limit=120)}"
+        + (f" [{safe_field(c['course'], limit=60)}]" if c.get("course") else "")
+        + (f" {safe_field(c['detail'], limit=40)}" if c.get("detail") else "")
+        for c in changes if c["kind"] in ("graded", "missing")
+    ] + [f"- PROMISE {k['status'].upper()}: {safe_field(k['what'], limit=120)}" for k in kept]
+    question = WEEKLY_QUESTION + "\n\nThis week's record:\n" + ("\n".join(record) or "- (nothing recorded)")
+    reply = await ctx.agent.answer(question, channel="job:weekly_review", today=ctx.today())
+    if ctx.send is None:
+        return JobResult("weekly_review", ran=True, sent=False, reply=reply)
+    try:
+        await ctx.send(reply)
+    except Exception as exc:  # noqa: BLE001
+        return JobResult("weekly_review", ran=True, sent=False, reason=f"delivery failed: {exc}", reply=reply)
+    return JobResult("weekly_review", ran=True, sent=True, reply=reply)
+
+
+async def backup(ctx: JobContext, now: datetime | None = None) -> JobResult:
+    """Nightly, silent: the data only Landen could recreate, as JSON, 14 kept."""
+    import json
+    from pathlib import Path
+
+    folder = ctx.config.backup_dir or (
+        str(Path(ctx.config.embed_cache_dir) / "backups") if ctx.config.embed_cache_dir else ""
+    )
+    if not folder:
+        return JobResult("backup", ran=False, reason="no BACKUP_DIR or EMBED_CACHE_DIR to write to")
+    zone = ZoneInfo(ctx.config.timezone)
+    stamp = (now or datetime.now(zone)).astimezone(zone)
+    data = await ctx.store.export()
+    target = Path(folder)
+    target.mkdir(parents=True, exist_ok=True)
+    path = target / f"sloane-{stamp:%Y-%m-%d}.json"
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps({"exported_at": stamp.isoformat(), "tables": data}, default=str, indent=1))
+    tmp.replace(path)  # atomic: a crash mid-write never leaves a torn backup
+    old = sorted(target.glob("sloane-*.json"))[: -max(1, ctx.config.backup_keep)]
+    for stale in old:
+        stale.unlink(missing_ok=True)
+    rows = sum(len(v) for v in data.values())
+    return JobResult("backup", ran=True, sent=False, reason=f"{rows} rows -> {path.name}")
+
+
 HANDLERS: dict[str, Callable[..., Awaitable[JobResult]]] = {
     "morning_brief": morning_brief,
     "pre_shift": pre_shift,
@@ -291,4 +354,6 @@ HANDLERS: dict[str, Callable[..., Awaitable[JobResult]]] = {
     "inbox": inbox,
     "reminders": reminders,
     "watchdog": watchdog,
+    "weekly_review": weekly_review,
+    "backup": backup,
 }

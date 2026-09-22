@@ -284,6 +284,12 @@ ran and whether it worked. `/sync` pulls Canvas, the calendar and shifts now.
 
 ---
 
+**Backups.** Every night at 12:30 she writes what only you could recreate
+(state, promises, people, courses, trust, reminders) to
+`/var/lib/sloane/models/backups/sloane-YYYY-MM-DD.json` inside the `models`
+volume, keeping 14. Copy one off the box with
+`docker cp sloane:/var/lib/sloane/models/backups ./sloane-backups`.
+
 ## When something is wrong
 
 Most of the time you won't need this table: the watchdog messages you when a

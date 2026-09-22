@@ -41,6 +41,8 @@ Total running cost: **$0/mo**, every layer on a free tier.
 | Watchdog | every 30 min, no model: failing or partial jobs, a main/bulk model failing every call (e.g. an expired Claude login — with the fix), a dead Gmail grant. Told after an hour, repeated daily, "✅ working again" when it clears |
 | Capture intake | `POST /capture` with a bearer token: what he says in Capture is stored in his own voice (recallable), and "remind me …" becomes a reminder. Off until `CAPTURE_TOKEN` is set; reached over Tailscale, never a public port |
 | Promises | `/promise send Keegan the outline by friday` tracks what he owes and to whom ("by friday" = end of that day); shown in FACTS and briefs until `/kept` |
+| Weekly review | Sunday 7 PM: the week behind (grades, missing work, promises kept — from her own records) and the week ahead from FACTS |
+| Backups | 12:30 AM, silent: state, promises, people, courses, trust, reminders and jobs as JSON on the `models` volume, 14 kept |
 | Reminders | "remind me at 5 to call Keegan" — typed or spoken, times read by rules (no model), held through quiet hours |
 | Gmail | triage every 3h in one batched call; replies drafted in his voice, sent only on Approve |
 | HTTP | `/health`, `/usage`, `/state`, `/facts`, `/jobs`, `POST /sync`, `POST /jobs/{name}/run`, `POST /capture` (token) |
@@ -467,6 +469,7 @@ sql/
   006_reminders.sql  timed reminders + the every-minute tick, idempotent
   007_school_changes.sql  Canvas changes waiting to be announced, idempotent
   008_watchdog.sql  what is broken and whether he's been told, idempotent
+  009_weekly.sql   the Sunday review and the nightly backup jobs, idempotent
 scripts/
   doctor.py      validates every credential
   seed_state.py  tier 1 from a markdown file
