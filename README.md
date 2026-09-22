@@ -28,7 +28,7 @@ Total running cost: **$0/mo**, every layer on a free tier.
 | Providers | `claude_code`, `groq`, `anthropic` behind one `Provider` base |
 | Contract | `Reply(speech, detail)` parsed from 5 model-output shapes |
 | Hard lines | 6 pairs, enforced in code before execution |
-| Interface | Telegram long polling: text, voice, buttons; `/brief` `/jobs` `/sync` `/inbox` `/remind` `/reminders` `/trust` `/revoke` `/usage` `/state` |
+| Interface | Telegram long polling: text, voice, buttons; `/today` `/week` `/brief` `/jobs` `/sync` `/inbox` `/remind` `/reminders` `/trust` `/revoke` `/usage` `/state` |
 | School | Canvas assignments + secret `.ics` calendar, both read-only |
 | Shifts | generated from the fixed 3–7 PM Mon–Fri rule, DST-correct |
 | Sync | `/sync` on Telegram, `POST /sync` over HTTP, `entity_sync` job every 4h |
@@ -36,6 +36,7 @@ Total running cost: **$0/mo**, every layer on a free tier.
 | Conflicts | computed in code and handed to her as findings, every turn |
 | Voice | a voice note in gets a voice note out; text is always the fallback |
 | Agency | every action proposed, approved with buttons, or run under earned trust |
+| Views | `/today` and `/week` render the schedule, due work and conflicts straight from SQL — no model, so they answer even when every provider is down |
 | Reminders | "remind me at 5 to call Keegan" — typed or spoken, times read by rules (no model), held through quiet hours |
 | Gmail | triage every 3h in one batched call; replies drafted in his voice, sent only on Approve |
 | HTTP | `/health`, `/usage`, `/state`, `/facts`, `/jobs`, `POST /sync`, `POST /jobs/{name}/run` |
@@ -442,6 +443,7 @@ sloane/
   voice.py       WAV → OGG/Opus voice note, budget; never costs a reply
   agency.py      propose → approve/trust → execute; hard lines first
   reminders.py   "at 5", "tomorrow 7am", "in 20 min" → a time, by rules
+  views.py       /today and /week from rows, no model
   mail/
     gmail.py     OAuth refresh + five REST calls; no delete, no SDK
     inbox.py     batched triage, drafts in his voice, reply/draft actions

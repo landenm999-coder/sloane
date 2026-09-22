@@ -38,12 +38,13 @@ deploying it.
 | P4 agency | propose → hard lines (on name *and* `really`) → registered only → trusted pairs auto-run (10 clean approvals, 60-day decay, deny/revoke re-gates) → else Approve/Edit/Deny buttons; one edit open at a time | `sloane/agency.py` |
 | P4 Gmail | inbox job 7 AM–7 PM every 3h: one batched triage call, bodies stored untrusted + fenced, up to 3 drafts in his voice; `reply` sends only on Approve; school domain (`dcsdk12.org`) → `draft` only (he sends); auto-send only for DMARC-verified, Reply-To==From, non-list mail to a trusted exact pair | `sloane/mail/` |
 | Reminders | "remind me at 5 to call Keegan", typed or spoken, or `/remind tomorrow 7am …`. The time comes from a rule-based parser (number words included) and never touches a model. Delivered by an every-minute job; held through quiet hours and marked late; claimed once; retried if the send fails. `/reminders`, `/unremind <n>` | `sloane/reminders.py`, `jobs/briefs.py` `reminders`, `sql/006_reminders.sql` |
+| Views | `/today`, `/week`: schedule + due + computed conflicts from SQL, no model | `sloane/views.py`, `tests/test_views.py` |
 | Security hardening | `claude -p` runs `--tools ""` `--strict-mcp-config` with a scrubbed env; bot fails closed with no chat id; httpx URL logging off (token/ICS URL); bind 127.0.0.1 unless `BIND_HOST` | various |
 | Ops | Dockerfile (arm64), compose (loopback port, `claude-auth` + `models` volumes), systemd unit, `doctor.py` (checks every credential), `seed_state.py`, `seed_courses.py`, `gmail_auth.py` (stdlib PKCE consent → writes `.env`), `eval.py` (golden questions, real model) | root, `scripts/` |
 | Agent setup | `CLAUDE.md` (invariants + how to work) and the `.claude/hooks/session-start.sh` web hook (creates `.venv`, starts pgvector Postgres, exports `DATABASE_URL`) | root, `.claude/` |
 | CI | `test.yml` (py3.12 + pgvector, migrations applied twice), `image.yml` (linux/arm64 build + smoke), Dependabot | `.github/` |
 
-Telegram commands: `/brief /jobs /sync /inbox /remind /reminders /unremind /trust /revoke /cancel /usage /state /help`, plus plain "remind me …".
+Telegram commands: `/today /week /brief /jobs /sync /inbox /remind /reminders /unremind /trust /revoke /cancel /usage /state /help`, plus plain "remind me …".
 HTTP (loopback only): `/health /usage /state /facts /jobs POST /sync POST /jobs/{name}/run`.
 
 ## Invariants (a violation is a bug even if tests pass)
@@ -67,17 +68,15 @@ Nothing half-done. (Update this section before stopping if something is.)
 
 1. **Canvas change alerts.** During entity_sync, detect new assignments, newly graded or newly missing work. Queue
    them as un-notified and deliver them batched outside quiet hours.
-2. **`/today` and `/week`.** Deterministic FACTS tables straight from SQL, no model, so they work when every
-   provider is down.
-3. **Watchdog job.** Tell Landen once per distinct problem (failing job, degraded provider, stale sync, dead Gmail
+2. **Watchdog job.** Tell Landen once per distinct problem (failing job, degraded provider, stale sync, dead Gmail
    grant, Claude CLI login expired), and again when it recovers.
-4. **Capture intake API.** `POST /capture` with a bearer token (`CAPTURE_TOKEN`). Notes and transcripts are stored
+3. **Capture intake API.** `POST /capture` with a bearer token (`CAPTURE_TOKEN`). Notes and transcripts are stored
    as Landen-authored episodes, with optional commitment extraction. Needs a documented safe way to expose it
    (Tailscale or a Cloudflare tunnel), because the API is loopback-only today.
-5. Weekly JSON export of state/commitments/trust to the models volume (a cheap backup; Supabase free tier has no PITR).
-6. Infinite Campus (grades), deliberately out of v1. Needs district credentials, and repeated automated logins can
+4. Weekly JSON export of state/commitments/trust to the models volume (a cheap backup; Supabase free tier has no PITR).
+5. Infinite Campus (grades), deliberately out of v1. Needs district credentials, and repeated automated logins can
    lock the account.
-7. P5 phone calls, beyond v1.
+6. P5 phone calls, beyond v1.
 
 ## Only Landen can do (the whole list; see DEPLOY.md)
 

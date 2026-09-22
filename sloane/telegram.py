@@ -306,6 +306,28 @@ class Bot:
         await self._store.add_reminder(text=text, due_at=parsed.due)
         return Reply(speech=f"Okay, I'll remind you {spoken(parsed.due, now)}: {text}.", detail="")
 
+    async def _view(self, name: str) -> Reply:
+        """/today and /week, from SQL alone. Answers even with every model down."""
+        from datetime import timedelta
+
+        from sloane import views
+
+        day = self._now().date()
+        span = 0 if name == "today" else 6
+        end = day + timedelta(days=span)
+        assignments = await self._store.assignments_due(day, end)
+        shifts = await self._store.shifts_between(day, end)
+        events = await self._store.events_between(day, end)
+        tz = self._config.timezone
+        if name == "today":
+            overdue = await self._store.overdue_assignments()
+            speech, detail = views.today(day, assignments=assignments, shifts=shifts,
+                                         events=events, overdue=overdue, tz=tz)
+        else:
+            speech, detail = views.week(day, assignments=assignments, shifts=shifts,
+                                        events=events, tz=tz)
+        return Reply(speech=speech, detail=detail)
+
     async def _reminders(self, command: str) -> Reply:
         from sloane.reminders import spoken
 
@@ -386,6 +408,8 @@ class Bot:
             return await self._reminders(command)
         if name in {"trust", "revoke", "cancel"}:
             return await self._agency_command(name, command)
+        if name in {"today", "week"}:
+            return await self._view(name)
         if name == "jobs":
             return await self._jobs()
         if name == "inbox":
@@ -397,6 +421,7 @@ class Bot:
                     "`/usage` — model calls in the last 24h\n"
                     "`/state` — the durable facts I hold\n"
                     "`/sync` — pull Canvas, the calendar and shifts now\n"
+                    "`/today` · `/week` — the schedule straight from the database, no AI\n"
                     "`/brief` — the morning brief, right now\n"
                     "`/jobs` — what ran, and whether it worked\n"
                     "`/inbox` — triage new email now\n"
