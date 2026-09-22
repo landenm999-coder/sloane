@@ -23,7 +23,7 @@ consecutive passes find nothing actionable.
 
 - [ ] **P4 — Gmail.** Read-only triage batched into one bulk call, drafts in his voice, every send through the approval flow. Built and tested against stubs; the one-time OAuth consent is a user step.
 - [ ] Docker image builds for `linux/arm64` in CI and passes a smoke test (imports, `claude` resolves as the non-root user).
-- [ ] Eval harness: golden questions through the real model on a seeded day, scored against the exact answers.
+- [x] Eval harness: golden questions through the real model on a seeded day, scored against the exact answers. First run 21/21.
 - [ ] Dependabot PRs triaged: safe ones merged once green; risky ones (major runtime bumps) closed with a reason.
 - [ ] Docs, `.env.example` and `doctor.py` agree with the code; a final review pass finds nothing high-severity.
 

@@ -286,6 +286,10 @@ DATABASE_URL=... python tests/test_jobs.py     # governor, briefs, scheduler —
 
 # or all of it
 python tests/run.py
+
+# the answers, not the plumbing: golden questions through the REAL model on a
+# seeded day, scored in code. Spends ~7 model calls; truncates its database.
+python scripts/eval.py 'postgresql://postgres@/sloane_eval?host=/tmp&port=5433'
 ```
 
 `tests/test_store.py` is **destructive** — it truncates every data table before
