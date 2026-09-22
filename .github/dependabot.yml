@@ -9,6 +9,13 @@ updates:
   - package-ecosystem: docker
     directory: /
     schedule: { interval: weekly }
+    ignore:
+      # The base image tag encodes the Python version. 3.12 -> 3.14 is a runtime
+      # change, not a patch: aarch64 wheels for onnxruntime and friends lag new
+      # CPython releases, so it can break the box's build while the 3.12 test
+      # job stays green. Patch updates to the 3.12 image still come through.
+      - dependency-name: python
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly }
