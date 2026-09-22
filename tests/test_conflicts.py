@@ -11,7 +11,7 @@ All times are Denver wall-clock, via the same helper the briefs use.
 from __future__ import annotations
 
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 

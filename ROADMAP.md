@@ -17,14 +17,14 @@ consecutive passes find nothing actionable.
 
 - [x] **P3 — voice out.** Telegram voice replies reading `speech` only; text always survives a TTS failure.
 - [x] **P4 — agency machinery.** Trust ledger (10 clean approvals unlock an exact pair, 60-day decay, any reversal re-gates), Approve / Edit / Deny buttons, hard lines unlockable never.
-- [ ] Every confirmed finding from the correctness and security reviews fixed, each with a regression test.
+- [x] Every confirmed finding from the correctness and security reviews fixed, each with a regression test (weekday cron numbering, calendar RECURRENCE-ID/UNTIL/EXDATE, stale and multi-day events, job budget, FACTS priority, edit orphans; unverified-sender auto-send, partial previews, CLI tools and env, fail-closed bot, token in logs, bind host).
 
 ## Remaining
 
 - [x] **P4 — Gmail.** Triage batched into one bulk call, drafts in his voice, every send through the approval flow, school staff drafts-only. Tested end to end against a stub Gmail; the one-time OAuth consent is a user step.
 - [x] Docker image builds for `linux/arm64` in CI and passes a smoke test (imports, `claude` resolves as the non-root user).
 - [x] Eval harness: golden questions through the real model on a seeded day, scored against the exact answers. First run 21/21.
-- [ ] Dependabot PRs triaged: safe ones merged once green; risky ones (major runtime bumps) closed with a reason.
+- [x] Dependabot PRs triaged: action bumps merged green; the five Python bumps tested together (14/14 + app smoke) and landed on main, which closed them.
 - [ ] Docs, `.env.example` and `doctor.py` agree with the code; a final review pass finds nothing high-severity.
 
 ## Deliberately out of v1

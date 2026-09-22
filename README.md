@@ -156,8 +156,9 @@ send is always answered, at any hour — quiet hours stop her *starting* a
 conversation, not replying to one.
 
 **The budget defers scheduled work only**, and says so. `DAILY_JOB_BUDGET`
-caps briefs so a runaway job can't spend the free tier before you ask anything;
-your own questions are never rationed. A held-back brief is recorded as
+caps the model calls scheduled jobs make (accounted as `job` in `/usage`) so a
+runaway job can't spend the free tier before you ask anything; your own
+questions and voice notes never count against it and are never rationed. A held-back brief is recorded as
 `deferred` with its reason, visible in `/jobs`, rather than silently not
 arriving.
 
@@ -220,7 +221,7 @@ providers and the Telegram token, and names the remedy for each failure.
 | Service | Needed for | Note |
 |---|---|---|
 | [Supabase](https://supabase.com) | `DATABASE_URL` | Free tier, 500 MB, pgvector. Use the **pooled** connection string. |
-| [@BotFather](https://t.me/botfather) | `TELEGRAM_BOT_TOKEN` | Also set `TELEGRAM_CHAT_ID`, or she answers strangers. |
+| [@BotFather](https://t.me/botfather) | `TELEGRAM_BOT_TOKEN` | Also set `TELEGRAM_CHAT_ID`. Until you do, she answers every message with its chat id and nothing else. |
 | [Groq](https://console.groq.com/keys) | `GROQ_API_KEY` | Free: 1K req/day, 200K tok/day; Whisper 2K/day. |
 | Canvas | `CANVAS_TOKEN` | Account → Settings → New Access Token. Reads all coursework; treat as a password. |
 | Google Calendar | `CALENDAR_ICS_URL` | Settings → Integrate calendar → **Secret address in iCal format**. The URL *is* the credential. |
@@ -274,7 +275,7 @@ Not before.
 | 1 State | `state` | always in prompt | 1,500 tok |
 | 2 Working set | `working_set` | always in prompt | 1,500 tok |
 | 3 Episodic | `episodes` | `search_episodes()`, decayed | 2,000 tok |
-| 4 Entities | `assignments` `shifts` `courses` `people` `commitments` | SQL, exact | 500 tok |
+| 4 Entities | `assignments` `shifts` `courses` `people` `commitments` | SQL, exact | 1,200 tok |
 
 Tiers 1 and 2 ride in *every* prompt — that is why she never re-asks what class
 he has third period.

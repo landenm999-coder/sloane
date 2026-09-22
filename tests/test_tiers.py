@@ -14,7 +14,6 @@ from sloane.memory.tiers import (
     estimate_tokens,
     fit,
     render_facts,
-    render_recall,
 )
 
 FAILURES: list[str] = []

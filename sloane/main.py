@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI
@@ -92,8 +92,10 @@ def create_app() -> FastAPI:
         # nothing -- which /jobs will show plainly.
         send = None
         if bot is not None and config.telegram_chat_id:
-            async def send(reply):  # noqa: ANN001
+            async def deliver(reply):  # noqa: ANN001
                 await bot.send(config.telegram_chat_id, reply)
+
+            send = deliver
 
         ctx = JobContext(
             store=store, agent=agent, governor=Governor(store, config),

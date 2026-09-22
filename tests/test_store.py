@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _settings import isolated
-from sloane.memory.store import Store, as_vector, remember
+from sloane.memory.store import Store, remember
 
 FAILURES: list[str] = []
 

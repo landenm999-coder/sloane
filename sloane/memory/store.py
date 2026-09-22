@@ -15,7 +15,7 @@ Two rules the callers depend on:
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Sequence
 from datetime import date, datetime
 from typing import Any, TypeVar
 
