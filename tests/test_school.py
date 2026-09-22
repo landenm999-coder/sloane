@@ -183,7 +183,7 @@ DTEND;VALUE=DATE:20261017
 END:VEVENT
 END:VCALENDAR"""
 
-TABLES = ("assignments", "events", "shifts", "courses")
+TABLES = ("assignments", "events", "shifts", "courses", "school_changes")
 
 
 async def main() -> None:
@@ -297,6 +297,49 @@ async def main() -> None:
             len(await store.shifts_between(date(2026, 9, 1), date(2027, 1, 1))),
             shifts_before,
         )
+
+        # -- Canvas change alerts ----------------------------------------------
+        from sloane.school.changes import announce
+
+        said: list[str] = []
+
+        async def say(text):
+            said.append(text)
+
+        check("the first sync is a silent baseline", await announce(store, say), 0)
+        ASSIGNMENTS["101"][0]["submission"] = {"workflow_state": "graded", "score": 17}
+        ASSIGNMENTS["101"].append({
+            "id": 9004, "name": "Unit 2 project", "due_at": "2027-01-15T06:59:00Z",
+            "points_possible": 50, "submission": {"workflow_state": "unsubmitted"},
+        })
+        ASSIGNMENTS["101"].append({  # new to us, but long past: not news
+            "id": 9005, "name": "Old worksheet", "due_at": "2020-01-01T06:59:00Z",
+            "submission": {"workflow_state": "unsubmitted"},
+        })
+        await sync_all(store, config)
+        check("one message for the whole sync", await announce(store, say), 2)
+        check("new first, then graded, with the score", said[-1].splitlines(), [
+            "📚 Canvas: 1 new, 1 graded",
+            "• NEW Unit 2 project [Statistical Reasoning - P2] — due Thu Jan 14 11:59 PM",
+            "• GRADED Stat p. 214 [Statistical Reasoning - P2]: 17/20",
+        ])
+        check("each change is announced once", await announce(store, say), 0)
+
+        ASSIGNMENTS["101"][2]["due_at"] = "2027-01-20T06:59:00Z"
+        ASSIGNMENTS["102"][0]["submission"] = {"missing": True}  # already missing: no news
+        await sync_all(store, config)
+
+        async def down(text):
+            raise RuntimeError("telegram down")
+
+        try:
+            await announce(store, down)
+            FAILURES.append("a failed alert should raise to its caller")
+        except RuntimeError:
+            pass
+        check("a failed alert is kept for next time", await announce(store, say), 1)
+        check("a moved due date is news", said[-1].splitlines()[1],
+              "• MOVED Unit 2 project [Statistical Reasoning - P2] — now due Tue Jan 19 11:59 PM")
 
         # -- calendar --------------------------------------------------------
         events = parse_ics(

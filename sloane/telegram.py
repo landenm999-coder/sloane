@@ -251,7 +251,14 @@ class Bot:
         """Pull every upstream source now, rather than waiting for the job."""
         from sloane.school.sync import sync_all
 
+        from sloane.school.changes import announce
+
         report = await sync_all(self._store, self._config)
+        # He asked, so any Canvas changes go out now, whatever the hour.
+        try:
+            await announce(self._store, self.say)
+        except Exception as exc:  # noqa: BLE001 - the next scheduled sync retries
+            log.warning("change alert not delivered: %s", exc)
         return Reply(speech=report.speech(), detail=report.detail())
 
     async def _brief(self) -> Reply:

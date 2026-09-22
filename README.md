@@ -20,7 +20,7 @@ Total running cost: **$0/mo**, every layer on a free tier.
 
 | | |
 |---|---|
-| Schema | 16 tables, idempotent, `vector(384)` + HNSW cosine index |
+| Schema | 17 tables, idempotent, `vector(384)` + HNSW cosine index |
 | Memory | all four tiers, with per-tier token budgets |
 | Embeddings | `bge-small-en-v1.5`, 384-dim, local, cached on a volume |
 | Retrieval | hybrid: vector + full-text fused with RRF, then aged |
@@ -37,6 +37,7 @@ Total running cost: **$0/mo**, every layer on a free tier.
 | Voice | a voice note in gets a voice note out; text is always the fallback |
 | Agency | every action proposed, approved with buttons, or run under earned trust |
 | Views | `/today` and `/week` render the schedule, due work and conflicts straight from SQL — no model, so they answer even when every provider is down |
+| Canvas alerts | after each sync, one message for what changed: new assignments, grades (with the score), newly missing, moved due dates. The first sync is a silent baseline; alerts wait out quiet hours |
 | Reminders | "remind me at 5 to call Keegan" — typed or spoken, times read by rules (no model), held through quiet hours |
 | Gmail | triage every 3h in one batched call; replies drafted in his voice, sent only on Approve |
 | HTTP | `/health`, `/usage`, `/state`, `/facts`, `/jobs`, `POST /sync`, `POST /jobs/{name}/run` |
@@ -458,6 +459,7 @@ sql/
   004_agency.sql   proposals for the approval flow, idempotent
   005_mail.sql     triaged email + the inbox job, idempotent
   006_reminders.sql  timed reminders + the every-minute tick, idempotent
+  007_school_changes.sql  Canvas changes waiting to be announced, idempotent
 scripts/
   doctor.py      validates every credential
   seed_state.py  tier 1 from a markdown file

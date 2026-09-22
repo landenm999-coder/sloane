@@ -151,14 +151,27 @@ async def reflection(ctx: JobContext, now: datetime | None = None) -> JobResult:
 
 
 async def entity_sync(ctx: JobContext, now: datetime | None = None) -> JobResult:
-    """Canvas, the calendar and shifts. Silent -- it feeds the briefs."""
+    """Canvas, the calendar and shifts; then any Canvas changes, in one message.
+
+    The sync itself is silent and runs at any hour. The change alert is held
+    through quiet hours and goes out with the first sync after 6:30.
+    """
+    from sloane.school.changes import announce
     from sloane.school.sync import sync_all
 
     report = await sync_all(ctx.store, ctx.config)
-    return JobResult(
-        "entity_sync", ran=True, sent=False,
-        reason=report.speech(),
-    )
+    reason = report.speech()
+    sent = False
+    if ctx.say is not None and ctx.governor.may_send(now):
+        try:
+            told = await announce(ctx.store, ctx.say)
+        except Exception as exc:  # noqa: BLE001 - the alert waits for the next run
+            reason += f"; change alert not delivered: {exc}"
+        else:
+            sent = told > 0
+            if told:
+                reason += f"; announced {told} Canvas change{'s' if told != 1 else ''}"
+    return JobResult("entity_sync", ran=True, sent=sent, reason=reason)
 
 
 INBOX_QUESTION = (

@@ -528,8 +528,21 @@ class Store:
         points_possible: float | None = None,
         points_earned: float | None = None,
         url: str | None = None,
-    ) -> None:
-        """Idempotent on (source, external_id) so a re-sync updates, never doubles."""
+    ) -> tuple[Row | None, Row | None]:
+        """Idempotent on (source, external_id) so a re-sync updates, never doubles.
+
+        Returns (before, after): the row as it was (None if new) and as it is,
+        so the sync can notice what changed. Both None for an id-less insert.
+        """
+        before = None
+        if external_id is not None:
+            before = await self._one(
+                """
+                select id, status, due_at, points_earned from assignments
+                 where source = %s and external_id = %s
+                """,
+                (source, external_id),
+            )
         if external_id is None:
             await self._exec(
                 """
@@ -541,8 +554,8 @@ class Store:
                 (title, source, due_at, course_id, status, all_day,
                  points_possible, points_earned, url),
             )
-            return
-        await self._exec(
+            return None, None
+        after = await self._one(
             """
             insert into assignments
               (title, source, external_id, due_at, course_id, status, all_day,
@@ -558,9 +571,46 @@ class Store:
                           points_earned = excluded.points_earned,
                           url = excluded.url,
                           updated_at = now()
+            returning id, status, due_at, points_earned, points_possible
             """,
             (title, source, external_id, due_at, course_id, status, all_day,
              points_possible, points_earned, url),
+        )
+        return before, after
+
+    async def has_assignments(self, source: str) -> bool:
+        row = await self._one("select exists(select 1 from assignments where source = %s) as any", (source,))
+        return bool(row and row["any"])
+
+    async def record_school_change(
+        self, *, assignment_id: str | None, kind: str, title: str,
+        course: str | None, detail: str | None,
+    ) -> None:
+        await self._exec(
+            """
+            insert into school_changes (assignment_id, kind, title, course, detail)
+            values (%s, %s, %s, %s, %s)
+            """,
+            (assignment_id, kind, title, course, detail),
+        )
+
+    async def claim_school_changes(self, limit: int = 50) -> list[Row]:
+        """Mark pending changes announced and return them, oldest first."""
+        return await self._fetch(
+            """
+            update school_changes set notified_at = now()
+             where id in (
+               select id from school_changes where notified_at is null
+                order by detected_at limit %s for update skip locked
+             )
+            returning *
+            """,
+            (limit,),
+        )
+
+    async def unclaim_school_changes(self, ids: Sequence[str]) -> None:
+        await self._exec(
+            "update school_changes set notified_at = null where id = any(%s::uuid[])", (list(ids),)
         )
 
     async def courses(self, semester: str | None = None) -> list[Row]:

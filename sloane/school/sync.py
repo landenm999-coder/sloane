@@ -19,8 +19,9 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from sloane.config import Settings
-from sloane.memory.store import Store
+from sloane.memory.store import Store, remember
 from sloane.school import SchoolError
+from sloane.school.changes import classify
 from sloane.school.calendar import fetch as fetch_ics, parse as parse_ics
 from sloane.school.canvas import CanvasClient
 from sloane.school.matching import best_match
@@ -127,6 +128,10 @@ async def sync_courses_and_assignments(store: Store, config: Settings) -> list[S
 
     written = 0
     problems: list[str] = []
+    # The first sync ever is the baseline: everything is "new" to the database,
+    # none of it is news to him.
+    baseline = not await store.has_assignments("canvas")
+    now = datetime.now(timezone.utc)
     for course in courses:
         try:
             items = await client.assignments(course["external_id"])
@@ -137,7 +142,7 @@ async def sync_courses_and_assignments(store: Store, config: Settings) -> list[S
         course_id = await store.course_id_for("canvas", course["external_id"])
         for item in items:
             try:
-                await store.upsert_assignment(
+                before, after = await store.upsert_assignment(
                     title=item["title"],
                     source="canvas",
                     external_id=item["external_id"],
@@ -149,6 +154,12 @@ async def sync_courses_and_assignments(store: Store, config: Settings) -> list[S
                     url=item["url"],
                 )
                 written += 1
+                if not baseline:
+                    for kind, detail in classify(before, after, now=now, tz=config.timezone):
+                        await remember("school change", store.record_school_change(
+                            assignment_id=str(after["id"]), kind=kind, title=item["title"],
+                            course=course["name"], detail=detail,
+                        ))
             except Exception as exc:  # noqa: BLE001
                 log.warning("could not store assignment %s: %s", item["external_id"], exc)
 
