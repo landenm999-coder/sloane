@@ -119,6 +119,11 @@ class Agent:
             "courses": self._store.courses(),
             "commitments": self._store.open_commitments(),
             "events": self._store.events_between(today, horizon),
+            "reminders": self._store.reminders_between(
+                datetime.now(ZoneInfo(self._config.timezone)),
+                datetime.combine(horizon + timedelta(days=1), datetime.min.time(),
+                                 tzinfo=ZoneInfo(self._config.timezone)),
+            ),
         }
         settled = await asyncio.gather(*reads.values(), return_exceptions=True)
 
@@ -197,6 +202,7 @@ class Agent:
             courses=tiers["courses"],
             commitments=tiers["commitments"],
             events=tiers["events"],
+            reminders=tiers["reminders"],
             conflicts=render_conflicts(collisions, self._config.timezone),
             episodes=episodes,
             ingested=ingested,

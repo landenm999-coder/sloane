@@ -876,13 +876,55 @@ class Store:
         person_id: str | None = None,
         due_at: datetime | None = None,
         source_episode_id: str | None = None,
-    ) -> None:
-        await self._exec(
+    ) -> Row:
+        row = await self._one(
             """
             insert into commitments (what, person_id, due_at, source_episode_id)
             values (%s, %s, %s, %s)
+            returning *
             """,
             (what, person_id, due_at, source_episode_id),
+        )
+        assert row is not None
+        return row
+
+    async def person_id(self, name: str) -> str:
+        """The id for this name, creating the person if new. Case-insensitive."""
+        row = await self._one(
+            """
+            with found as (
+              select id from people where lower(name) = lower(%s) order by created_at limit 1
+            ), made as (
+              insert into people (name, relation)
+              select %s, 'unknown' where not exists (select 1 from found)
+              on conflict (lower(name), relation) do update set name = people.name
+              returning id
+            )
+            select id from found union all select id from made limit 1
+            """,
+            (name, name),
+        )
+        assert row is not None
+        return str(row["id"])
+
+    async def close_commitment(self, commitment_id: str, status: str = "kept") -> Row | None:
+        return await self._one(
+            """
+            update commitments set status = %s, closed_at = now()
+             where id = %s and status = 'open'
+             returning *
+            """,
+            (status, commitment_id),
+        )
+
+    async def reminders_between(self, start: datetime, end: datetime) -> list[Row]:
+        return await self._fetch(
+            """
+            select id, text, due_at from reminders
+             where sent_at is null and cancelled_at is null and due_at between %s and %s
+             order by due_at
+            """,
+            (start, end),
         )
 
     # -- trust ----------------------------------------------------------------

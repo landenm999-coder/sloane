@@ -55,6 +55,7 @@ class EmptyStore:
     async def courses(self): return []
     async def open_commitments(self): return []
     async def events_between(self, start, end): return []
+    async def reminders_between(self, start, end): return []
     async def search_episodes(self, *a, **k): return []
     async def add_episode(self, *a, **k): return "x"
     async def log_usage(self, **k): return None

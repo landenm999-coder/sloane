@@ -333,6 +333,42 @@ class Bot:
                                         events=events, tz=tz)
         return Reply(speech=speech, detail=detail)
 
+    async def _promises(self, name: str, rest: str) -> Reply:
+        """/promise <what> [to Name] [by when] · /promises · /kept <n>."""
+        from sloane.promises import parse as parse_promise
+        from sloane.reminders import spoken
+
+        now = self._now()
+        zone = ZoneInfo(self._config.timezone)
+        if name == "promise":
+            promise = parse_promise(rest, now)
+            if promise is None:
+                return Reply(speech="What did you promise?",
+                             detail="Try: /promise send Keegan the outline by friday")
+            person_id = await self._store.person_id(promise.person) if promise.person else None
+            await self._store.add_commitment(safe_field(promise.what, limit=300), person_id=person_id,
+                                             due_at=promise.due)
+            when = f", due {spoken(promise.due, now).removeprefix('at ')}" if promise.due else ""
+            return Reply(speech=f"Noted: {safe_field(promise.what, limit=300)}{when}.", detail="")
+
+        rows = await self._store.open_commitments()
+        if name == "kept":
+            if not rest.strip().isdigit() or not 1 <= int(rest) <= len(rows):
+                return Reply(speech="Use /kept with a number from /promises.", detail="")
+            row = await self._store.close_commitment(str(rows[int(rest) - 1]["id"]))
+            if row is None:
+                return Reply(speech="That one's already closed.", detail="")
+            return Reply(speech=f"Nice. Marked kept: {row['what']}.", detail="")
+        if not rows:
+            return Reply(speech="No open promises.", detail="")
+        lines = []
+        for i, r in enumerate(rows, 1):
+            who = f" (to {r['person']})" if r.get("person") else ""
+            due = f" — due {spoken(r['due_at'].astimezone(zone), now).removeprefix('at ')}" if r.get("due_at") else ""
+            lines.append(f"{i}. {r['what']}{who}{due}")
+        return Reply(speech=f"{len(rows)} open promise{'s' if len(rows) != 1 else ''}.",
+                     detail="\n".join(lines) + "\n\n`/kept <n>` marks one done.")
+
     async def _reminders(self, command: str) -> Reply:
         from sloane.reminders import spoken
 
@@ -409,6 +445,9 @@ class Bot:
         if name == "remind":
             rest = command.split(maxsplit=1)[1] if len(command.split(maxsplit=1)) > 1 else ""
             return await self._remind(rest)
+        if name in {"promise", "promises", "kept"}:
+            rest = command.split(maxsplit=1)[1] if len(command.split(maxsplit=1)) > 1 else ""
+            return await self._promises(name, rest)
         if name in {"reminders", "unremind"}:
             return await self._reminders(command)
         if name in {"trust", "revoke", "cancel"}:
@@ -432,6 +471,7 @@ class Bot:
                     "`/inbox` — triage new email now\n"
                     "`/remind 5pm call Keegan` — a reminder at a time (or just say \"remind me…\")\n"
                     "`/reminders` — what's set; `/unremind <n>` cancels one\n"
+                    "`/promise <what> by <when>` — track a promise; `/promises`, `/kept <n>`\n"
                     "`/trust` — what I may do without asking\n"
                     "`/revoke <action> <target>` — make me ask again"
                 ),

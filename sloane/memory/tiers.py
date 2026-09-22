@@ -137,6 +137,7 @@ def render_facts(
     overdue: Sequence[Row] = (),
     events: Sequence[Row] = (),
     conflicts: Sequence[str] = (),
+    reminders: Sequence[Row] = (),
     budget: int,
     tz: str = "UTC",
 ) -> tuple[str, int]:
@@ -163,6 +164,8 @@ def render_facts(
             else f"{_when(e.get('starts_at'), tz).rsplit(' ', 2)[0]} (all day)"
         )
         lines.append(f"- EVENT {when}: {e['title']}{where}")
+    for r in reminders:
+        lines.append(f"- REMINDER set for {_when(r.get('due_at'), tz)}: {r['text']}")
     for a in assignments:
         course = f" [{a['course']}]" if a.get("course") else ""
         lines.append(f"- DUE {_when(a.get('due_at'), tz)}: {a['title']}{course}")
@@ -247,6 +250,7 @@ def assemble(
     overdue: Sequence[Row] = (),
     events: Sequence[Row] = (),
     conflicts: Sequence[str] = (),
+    reminders: Sequence[Row] = (),
     episodes: Sequence[Row] = (),
     ingested: str = "",
     config: Settings | None = None,
@@ -266,6 +270,7 @@ def assemble(
         overdue=overdue,
         events=events,
         conflicts=conflicts,
+        reminders=reminders,
         budget=cfg.budget_entities,
         tz=tz,
     )
