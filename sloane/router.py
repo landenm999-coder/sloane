@@ -25,6 +25,7 @@ from sloane.providers.anthropic_api import AnthropicProvider
 from sloane.providers.base import Completion, Provider, ProviderError, Usage
 from sloane.providers.claude_code import ClaudeCodeProvider
 from sloane.providers.groq import GroqProvider
+from sloane.providers.tts import Audio, GroqTTS, PiperTTS, TTSProvider
 
 log = logging.getLogger(__name__)
 
@@ -32,6 +33,9 @@ log = logging.getLogger(__name__)
 # first, then the rest of its lane in this order.
 MAIN_ORDER = ("claude_code", "anthropic", "groq")
 BULK_ORDER = ("groq", "anthropic", "claude_code")
+# Voice: Groq Orpheus is fast and free up to its daily cap; Piper is local and
+# has no cap. Either way, a failure here costs the voice, never the reply.
+SPEAK_ORDER = ("groq", "piper")
 
 UsageSink = Callable[[Usage, str, bool, str | None, str | None], Awaitable[None]]
 
@@ -51,6 +55,14 @@ def build(name: str, config: Settings, *, bulk: bool = False) -> Provider:
     raise ValueError(f"unknown provider {name!r}")
 
 
+def build_tts(name: str, config: Settings) -> TTSProvider:
+    if name == "groq":
+        return GroqTTS(config)
+    if name == "piper":
+        return PiperTTS(config)
+    raise ValueError(f"unknown speech provider {name!r}")
+
+
 def _lane(preferred: str, order: Iterable[str]) -> list[str]:
     """The preferred provider first, then the rest of the lane, no duplicates."""
     rest = [n for n in order if n != preferred]
@@ -64,6 +76,7 @@ class Router:
         *,
         usage_sink: UsageSink | None = None,
         factory: Callable[[str, Settings, bool], Provider] | None = None,
+        tts_factory: Callable[[str, Settings], TTSProvider] | None = None,
     ) -> None:
         self._config = config or default_settings()
         self._sink = usage_sink
@@ -71,6 +84,8 @@ class Router:
         # touching the network.
         self._factory = factory or (lambda n, c, b: build(n, c, bulk=b))
         self._cache: dict[tuple[str, bool], Provider] = {}
+        self._tts_factory = tts_factory or build_tts
+        self._tts_cache: dict[str, TTSProvider] = {}
 
     # -- lanes ----------------------------------------------------------------
 
@@ -95,6 +110,33 @@ class Router:
             bulk=True,
             purpose="bulk",
         )
+
+    async def speak(self, text: str) -> Audio:
+        """Text to WAV, degrading across speech providers like the text lanes."""
+        configured = self._config.speak_provider
+        failures: list[str] = []
+        for name in _lane(configured, SPEAK_ORDER):
+            degraded_from = None if name == configured else configured
+            try:
+                if name not in self._tts_cache:
+                    self._tts_cache[name] = self._tts_factory(name, self._config)
+                provider = self._tts_cache[name]
+            except ValueError as exc:
+                log.error("speech provider %s is not usable: %s", name, exc)
+                failures.append(f"{name}: {exc}")
+                continue
+            try:
+                audio = await provider.synthesize(text)
+            except ProviderError as exc:
+                log.warning("speech provider %s failed: %s", name, exc.message)
+                failures.append(exc.message)
+                await self._record(Usage(provider=name), "speak", ok=False,
+                                   error=exc.message, degraded_from=degraded_from)
+                continue
+            await self._record(audio.usage, "speak", ok=True, error=None,
+                               degraded_from=degraded_from)
+            return audio
+        raise NoProviderAvailable("; ".join(failures) or "no speech providers configured")
 
     # -- internals ------------------------------------------------------------
 

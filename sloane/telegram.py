@@ -22,6 +22,7 @@ from sloane.contract import Reply
 from sloane.memory.store import Store, remember
 from sloane.providers.base import ProviderError
 from sloane.providers.groq import GroqProvider
+from sloane.voice import Voice
 
 log = logging.getLogger(__name__)
 
@@ -38,10 +39,13 @@ class Bot:
         store: Store,
         agent: Agent,
         config: Settings | None = None,
+        *,
+        voice: "Voice | None" = None,
     ) -> None:
         self._config = config or default_settings()
         self._store = store
         self._agent = agent
+        self._voice = voice
         self._stt = GroqProvider(self._config)
         self._token = self._config.telegram_bot_token
         self._owner = self._config.telegram_chat_id
@@ -75,6 +79,43 @@ class Bot:
                 chat_id=chat_id, direction="out", kind="text", body=text[:4000]
             ),
         )
+
+    async def send_voice(self, chat_id: int, ogg: bytes) -> None:
+        """Send an OGG/Opus clip as a Telegram voice note."""
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                self._url("sendVoice"),
+                data={"chat_id": str(chat_id)},
+                files={"voice": ("sloane.ogg", ogg, "audio/ogg")},
+            )
+        if response.status_code >= 400 or not response.json().get("ok"):
+            raise RuntimeError(f"telegram sendVoice -> {response.status_code}")
+        await remember(
+            "outbound voice",
+            self._store.log_message(chat_id=chat_id, direction="out", kind="voice"),
+        )
+
+    async def reply(self, chat_id: int, reply: Reply, *, as_voice: bool) -> None:
+        """Answer in the modality he used. Text is the floor, never the risk.
+
+        A voice note in gets a voice note out, reading `speech` only, followed
+        by the detail as text when it adds something. If the voice cannot be
+        made or sent -- budget, TTS, ffmpeg, Telegram -- the whole reply goes
+        as text instead, exactly as it would have without P3.
+        """
+        if as_voice and self._voice is not None:
+            ogg = await self._voice.render(reply.speech)
+            if ogg is not None:
+                try:
+                    await self.send_voice(chat_id, ogg)
+                except (httpx.HTTPError, RuntimeError, ValueError) as exc:
+                    log.warning("voice note not delivered, falling back to text: %s", exc)
+                else:
+                    detail = (reply.detail or "").strip()
+                    if detail and detail != reply.speech.strip():
+                        await self.send(chat_id, Reply(speech="", detail=detail))
+                    return
+        await self.send(chat_id, reply)
 
     async def _download_voice(self, client: httpx.AsyncClient, file_id: str) -> bytes:
         meta = await self._call(client, "getFile", file_id=file_id)
@@ -243,7 +284,7 @@ class Bot:
                 return
 
         reply = await self._agent.answer(body, channel=kind)
-        await self.send(chat_id, reply)
+        await self.reply(chat_id, reply, as_voice=bool(voice))
 
     async def poll_forever(self) -> None:
         """Long-poll until stopped. Network trouble backs off, it does not exit."""

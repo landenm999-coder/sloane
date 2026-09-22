@@ -3,8 +3,8 @@
 Always-on personal assistant for Landen. Reached by Telegram text and voice
 notes. She runs the day: what's due, what shift, what slipped, what's next.
 
-**P0 (the spine), P1 (memory + school) and P2 (rhythm) are built.** Voice out
-(P3) and agency (P4) are not; the roadmap is at the bottom.
+**P0 (the spine), P1 (memory + school), P2 (rhythm) and P3 (voice) are built.**
+Agency (P4) is in progress; see [ROADMAP.md](ROADMAP.md).
 
 Total running cost: **$0/mo**, every layer on a free tier.
 
@@ -33,10 +33,36 @@ Total running cost: **$0/mo**, every layer on a free tier.
 | Sync | `/sync` on Telegram, `POST /sync` over HTTP, `entity_sync` job every 4h |
 | Rhythm | five daily briefs on a scheduler, quiet hours, a budget that defers |
 | Conflicts | computed in code and handed to her as findings, every turn |
+| Voice | a voice note in gets a voice note out; text is always the fallback |
 | HTTP | `/health`, `/usage`, `/state`, `/facts`, `/jobs`, `POST /sync`, `POST /jobs/{name}/run` |
 
-Not built: Infinite Campus (deferred — see below), voice replies, Gmail, the
-trust ledger.
+Not built: Infinite Campus (deferred — see below), Gmail, the trust ledger.
+
+### Voice (P3)
+
+Send a voice note and she answers with one. She reads `speech` only — the field
+the contract caps at two sentences with no markdown, lists or URLs — then sends
+`detail` as text when it adds something. A typed message gets a typed answer.
+
+| Piece | |
+|---|---|
+| In | Groq Whisper transcribes the note (existing since P0) |
+| Out | Groq Orpheus (`canopylabs/orpheus-v1-english`), Piper as a local fallback |
+| Format | ffmpeg → OGG/Opus, the only format Telegram shows as a voice note |
+
+**Text is the floor.** Over the daily speech budget, every TTS provider down,
+ffmpeg missing, `sendVoice` rejected — each falls back to sending the whole
+reply as text, exactly as before P3. A voice note is an upgrade on an answer,
+never a condition of getting one.
+
+Orpheus rejects input over 200 characters, and two sentences can exceed that, so
+speech is split at sentence boundaries (then clauses, then words), synthesised
+per piece and joined back into one clip.
+
+**Latency is dominated by the model, not the voice.** Transcription, TTS and
+the transcode each take well under a second; the answer itself, through
+`claude -p`, typically takes several. The build plan's ~3 s target is reachable
+on the Groq or API lane, not on the CLI lane.
 
 ### Rhythm (P2)
 
@@ -278,6 +304,7 @@ python tests/test_tiers.py      # budgets, labelling, timezones
 python tests/test_embed.py      # dimension guard, degradation
 python tests/test_matching.py   # course matching, and what it refuses
 python tests/test_conflicts.py  # should-have-caught-this, and must-not-cry-wolf
+python tests/test_voice.py      # real ffmpeg transcode; text always survives
 
 # integration — needs a Postgres with pgvector and the schema applied
 DATABASE_URL=... python tests/test_store.py
@@ -330,7 +357,7 @@ sloane/
   agent.py       context assembly to budget, one turn, the hard-line gate
   telegram.py    long-poll bot: text, voice notes, /usage, /state
   main.py        FastAPI: /health /usage /state /facts
-  providers/     claude_code · groq · anthropic_api, behind base.Provider
+  providers/     claude_code · groq · anthropic_api · tts (groq, piper)
   jobs/
     conflicts.py collisions computed in code, and what they refuse to flag
     governor.py  quiet hours + a budget that defers scheduled work
@@ -342,6 +369,7 @@ sloane/
     shifts.py    the fixed 3-7 PM Mon-Fri rule, DST-correct
     matching.py  conservative course-name matching, refuses ties
     sync.py      one pass over every source, per-source failure
+  voice.py       WAV → OGG/Opus voice note, budget; never costs a reply
   memory/
     store.py     THE ONLY FILE THAT TALKS SQL
     embed.py     fastembed, 384-dim, local

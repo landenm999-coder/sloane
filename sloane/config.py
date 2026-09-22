@@ -47,6 +47,19 @@ class Settings(BaseSettings):
     groq_model: str = "llama-3.3-70b-versatile"
     groq_stt_model: str = "whisper-large-v3-turbo"
 
+    # --- voice out (P3) -------------------------------------------------------
+    # groq | piper. The other is the fallback. Either failing leaves a text
+    # reply, never no reply.
+    speak_provider: str = "groq"
+    groq_tts_model: str = "canopylabs/orpheus-v1-english"
+    groq_tts_voice: str = "hannah"
+    piper_bin: str = "piper"
+    piper_voice: str = ""  # path to a Piper .onnx voice on the box
+    ffmpeg_bin: str = "ffmpeg"
+    # Groq's free TTS allowance is about 100 requests a day, and a long reply
+    # can take two. Past this she answers in text and says so in the log.
+    daily_speak_budget: int = 80
+
     # --- anthropic api (the paid destination of the upgrade lever) -----------
     anthropic_api_key: str = ""
     anthropic_main_model: str = "claude-sonnet-5"

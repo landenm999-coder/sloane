@@ -15,10 +15,11 @@ ENV PYTHONUNBUFFERED=1 \
 
 # curl for the healthcheck and the Node install; ca-certificates for TLS to
 # Telegram, Groq, Canvas and Supabase. postgresql-client gives the box `psql`
-# so the migrations can be applied without installing anything else.
+# so the migrations can be applied without installing anything else. ffmpeg
+# turns speech into the OGG/Opus Telegram plays as a voice note (P3).
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      curl ca-certificates postgresql-client \
+      curl ca-certificates postgresql-client ffmpeg \
  && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
  && apt-get install -y --no-install-recommends nodejs \
  && npm install -g @anthropic-ai/claude-code \

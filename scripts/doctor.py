@@ -207,6 +207,41 @@ async def check_school(config: Settings) -> None:
     record("calendar", PASS, f"{len(events)} events in the sync window")
 
 
+async def check_voice(config: Settings, *, warm: bool) -> None:
+    """P3. Voice is optional -- every failure here still leaves text replies."""
+    import shutil
+    import subprocess
+
+    ffmpeg = shutil.which(config.ffmpeg_bin)
+    if ffmpeg is None:
+        record("voice: ffmpeg", WARN, f"{config.ffmpeg_bin} not found, so replies stay text. apt-get install ffmpeg.")
+    else:
+        encoders = subprocess.run([ffmpeg, "-hide_banner", "-encoders"],
+                                  capture_output=True, text=True).stdout
+        if "libopus" in encoders:
+            record("voice: ffmpeg", PASS, "can encode Opus voice notes")
+        else:
+            record("voice: ffmpeg", WARN, "this ffmpeg lacks libopus; voice notes will fail over to text")
+
+    lanes = {"groq": bool(config.groq_api_key),
+             "piper": bool(config.piper_voice) and bool(shutil.which(config.piper_bin))}
+    ready = [n for n, ok in lanes.items() if ok]
+    if not ready:
+        record("voice: tts", WARN, "no speech provider ready (GROQ_API_KEY, or PIPER_VOICE + piper); replies stay text")
+        return
+    if not warm:
+        record("voice: tts", PASS, f"configured: {', '.join(ready)} (live check with --warm)")
+        return
+    from sloane.router import NoProviderAvailable, Router
+
+    try:
+        audio = await Router(config).speak("Sloane voice check.")
+    except NoProviderAvailable as exc:
+        record("voice: tts", FAIL, str(exc))
+        return
+    record("voice: tts", PASS, f"{audio.usage.provider} spoke, {len(audio.wav)} bytes of audio")
+
+
 async def check_telegram(config: Settings) -> None:
     if not config.telegram_bot_token:
         record("telegram", FAIL, "TELEGRAM_BOT_TOKEN is unset. Create a bot with @BotFather.")
@@ -329,6 +364,7 @@ async def main(warm: bool = False) -> int:
     await check_provider(config, config.bulk_provider, "bulk provider", bulk=True)
     await check_fallbacks(config)
     await check_school(config)
+    await check_voice(config, warm=warm)
     await check_telegram(config)
 
     width = max(len(name) for name, _, _ in results)

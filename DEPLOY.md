@@ -148,6 +148,23 @@ fallback lane, Canvas, the calendar and Telegram — and gives the fix for each.
 
 ---
 
+## 7b. Optional: a local voice fallback
+
+Voice replies use Groq by default (free, ~100 a day). For a fallback with no
+cap, install Piper and one voice on the box:
+
+```bash
+# on the host, into the models volume so it survives rebuilds
+docker compose run --rm sloane sh -c '
+  cd /var/lib/sloane/models &&
+  curl -fsSLO https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium/en_US-amy-medium.onnx &&
+  curl -fsSLO https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium/en_US-amy-medium.onnx.json'
+```
+
+then set `PIPER_VOICE=/var/lib/sloane/models/en_US-amy-medium.onnx` in `.env`
+and install the `piper` binary. Without this, when Groq's daily speech allowance
+runs out she simply answers in text.
+
 ## 8. Run her
 
 ```bash
@@ -206,7 +223,7 @@ fix something, stop — the answer is somewhere else.
 
 ## What this does not do yet
 
-Voice replies (P3) and email triage (P4) are not built. The five daily briefs
+Email triage (P4) is not built yet. The five daily briefs
 start on their own the moment she's running — the first you'll hear is the
 6:35 AM brief. `TELEGRAM_CHAT_ID` must be set or the briefs run and record but
 have nobody to send to; `/jobs` will show that plainly.

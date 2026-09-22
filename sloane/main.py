@@ -19,6 +19,9 @@ from sloane.agent import HARD_LINES, Agent
 from sloane.jobs.briefs import JobContext
 from sloane.jobs.governor import Governor
 from sloane.jobs.scheduler import Scheduler
+from sloane.memory.tiers import usage_sink
+from sloane.router import Router
+from sloane.voice import Voice
 from sloane.config import settings
 from sloane.memory.embed import Embedder
 from sloane.memory.store import Store
@@ -41,7 +44,10 @@ def create_app() -> FastAPI:
     async def lifespan(_app: FastAPI):
         await store.open()
         embedder = Embedder(config)
-        agent = Agent(store, config, embedder=embedder)
+        # One router for text and speech, so /usage accounts for both.
+        router = Router(config, usage_sink=usage_sink(store))
+        agent = Agent(store, config, router=router, embedder=embedder)
+        voice = Voice(router, store, config)
         state["agent"] = agent
         state["embedder"] = embedder
 
@@ -52,7 +58,7 @@ def create_app() -> FastAPI:
         task: asyncio.Task | None = None
         bot: Bot | None = None
         if config.telegram_bot_token:
-            bot = Bot(store, agent, config)
+            bot = Bot(store, agent, config, voice=voice)
             state["bot"] = bot
             task = asyncio.create_task(bot.poll_forever())
             log.info("telegram poller started")
