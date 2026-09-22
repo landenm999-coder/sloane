@@ -78,6 +78,9 @@ class Message:
     # header.from domain). Anyone can type any From line; only this says the
     # message really came from that domain.
     authenticated: bool = False
+    # Sent to a mailing list. Anyone who can post to the list can write one,
+    # so it is never "verified" for unattended replies, whoever the list is.
+    mailing_list: bool = False
 
 
 def _b64(data: str) -> str:
@@ -140,7 +143,13 @@ def _authenticated(first_auth_results: str, sender: str) -> bool:
     domain = sender.rsplit("@", 1)[-1].lower() if "@" in sender else ""
     if not domain:
         return False
-    value = _COMMENT.sub(" ", _QUOTED.sub('""', value))
+    value = _QUOTED.sub('""', value)
+    # Comments nest; strip innermost-first until none are left.
+    while True:
+        stripped = _COMMENT.sub(" ", value)
+        if stripped == value:
+            break
+        value = stripped
     dmarc: list[str] | None = None
     for clause in value.split(";")[1:]:
         tokens = clause.split()
@@ -190,6 +199,7 @@ def parse_message(raw: dict) -> Message:
         references=safe_field(headers.get("references", ""), limit=2000),
         to=", ".join(a for _, a in getaddresses([headers.get("to", "")]) if a),
         authenticated=_authenticated(first_auth, address.strip().lower()),
+        mailing_list=bool(headers.get("list-id") or headers.get("list-post")),
     )
 
 

@@ -279,6 +279,10 @@ def unit() -> None:
           parse_message(message("a6", "keegan@gmail.com", "s", "b", auth=[smuggled])).authenticated, False)
     quoted = ('mx.google.com; spf=neutral smtp.mailfrom="x; dmarc=pass header.from=gmail.com; y"'
               '@evil.example; dmarc=fail (p=NONE) header.from=gmail.com')
+    nested = ("mx.google.com; spf=none (a (b; dmarc=pass header.from=gmail.com) c) "
+              "smtp.mailfrom=x@evil.example")
+    check("nor one inside a nested comment",
+          parse_message(message("a8", "keegan@gmail.com", "s", "b", auth=[nested])).authenticated, False)
     check("nor one hidden in a quoted local part",
           parse_message(message("a7", "keegan@gmail.com", "s", "b", auth=[quoted])).authenticated, False)
     check("no header, no verification",
@@ -435,6 +439,12 @@ async def integration(base: str) -> None:
         check("a Reply-To pointing at a trusted friend asks", "(pending)" in line, True)
         check("neither of those sent anything", len(OUTBOX["send"]), before_sent + 1)
         check("both asked him", len(asked), before_asked + 2)
+
+        listed = message("v5", "Keegan <keegan@gmail.com>", "list post", "hi all",
+                         auth=[GOOGLE_AUTH.format(d="gmail.com")])
+        listed["payload"]["headers"].append({"name": "List-Id", "value": "<crew.groups.test>"})
+        line = await inbox._propose(Triaged(parse_message(listed), "reply", "x"), [])
+        check("mailing-list mail asks, even from a verified trusted sender", "(pending)" in line, True)
 
         # -- what he approves is all of what is sent ---------------------------------
         router.draft = "Sounds good. " + "x" * 3000 + " TAILMARK"

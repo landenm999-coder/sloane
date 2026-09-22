@@ -25,7 +25,7 @@ consecutive passes find nothing actionable.
 - [x] Docker image builds for `linux/arm64` in CI and passes a smoke test (imports, `claude` resolves as the non-root user).
 - [x] Eval harness: golden questions through the real model on a seeded day, scored against the exact answers. First run 21/21.
 - [x] Dependabot PRs triaged: action bumps merged green; the five Python bumps tested together (14/14 + app smoke) and landed on main, which closed them.
-- [ ] Docs, `.env.example` and `doctor.py` agree with the code; a final review pass finds nothing high-severity.
+- [x] Docs, `.env.example` and `doctor.py` agree with the code; a final review pass finds nothing high-severity. (Three review passes: the first two found real issues, all fixed with regression tests; the third found nothing high or medium, and its two low findings are fixed too.)
 
 ## Deliberately out of v1
 

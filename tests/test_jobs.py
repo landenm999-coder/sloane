@@ -209,6 +209,13 @@ async def main() -> None:
         check("*/2 counts from Sunday", fires("0 9 * * */2", 4), ["Sun", "Tue", "Thu", "Sat"])
         check("7 is Sunday in a range", fires("0 9 * * 5-7", 3), ["Sun", "Fri", "Sat"])
         check("a list mixes", fires("0 9 * * 0,3,6", 3), ["Sun", "Wed", "Sat"])
+        check("names and numbers mix in cron's numbering", fires("0 9 * * 1,fri", 2), ["Mon", "Fri"])
+        check("sun-sat is every day", len(set(fires("0 9 * * sun-sat", 7))), 7)
+        try:
+            crontab_trigger("0 9 1 * 1", DEN)
+            FAILURES.append("both day fields set should be refused, not silently narrowed")
+        except ValueError:
+            pass
         check(
             "the morning brief fires at 6:35 local",
             nxt["morning_brief"].astimezone(DEN).strftime("%H:%M"), "06:35",

@@ -409,7 +409,7 @@ class Inbox:
             "in_reply_to": m.message_id,
             "references": m.references,
             "gmail_id": m.gmail_id,
-            "verified": m.authenticated and m.reply_to == m.sender,
+            "verified": m.authenticated and m.reply_to == m.sender and not m.mailing_list,
         }
         outcome = await self._agency.propose("draft" if school else "reply", to, payload)
         if outcome.proposal is not None:

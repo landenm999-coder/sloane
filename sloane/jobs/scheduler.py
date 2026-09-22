@@ -45,13 +45,16 @@ def _cron_weekdays(field: str) -> str:
     Cron counts Sunday = 0 (and 7); APScheduler counts Monday = 0. Expanding
     every number, range and step to names -- `1-5` to mon,...,fri, `*/2` to
     sun,tue,thu,sat, `1-5/2` to mon,wed,fri -- means APScheduler never has to
-    interpret a weekday number at all. A field that is already names is left
-    as written.
+    interpret a weekday number at all. Names are accepted anywhere cron allows.
     """
-    if field == "*" or any(c.isalpha() for c in field):
+    if field == "*":
         return field
     days: set[int] = set()
-    for part in field.split(","):
+    for part in field.lower().split(","):
+        # Names become cron numbers first, so "1,fri" and "sun-sat" are read
+        # the same way as "1,5" and "0-6" rather than half in each numbering.
+        for n, day in enumerate(_DOW_NAMES):
+            part = part.replace(day, str(n))
         found = _DOW_PART.match(part)
         if not found:
             raise ValueError(f"unreadable day of week {part!r}")
@@ -76,6 +79,11 @@ def crontab_trigger(expr: str, zone) -> CronTrigger:  # noqa: ANN001 - a tzinfo
     """
     fields = expr.split()
     if len(fields) == 5:
+        # Cron fires when *either* day field matches if both are restricted;
+        # APScheduler requires both. Rather than silently differ, refuse.
+        if fields[2] != "*" and fields[4] != "*":
+            raise ValueError("day-of-month and day-of-week both set; cron and "
+                             "APScheduler disagree on what that means")
         fields[4] = _cron_weekdays(fields[4])
         expr = " ".join(fields)
     return CronTrigger.from_crontab(expr, timezone=zone)
