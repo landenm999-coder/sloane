@@ -1,0 +1,62 @@
+# The full suite on every push and pull request, against a real Postgres with
+# pgvector, on Python 3.12 -- the version the Oracle box runs. The local
+# development venv is 3.11, so this is the only place 3.12 is exercised before
+# a deploy.
+
+name: test
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  suite:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sloane
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/sloane
+      # The suite never needs the real embedder -- it stubs it -- and the one
+      # test that probes a cold load must not pull 130 MB from Hugging Face on
+      # every run. Offline makes that probe fast and deterministic.
+      HF_HUB_OFFLINE: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: pip install -r requirements.txt
+
+      - name: Apply migrations twice (they must be idempotent)
+        run: |
+          sudo apt-get install -y --no-install-recommends postgresql-client >/dev/null
+          for pass in 1 2; do
+            for f in sql/*.sql; do
+              psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f "$f"
+            done
+          done
+
+      - name: Suite
+        run: python tests/run.py
