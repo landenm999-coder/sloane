@@ -1,0 +1,13 @@
+# Sloane P0. Every line is load-bearing: the box is a 2-core ARM instance and
+# each dependency is something that can break a deploy at 11 PM.
+
+fastapi==0.118.0            # /health, /usage, and the process the bot runs in
+uvicorn[standard]==0.37.0   # the ASGI server
+pydantic-settings==2.11.0   # env -> typed Settings
+psycopg[binary,pool]==3.2.10 # Postgres, with dict_row and an async pool
+httpx==0.28.1               # Telegram and Groq; the only HTTP client
+fastembed==0.7.1            # bge-small-en-v1.5, 384-dim, local, no API key
+
+# Optional: only needed once MAIN_PROVIDER or BULK_PROVIDER is `anthropic`.
+# The provider imports it lazily, so the free tier runs without it.
+# anthropic==0.69.0

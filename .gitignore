@@ -1,0 +1,16 @@
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# secrets — the template is tracked, the real thing never is
+.env
+!.env.example
+
+# the embedder's ONNX weights, if EMBED_CACHE_DIR points inside the repo
+.models/
+.local_cache/
+
+.DS_Store
