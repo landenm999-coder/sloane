@@ -19,6 +19,7 @@ Three behaviours that matter more than they look:
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -26,11 +27,39 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from sloane.jobs.briefs import HANDLERS, JobContext, JobResult
+from sloane.router import SCHEDULED
 
 log = logging.getLogger(__name__)
 
 # How late a missed run may still fire. Past this, it is dropped.
 MISFIRE_GRACE_SECONDS = 30 * 60
+
+
+_DOW_NAMES = ["sun", "mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+_DOW_NUMBER = re.compile(r"(?<![/\d])(\d+)")
+
+
+def crontab_trigger(expr: str, zone) -> CronTrigger:  # noqa: ANN001 - a tzinfo
+    """A crontab line, read the way cron reads it.
+
+    APScheduler numbers weekdays from Monday = 0, so `from_crontab("... 1-5")`
+    fires Tuesday to Saturday -- the pre- and post-shift briefs would skip
+    Monday and turn up on Saturday. Standard cron numbers from Sunday = 0 (and
+    7). Translating the numbers to names removes the ambiguity for every row in
+    the jobs table, including ones already deployed. Step values (`*/2`) are
+    left alone.
+    """
+    fields = expr.split()
+    if len(fields) == 5:
+        def name(match: re.Match) -> str:
+            n = int(match.group(1))
+            if n > 7:
+                raise ValueError(f"day of week {n} is out of range")
+            return _DOW_NAMES[n]
+
+        fields[4] = _DOW_NUMBER.sub(name, fields[4])
+        expr = " ".join(fields)
+    return CronTrigger.from_crontab(expr, timezone=zone)
 
 
 class Scheduler:
@@ -55,7 +84,7 @@ class Scheduler:
                 self.skipped.append(f"{name} (no handler)")
                 continue
             try:
-                trigger = CronTrigger.from_crontab(row["cron"], timezone=self._zone)
+                trigger = crontab_trigger(row["cron"], self._zone)
             except ValueError as exc:
                 log.error("job %s has an invalid cron %r: %s", name, row["cron"], exc)
                 self.skipped.append(f"{name} (bad cron)")
@@ -84,6 +113,7 @@ class Scheduler:
         if handler is None:
             return JobResult(name, ran=False, reason="no such job")
 
+        scheduled = SCHEDULED.set(True)
         try:
             result = await handler(self._ctx, now)
         except Exception as exc:  # noqa: BLE001 - a job must never kill the scheduler
@@ -92,6 +122,8 @@ class Scheduler:
             status = "failed"
         else:
             status = "ok" if result.ran else "deferred"
+        finally:
+            SCHEDULED.reset(scheduled)
 
         try:
             await self._ctx.store.mark_job(

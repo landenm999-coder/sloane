@@ -18,7 +18,8 @@ Two things this handles that a naive VEVENT loop does not:
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, time, timedelta
+import re
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -88,9 +89,23 @@ def parse(
     zone = ZoneInfo(tz)
     out: list[dict] = []
 
+    # A moved or cancelled single occurrence arrives as its own VEVENT with the
+    # master's UID and a RECURRENCE-ID naming the slot it replaces. The master's
+    # rule must skip that slot, or a class moved from 10:00 to noon shows twice.
+    replaced: dict[str, list[datetime]] = {}
+    for component in cal.walk("VEVENT"):
+        rid = component.get("RECURRENCE-ID")
+        if rid is not None:
+            moment, _ = _as_aware(getattr(rid, "dt", None), zone)
+            if moment is not None:
+                uid = safe_field(component.get("UID"), limit=200)
+                replaced.setdefault(uid, []).append(moment)
+
     for component in cal.walk("VEVENT"):
         title = safe_field(component.get("SUMMARY"), limit=200)
         if not title:
+            continue
+        if str(component.get("STATUS", "")).upper() == "CANCELLED":
             continue
         uid = safe_field(component.get("UID"), limit=200) or title
 
@@ -106,7 +121,8 @@ def parse(
         )
 
         location = safe_field(component.get("LOCATION"), limit=200) or None
-        starts = _occurrences(component, start, window_start, window_end)
+        skip = replaced.get(uid, []) if component.get("RECURRENCE-ID") is None else []
+        starts = _occurrences(component, start, window_start, window_end, zone=zone, skip=skip)
 
         for occurrence in starts:
             out.append(
@@ -124,11 +140,36 @@ def parse(
     return out
 
 
+_UNTIL = re.compile(r"UNTIL=(\d{8})(T\d{6})?(Z?)", re.I)
+
+
+def _utc_until(rule: str, zone: ZoneInfo) -> str:
+    """Make UNTIL a UTC timestamp, which dateutil insists on for an aware start.
+
+    Google writes all-day series as UNTIL=20261028 (a date) and some clients
+    write a floating UNTIL=20261028T090000. With a timezone-aware DTSTART,
+    dateutil rejects both, and the whole series collapses to its first
+    occurrence. A date means "through the end of that day, in his timezone".
+    """
+    def fix(match: re.Match) -> str:
+        day, clock, utc = match.group(1), match.group(2), match.group(3)
+        if utc:
+            return match.group(0)
+        stamp = datetime.strptime(day + (clock or "T235959"), "%Y%m%dT%H%M%S")
+        moment = stamp.replace(tzinfo=zone).astimezone(timezone.utc)
+        return f"UNTIL={moment:%Y%m%dT%H%M%S}Z"
+
+    return _UNTIL.sub(fix, rule)
+
+
 def _occurrences(
     component: Any,
     start: datetime,
     window_start: datetime,
     window_end: datetime,
+    *,
+    zone: ZoneInfo | None = None,
+    skip: list[datetime] | None = None,
 ) -> list[datetime]:
     """Expand an RRULE, or return the single start if there is none."""
     rrule_prop = component.get("RRULE")
@@ -142,16 +183,21 @@ def _occurrences(
         return [start] if window_start <= start <= window_end else []
 
     try:
+        text = rrule_prop.to_ical().decode()
         rule = rrulestr(
-            rrule_prop.to_ical().decode(), dtstart=start, forceset=True
+            _utc_until(text, zone or start.tzinfo), dtstart=start, forceset=True
         )
+        for moment in skip or []:
+            rule.exdate(moment)
         # EXDATE: occurrences the organiser removed.
         exdates = component.get("EXDATE")
         for prop in exdates if isinstance(exdates, list) else ([exdates] if exdates else []):
             for excluded in getattr(prop, "dts", []):
-                moment = getattr(excluded, "dt", None)
-                if isinstance(moment, datetime):
-                    rule.exdate(moment if moment.tzinfo else moment.replace(tzinfo=start.tzinfo))
+                # A date-valued EXDATE cancels an all-day occurrence; it has
+                # to become the same aware midnight the rule generates.
+                moment, _ = _as_aware(getattr(excluded, "dt", None), start.tzinfo)
+                if moment is not None:
+                    rule.exdate(moment)
     except Exception as exc:  # noqa: BLE001 - a bad rule must not lose the feed
         log.warning("unparseable RRULE, keeping the single occurrence: %s", exc)
         return [start] if window_start <= start <= window_end else []

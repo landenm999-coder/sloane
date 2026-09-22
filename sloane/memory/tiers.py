@@ -31,6 +31,9 @@ Row = dict[str, Any]
 # send would cost more than the occasional 10% misestimate.
 CHARS_PER_TOKEN = 4
 
+# Overdue rows shown in FACTS; the rest are counted, not listed.
+OVERDUE_SHOWN = 8
+
 
 def estimate_tokens(text: str) -> int:
     return (len(text) + CHARS_PER_TOKEN - 1) // CHARS_PER_TOKEN
@@ -144,14 +147,10 @@ def render_facts(
     """
     # Conflicts lead. They are the one thing in FACTS that is a finding rather
     # than a record, and the one thing that is useless if the budget truncates
-    # it off the end.
+    # it off the end. Shifts and events come next: there are only ever a few,
+    # and "do I work today?" must never be answered "no" because a heavy week
+    # of assignments pushed the SHIFT line out of the budget.
     lines: list[str] = list(conflicts)
-    for a in assignments:
-        course = f" [{a['course']}]" if a.get("course") else ""
-        lines.append(f"- DUE {_when(a.get('due_at'), tz)}: {a['title']}{course}")
-    for o in overdue:
-        course = f" [{o['course']}]" if o.get("course") else ""
-        lines.append(f"- OVERDUE since {_when(o.get('due_at'), tz)}: {o['title']}{course}")
     for s in shifts:
         lines.append(
             f"- SHIFT {_when(s.get('starts_at'), tz)} to {_when(s.get('ends_at'), tz)}"
@@ -164,6 +163,16 @@ def render_facts(
             else f"{_when(e.get('starts_at'), tz).rsplit(' ', 2)[0]} (all day)"
         )
         lines.append(f"- EVENT {when}: {e['title']}{where}")
+    for a in assignments:
+        course = f" [{a['course']}]" if a.get("course") else ""
+        lines.append(f"- DUE {_when(a.get('due_at'), tz)}: {a['title']}{course}")
+    # A semester of missed work is not eight hundred tokens of context; the
+    # most recent few are what can still be saved, and the count says the rest.
+    for o in overdue[:OVERDUE_SHOWN]:
+        course = f" [{o['course']}]" if o.get("course") else ""
+        lines.append(f"- OVERDUE since {_when(o.get('due_at'), tz)}: {o['title']}{course}")
+    if len(overdue) > OVERDUE_SHOWN:
+        lines.append(f"- OVERDUE: {len(overdue) - OVERDUE_SHOWN} more, older")
     for c in commitments:
         who = f" (to {c['person']})" if c.get("person") else ""
         when = f", due {_when(c.get('due_at'), tz)}" if c.get("due_at") else ""
@@ -174,6 +183,12 @@ def render_facts(
         lines.append(f"- CLASS {period}: {c['name']}{teacher}")
 
     kept, used = fit(lines, budget)
+    if len(kept) < len(lines):
+        # Say that rows were cut, so a missing row is never read as "none".
+        note = "- (more rows exist than fit here; not listed is not the same as none)"
+        kept, used = fit(lines, budget - estimate_tokens(note) - 1)
+        kept.append(note)
+        used += estimate_tokens(note) + 1
     return _block("FACTS", kept, "exact rows from the database"), used
 
 

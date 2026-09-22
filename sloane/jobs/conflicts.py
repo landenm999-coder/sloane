@@ -61,6 +61,23 @@ def _within(moment: datetime, start: datetime, end: datetime) -> bool:
     return start <= moment < end
 
 
+def _clash(a_start: datetime, a_end: datetime, b_start: datetime, b_end: datetime) -> bool:
+    """Overlap that treats a zero-length event as a moment, not as nothing.
+
+    Half-open overlap on a zero-length interval collapses to `start < start`,
+    so a call at exactly 3:00 PM -- the minute the shift starts -- or two calls
+    booked at the same instant would both slip through.
+    """
+    a_point, b_point = a_end <= a_start, b_end <= b_start
+    if a_point and b_point:
+        return a_start == b_start
+    if a_point:
+        return _within(a_start, b_start, b_end)
+    if b_point:
+        return _within(b_start, a_start, a_end)
+    return _overlaps(a_start, a_end, b_start, b_end)
+
+
 def find(
     *,
     assignments: Sequence[Row] = (),
@@ -109,16 +126,8 @@ def find(
                 continue
             if e.get("all_day"):
                 continue  # an all-day marker is not a collision
-            # A point-in-time event has no span, and half-open overlap on a
-            # zero-length interval collapses to `start < start` -- so a call at
-            # exactly 3:00 PM, the minute the shift starts, would slip through.
-            # Treat it like a due time instead: inside if it lands in the shift.
-            clashes = (
-                _within(e_start, s_start, s_end)
-                if e_end <= e_start
-                else _overlaps(e_start, e_end, s_start, s_end)
-            )
-            if clashes:
+            # A point-in-time event is inside if it lands in the shift.
+            if _clash(e_start, e_end, s_start, s_end):
                 found.append(
                     Conflict(
                         kind="event_during_shift", severity=HARD,
@@ -138,7 +147,7 @@ def find(
             f_end = first.get("ends_at") or f_start
             s_start = second["starts_at"]
             s_end = second.get("ends_at") or s_start
-            if _overlaps(f_start, f_end, s_start, s_end):
+            if _clash(f_start, f_end, s_start, s_end):
                 found.append(
                     Conflict(
                         kind="event_overlaps_event", severity=HARD,

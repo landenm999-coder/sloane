@@ -31,6 +31,7 @@ from sloane.school.sync import sync_all
 
 FAILURES: list[str] = []
 UTC = timezone.utc
+DEN = __import__("zoneinfo").ZoneInfo("America/Denver")
 SEEN_METHODS: list[str] = []
 
 
@@ -138,6 +139,47 @@ SUMMARY:Physics tutoring
 DTSTART:20260924T220000Z
 DTEND:20260924T230000Z
 RRULE:FREQ=WEEKLY;COUNT=4
+END:VEVENT
+END:VCALENDAR"""
+
+# Shapes Google Calendar really emits, each of which used to go wrong.
+ICS_EDGES = b"""BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:club@test
+SUMMARY:Robotics club
+DTSTART;VALUE=DATE:20260902
+DTEND;VALUE=DATE:20260903
+RRULE:FREQ=WEEKLY;UNTIL=20260930
+EXDATE;VALUE=DATE:20260916
+END:VEVENT
+BEGIN:VEVENT
+UID:stat@test
+SUMMARY:Stat study group
+DTSTART;TZID=America/Denver:20260902T100000
+DTEND;TZID=America/Denver:20260902T110000
+RRULE:FREQ=WEEKLY;COUNT=3
+END:VEVENT
+BEGIN:VEVENT
+UID:stat@test
+RECURRENCE-ID;TZID=America/Denver:20260909T100000
+SUMMARY:Stat study group (moved)
+DTSTART;TZID=America/Denver:20260910T120000
+DTEND;TZID=America/Denver:20260910T130000
+END:VEVENT
+BEGIN:VEVENT
+UID:stat@test
+RECURRENCE-ID;TZID=America/Denver:20260916T100000
+SUMMARY:Stat study group
+STATUS:CANCELLED
+DTSTART;TZID=America/Denver:20260916T100000
+DTEND;TZID=America/Denver:20260916T110000
+END:VEVENT
+BEGIN:VEVENT
+UID:break@test
+SUMMARY:Fall break
+DTSTART;VALUE=DATE:20261012
+DTEND;VALUE=DATE:20261017
 END:VEVENT
 END:VCALENDAR"""
 
@@ -275,6 +317,43 @@ async def main() -> None:
         check("calendar text is untrusted by default", stored[0]["trusted"], False)
         deca = [e for e in stored if "DECA" in e["title"]]
         check("location survives", deca[0]["location"], "Room 204")
+
+        # -- the calendar shapes that used to go wrong -----------------------
+        edges = parse_ics(
+            ICS_EDGES,
+            window_start=datetime(2026, 9, 1, tzinfo=UTC),
+            window_end=datetime(2026, 10, 31, tzinfo=UTC),
+            tz="America/Denver",
+        )
+        club = [e["starts_at"].date().isoformat() for e in edges if e["title"] == "Robotics club"]
+        check("an all-day series with a date UNTIL expands, minus its date EXDATE", club,
+              ["2026-09-02", "2026-09-09", "2026-09-23", "2026-09-30"])
+        study = [(e["title"], e["starts_at"].astimezone(DEN).strftime("%m-%d %H:%M"))
+                 for e in edges if e["title"].startswith("Stat")]
+        check("a moved occurrence shows once, where it moved to; a cancelled one not at all",
+              study, [("Stat study group", "09-02 10:00"),
+                      ("Stat study group (moved)", "09-10 12:00")])
+
+        # -- a multi-day event is on every day it covers -----------------------
+        await store._exec("truncate events")
+        for event in edges:
+            await store.upsert_event(**{k: v for k, v in event.items() if k != "source"},
+                                     source="ics")
+        midweek = await store.events_between(date(2026, 10, 14), date(2026, 10, 14))
+        check("fall break is still on on its Wednesday",
+              [e["title"] for e in midweek], ["Fall break"])
+        after = await store.events_between(date(2026, 10, 17), date(2026, 10, 17))
+        check("and over the day after it ends", after, [])
+
+        # -- an event the feed dropped is retired, inside the window only ------
+        keep = [e["external_id"] for e in edges if e["title"] != "Fall break"]
+        gone = await store.retire_events(
+            source="ics", start=datetime(2026, 9, 1, tzinfo=UTC),
+            end=datetime(2026, 10, 31, tzinfo=UTC), keep=keep,
+        )
+        check("the dropped event is retired", gone, 1)
+        check("and nothing else", len(await store.events_between(date(2026, 9, 1), date(2026, 10, 31))),
+              len(keep))
 
         # -- shifts are the rule, not a scrape -------------------------------
         spans = planned_shifts(date(2026, 9, 21), 1, tz="America/Denver",

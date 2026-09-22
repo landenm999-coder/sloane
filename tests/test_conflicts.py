@@ -183,6 +183,22 @@ check(
     find(assignments=nightly, shifts=week), [],
 )
 
+# -- two calls booked for the same instant are a collision -----------------
+check(
+    "two point-in-time events at the same minute collide",
+    kinds(find(events=[event("Call A", at(20)), event("Call B", at(20))])),
+    ["event_overlaps_event"],
+)
+check(
+    "a point event inside a timed one collides",
+    kinds(find(events=[event("Call", at(20, 30)), event("Dinner", at(20), at(21))])),
+    ["event_overlaps_event"],
+)
+check(
+    "a point event at another's end does not",
+    find(events=[event("Call", at(21)), event("Dinner", at(20), at(21))]), [],
+)
+
 if FAILURES:
     print(f"FAIL ({len(FAILURES)})")
     for f in FAILURES:

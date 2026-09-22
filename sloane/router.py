@@ -18,6 +18,7 @@ Two jobs beyond dispatch:
 from __future__ import annotations
 
 import logging
+from contextvars import ContextVar
 from collections.abc import Awaitable, Callable, Iterable
 
 from sloane.config import Settings, settings as default_settings
@@ -31,6 +32,11 @@ log = logging.getLogger(__name__)
 
 # The order each lane falls back through. The configured provider is tried
 # first, then the rest of its lane in this order.
+# Set by the scheduler around a job. Main-lane calls made inside one are
+# accounted as purpose "job", so the scheduled-work budget counts scheduled
+# work -- not Landen's own questions, which are never rationed.
+SCHEDULED: ContextVar[bool] = ContextVar("sloane_scheduled", default=False)
+
 MAIN_ORDER = ("claude_code", "anthropic", "groq")
 BULK_ORDER = ("groq", "anthropic", "claude_code")
 # Voice: Groq Orpheus is fast and free up to its daily cap; Piper is local and
@@ -97,7 +103,7 @@ class Router:
             prompt,
             max_tokens or self._config.max_reply_tokens,
             bulk=False,
-            purpose="reply",
+            purpose="job" if SCHEDULED.get() else "reply",
         )
 
     async def bulk(self, system: str, prompt: str, *, max_tokens: int = 2048) -> str:

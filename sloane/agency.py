@@ -233,6 +233,20 @@ class Agency:
             if row is None:
                 return Outcome("stale", "That one was already decided.")
             await self._ledger(row["action"], row["target"], "edited")
+            # One edit at a time. His next message is the replacement for
+            # *this* one; an earlier Edit left open would otherwise swallow a
+            # later, unrelated message as the body of that email. It goes back
+            # up for approval, unchanged, with fresh buttons.
+            for other in await self._store.editing_proposals():
+                if str(other["id"]) == proposal_id:
+                    continue
+                back = await self._store.transition_proposal(
+                    str(other["id"]), from_status="editing", to_status="pending"
+                )
+                if back is not None:
+                    message_id = await self._ask(back)
+                    if message_id is not None:
+                        await self._store.set_proposal_message(str(back["id"]), message_id)
             return Outcome(
                 "editing",
                 "Send me the replacement as your next message, or /cancel to keep the original.",

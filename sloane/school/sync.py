@@ -193,6 +193,19 @@ async def sync_calendar(store: Store, config: Settings) -> SourceResult:
         except Exception as exc:  # noqa: BLE001
             log.warning("could not store event: %s", exc)
 
+    # Only after a clean parse, and never on an empty one: a feed that parsed
+    # to nothing is far more likely a Google hiccup than an empty semester, and
+    # wiping the calendar on a hiccup is the worse mistake.
+    if events and written == len(events):
+        try:
+            retired = await store.retire_events(
+                source="ics", start=start, end=end, keep=[e["external_id"] for e in events]
+            )
+            if retired:
+                log.info("retired %s calendar rows the feed no longer has", retired)
+        except Exception as exc:  # noqa: BLE001 - housekeeping
+            log.warning("event retire failed: %s", exc)
+
     try:
         await store.prune_events(before=start.date())
     except Exception as exc:  # noqa: BLE001 - pruning is housekeeping

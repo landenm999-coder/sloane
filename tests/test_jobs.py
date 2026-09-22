@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -121,8 +121,13 @@ async def main() -> None:
         check("and says so", "delivery failed" in broken.reason, True)
 
         # -- the budget defers scheduled work, with a reason -----------------
-        for _ in range(3):
+        for _ in range(20):
             await store.log_usage(provider="claude_code", purpose="reply")
+            await store.log_usage(provider="groq", purpose="speak")
+        check("his own chats and voice notes never spend the job budget",
+              bool(await gov.may_spend("reply")), True)
+        for _ in range(3):
+            await store.log_usage(provider="claude_code", purpose="job")
         spent = await gov.may_spend("reply")
         check("at the cap, scheduled work is refused", bool(spent), False)
         check("and the refusal explains itself", "budget is spent" in spent.reason, True)
@@ -145,6 +150,34 @@ async def main() -> None:
             bool(await Governor(BrokenStore(), config).may_spend()), True,
         )
 
+        # -- a job's model calls are accounted as the job's ------------------
+        from sloane.router import SCHEDULED, Router
+
+        class Echo:
+            async def complete(self, system, prompt, *, max_tokens=0):
+                from sloane.providers.base import Completion, Usage
+                return Completion(text="ok", usage=Usage(provider="claude_code"))
+
+        purposes = []
+
+        async def sink(usage, purpose, ok, error, degraded):
+            purposes.append(purpose)
+
+        rt = Router(config, usage_sink=sink, factory=lambda n, c, b: Echo())
+        await rt.reply("s", "p")
+        token = SCHEDULED.set(True)
+        await rt.reply("s", "p")
+        SCHEDULED.reset(token)
+
+        class Asker:
+            async def answer(self, question, *, channel="", today=None, ingested=""):
+                await rt.reply("s", "p")
+                return Reply(speech="ok", detail="ok")
+
+        runner = Scheduler(context(Outbox(), Asker()))
+        await runner.run("wrap", local(22))
+        check("his question is 'reply'; a job's call is 'job'", purposes, ["reply", "job", "job"])
+
         # -- the scheduler -----------------------------------------------------
         sched = Scheduler(context(Outbox()))
         await sched.start()
@@ -155,6 +188,22 @@ async def main() -> None:
                     "reflection", "entity_sync", "inbox"]),
         )
         nxt = sched.next_runs()
+
+        # Cron's weekday numbers, not APScheduler's: 1-5 is Monday to Friday.
+        from sloane.jobs.scheduler import crontab_trigger
+
+        def fires(expr, n=7):
+            trig, at, days = crontab_trigger(expr, DEN), datetime(2026, 9, 20, tzinfo=DEN), []
+            for _ in range(n):
+                at = trig.get_next_fire_time(None, at)
+                days.append(at.strftime("%a"))
+                at = at + timedelta(minutes=1)
+            return days
+
+        check("1-5 is Monday to Friday", fires("45 14 * * 1-5", 5), ["Mon", "Tue", "Wed", "Thu", "Fri"])
+        check("0 and 7 are both Sunday", (fires("0 9 * * 0", 1), fires("0 9 * * 7", 1)), (["Sun"], ["Sun"]))
+        check("names still work", fires("0 9 * * sat", 1), ["Sat"])
+        check("steps are left alone", fires("0 */12 * * *", 2), ["Sun", "Sun"])
         check(
             "the morning brief fires at 6:35 local",
             nxt["morning_brief"].astimezone(DEN).strftime("%H:%M"), "06:35",

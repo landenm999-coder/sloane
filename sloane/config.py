@@ -140,7 +140,7 @@ class Settings(BaseSettings):
     budget_state: int = 1500
     budget_working_set: int = 1500
     budget_episodes: int = 2000
-    budget_entities: int = 500
+    budget_entities: int = 1200
 
     # Retrieval decay: cosine similarity times 0.5 ** (age_days / half_life).
     recency_half_life_days: float = 14.0

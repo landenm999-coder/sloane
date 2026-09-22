@@ -115,6 +115,23 @@ check("the total respects the documented budget", ctx.tokens <= CFG.total_budget
 check("state filled its budget", ctx.spent["state"] > CFG.budget_state * 0.8, True)
 check("facts filled their budget", ctx.spent["facts"] > CFG.budget_entities * 0.8, True)
 
+# --- a heavy week never pushes the shift out of FACTS ----------------------
+heavy = assemble(
+    assignments=[{"title": f"Worksheet {i}", "course": "Stat", "due_at": due} for i in range(40)],
+    overdue=[{"title": f"Old log {i}", "due_at": due} for i in range(60)],
+    shifts=[{"starts_at": due, "ends_at": due}],
+    events=[{"title": "DECA call", "starts_at": due}],
+    config=CFG,
+)
+check("the shift survives a heavy week", "SHIFT" in heavy.facts, True)
+check("so does the event", "DECA call" in heavy.facts, True)
+check("a cut list says it was cut", "not listed is not the same as none" in heavy.facts, True)
+check("and still fits its budget", heavy.spent["facts"] <= CFG.budget_entities, True)
+light = assemble(overdue=[{"title": f"Old log {i}", "due_at": due} for i in range(20)], config=CFG)
+check("overdue is capped and counted", ("Old log 8" in light.facts, "12 more, older" in light.facts),
+      (False, True))
+check("an uncut list carries no cut note", "not listed" in light.facts, False)
+
 # --- empty tiers render as nothing, not as empty headers ------------------
 ctx = assemble(config=CFG)
 check("an empty context has no stray headers", ctx.to_prompt("hi").strip(), "LANDEN:\nhi")

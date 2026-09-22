@@ -86,7 +86,9 @@ class Governor:
         if purpose == "bulk":
             spent, cap, label = used.get("bulk", 0), self._config.daily_bulk_budget, "bulk"
         else:
-            spent = sum(v for k, v in used.items() if k != "bulk")
+            # Only calls made *by* scheduled work. His own questions ("reply")
+            # and voice notes ("speak", capped separately) never count here.
+            spent = used.get("job", 0)
             cap, label = self._config.daily_job_budget, "scheduled"
 
         if spent >= cap:

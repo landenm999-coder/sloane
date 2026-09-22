@@ -511,7 +511,7 @@ class Store:
              where a.status in ('open', 'missing')
                and a.due_at is not null
                and a.due_at < now()
-             order by a.due_at
+             order by a.due_at desc  -- most recent first: the ones still worth saving
             """
         )
 
@@ -721,11 +721,39 @@ class Store:
             """
             select id, title, starts_at, ends_at, all_day, location, trusted
               from events
-             where (starts_at at time zone %(tz)s)::date between %(start)s and %(end)s
+             -- Overlap, not start: on the Wednesday of a Monday-to-Friday
+             -- break, the break is still on. Local days, exclusive end.
+             where (starts_at at time zone %(tz)s) < (%(end)s::date + 1)::timestamp
+               and ((coalesce(ends_at, starts_at) at time zone %(tz)s) > %(start)s::date::timestamp
+                    or (starts_at at time zone %(tz)s) >= %(start)s::date::timestamp)
              order by starts_at
             """,
             {"tz": self._config.timezone, "start": start, "end": end},
         )
+
+    async def retire_events(
+        self, *, source: str, start: datetime, end: datetime, keep: Sequence[str]
+    ) -> int:
+        """Delete this source's rows in [start, end] that the feed no longer has.
+
+        An event moved from Thursday to Friday has a new external id, and one
+        deleted upstream has none; without this both linger as phantom FACTS
+        (and phantom conflicts) until they drift out of the window.
+        """
+        row = await self._one(
+            """
+            with gone as (
+              delete from events
+               where source = %s
+                 and starts_at between %s and %s
+                 and not (external_id = any(%s))
+              returning 1
+            )
+            select count(*) as n from gone
+            """,
+            (source, start, end, list(keep)),
+        )
+        return int(row["n"]) if row else 0
 
     async def prune_events(self, before: date) -> int:
         """Drop occurrences that have fallen out of the sync window.
@@ -1006,6 +1034,11 @@ class Store:
             select * from proposals where status = 'editing'
              order by decided_at desc nulls last limit 1
             """
+        )
+
+    async def editing_proposals(self) -> list[Row]:
+        return await self._fetch(
+            "select * from proposals where status = 'editing' order by decided_at"
         )
 
     async def open_proposals(self) -> list[Row]:

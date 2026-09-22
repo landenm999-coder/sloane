@@ -125,6 +125,21 @@ async def main() -> None:
         check("approving an edited one does not count as clean", ledger[("note", "coach")]["clean_streak"], 0)
         check("no edit is waiting any more", await agency.submit_edit("stray"), None)
 
+        # -- two Edits in a row: only the latest is waiting for text ------------
+        first_edit = await agency.propose("note", "coach", {"text": "A"})
+        second_edit = await agency.propose("note", "coach", {"text": "B"})
+        await agency.decide(str(first_edit.proposal["id"]), "edit")
+        await agency.decide(str(second_edit.proposal["id"]), "edit")
+        check("the earlier edit went back up for approval",
+              (await store.get_proposal(str(first_edit.proposal["id"])))["status"], "pending")
+        revised_b = await agency.submit_edit("B, reworded")
+        check("the replacement goes to the latest edit", revised_b.proposal["payload"]["text"], "B, reworded")
+        check("and a later message is a question again, not A's new body",
+              await agency.submit_edit("what's due tomorrow?"), None)
+        check("A is untouched", (await store.get_proposal(str(first_edit.proposal["id"])))["payload"]["text"], "A")
+        await agency.decide(str(first_edit.proposal["id"]), "deny")
+        await agency.decide(str(revised_b.proposal["id"]), "deny")
+
         cancel_me = await agency.propose("note", "coach", {"text": "orig"})
         await agency.decide(str(cancel_me.proposal["id"]), "edit")
         kept = await agency.cancel_edit()
