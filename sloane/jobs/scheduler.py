@@ -148,7 +148,7 @@ class Scheduler:
             result = JobResult(name, ran=False, reason=f"failed: {exc}")
             status = "failed"
         else:
-            status = "ok" if result.ran else "deferred"
+            status = ("partial" if result.partial else "ok") if result.ran else "deferred"
         finally:
             SCHEDULED.reset(scheduled)
 

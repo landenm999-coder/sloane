@@ -20,7 +20,7 @@ Total running cost: **$0/mo**, every layer on a free tier.
 
 | | |
 |---|---|
-| Schema | 17 tables, idempotent, `vector(384)` + HNSW cosine index |
+| Schema | 18 tables, idempotent, `vector(384)` + HNSW cosine index |
 | Memory | all four tiers, with per-tier token budgets |
 | Embeddings | `bge-small-en-v1.5`, 384-dim, local, cached on a volume |
 | Retrieval | hybrid: vector + full-text fused with RRF, then aged |
@@ -38,6 +38,7 @@ Total running cost: **$0/mo**, every layer on a free tier.
 | Agency | every action proposed, approved with buttons, or run under earned trust |
 | Views | `/today` and `/week` render the schedule, due work and conflicts straight from SQL — no model, so they answer even when every provider is down |
 | Canvas alerts | after each sync, one message for what changed: new assignments, grades (with the score), newly missing, moved due dates. The first sync is a silent baseline; alerts wait out quiet hours |
+| Watchdog | every 30 min, no model: failing or partial jobs, a main/bulk model failing every call (e.g. an expired Claude login — with the fix), a dead Gmail grant. Told after an hour, repeated daily, "✅ working again" when it clears |
 | Reminders | "remind me at 5 to call Keegan" — typed or spoken, times read by rules (no model), held through quiet hours |
 | Gmail | triage every 3h in one batched call; replies drafted in his voice, sent only on Approve |
 | HTTP | `/health`, `/usage`, `/state`, `/facts`, `/jobs`, `POST /sync`, `POST /jobs/{name}/run` |
@@ -433,6 +434,7 @@ sloane/
   jobs/
     conflicts.py collisions computed in code, and what they refuse to flag
     governor.py  quiet hours + a budget that defers scheduled work
+    watchdog.py  what's broken, told once; what's fixed, told once
     briefs.py    the five daily jobs, reflection, sync and inbox
     scheduler.py APScheduler driven by the jobs table, local time
   school/        all read-only
@@ -460,6 +462,7 @@ sql/
   005_mail.sql     triaged email + the inbox job, idempotent
   006_reminders.sql  timed reminders + the every-minute tick, idempotent
   007_school_changes.sql  Canvas changes waiting to be announced, idempotent
+  008_watchdog.sql  what is broken and whether he's been told, idempotent
 scripts/
   doctor.py      validates every credential
   seed_state.py  tier 1 from a markdown file

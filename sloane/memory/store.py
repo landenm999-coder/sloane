@@ -1150,6 +1150,49 @@ class Store:
             (reminder_id,),
         )
 
+    # -- watchdog -------------------------------------------------------------------
+
+    async def open_alerts(self) -> list[Row]:
+        return await self._fetch("select * from alerts where resolved_at is null order by first_seen")
+
+    async def see_alert(self, key: str, message: str, now: datetime) -> Row:
+        """Record that a problem is present. A resolved or new key starts fresh."""
+        row = await self._one(
+            """
+            insert into alerts (key, message, first_seen) values (%s, %s, %s)
+            on conflict (key) do update
+               set message = excluded.message,
+                   first_seen = case when alerts.resolved_at is null
+                                     then alerts.first_seen else excluded.first_seen end,
+                   notified_at = case when alerts.resolved_at is null
+                                      then alerts.notified_at else null end,
+                   resolved_at = null
+            returning *
+            """,
+            (key, message, now),
+        )
+        assert row is not None
+        return row
+
+    async def mark_alert_notified(self, key: str, now: datetime) -> None:
+        await self._exec("update alerts set notified_at = %s where key = %s", (now, key))
+
+    async def resolve_alert(self, key: str, now: datetime) -> None:
+        await self._exec("update alerts set resolved_at = %s where key = %s", (now, key))
+
+    async def provider_health(self, hours: int) -> list[Row]:
+        """Per provider over the window: attempts and failures."""
+        return await self._fetch(
+            """
+            select provider, count(*) as calls, count(*) filter (where not ok) as failures,
+                   max(error) filter (where not ok) as sample_error
+              from usage_log
+             where at > now() - make_interval(hours => %s)
+             group by provider
+            """,
+            (hours,),
+        )
+
     # -- email (P4) -------------------------------------------------------------
 
     async def known_emails(self, gmail_ids: Sequence[str]) -> set[str]:

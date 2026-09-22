@@ -249,6 +249,11 @@ ran and whether it worked. `/sync` pulls Canvas, the calendar and shifts now.
 
 ## When something is wrong
 
+Most of the time you won't need this table: the watchdog messages you when a
+job keeps failing, a model stops answering (for example, an expired Claude
+login), or Gmail access dies. It tells you the fix, and tells you again when
+it's working.
+
 | Symptom | Cause |
 |---|---|
 | `health` says `database: down` | Wrong `DATABASE_URL`, or you took the **transaction** pooler (6543). Use **session** (5432). |

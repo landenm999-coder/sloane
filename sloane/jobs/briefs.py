@@ -50,6 +50,9 @@ class JobResult:
     sent: bool = False
     reason: str = ""
     reply: Reply | None = None
+    # Ran, but not everything worked (e.g. Canvas down while the calendar
+    # synced). Recorded as "partial" so the watchdog can see it.
+    partial: bool = False
 
 
 @dataclass
@@ -171,7 +174,7 @@ async def entity_sync(ctx: JobContext, now: datetime | None = None) -> JobResult
             sent = told > 0
             if told:
                 reason += f"; announced {told} Canvas change{'s' if told != 1 else ''}"
-    return JobResult("entity_sync", ran=True, sent=sent, reason=reason)
+    return JobResult("entity_sync", ran=True, sent=sent, reason=reason, partial=not report.ok)
 
 
 INBOX_QUESTION = (
@@ -262,6 +265,22 @@ async def reminders(ctx: JobContext, now: datetime | None = None) -> JobResult:
     )
 
 
+async def watchdog(ctx: JobContext, now: datetime | None = None) -> JobResult:
+    """Every 30 minutes: is anything broken? Told once, repeated daily, cleared when fixed."""
+    from sloane.jobs import watchdog as wd
+
+    if ctx.say is None:
+        return JobResult("watchdog", ran=False, reason="no chat to deliver to")
+    speaking = ctx.governor.may_send(now)
+    if not speaking:
+        return JobResult("watchdog", ran=False, reason=speaking.reason)
+    zone = ZoneInfo(ctx.config.timezone)
+    moment = (now or datetime.now(zone)).astimezone(zone)
+    present, sent = await wd.run(ctx.store, ctx.config, ctx.say, moment)
+    return JobResult("watchdog", ran=True, sent=sent > 0,
+                     reason=f"{present} problem{'s' if present != 1 else ''} present")
+
+
 HANDLERS: dict[str, Callable[..., Awaitable[JobResult]]] = {
     "morning_brief": morning_brief,
     "pre_shift": pre_shift,
@@ -271,4 +290,5 @@ HANDLERS: dict[str, Callable[..., Awaitable[JobResult]]] = {
     "entity_sync": entity_sync,
     "inbox": inbox,
     "reminders": reminders,
+    "watchdog": watchdog,
 }
