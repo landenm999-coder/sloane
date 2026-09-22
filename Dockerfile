@@ -6,7 +6,7 @@
 # Claude Code CLI, which bills against Landen's Pro subscription instead of API
 # credits. That is the whole reason this runs at $0/mo.
 
-FROM python:3.12-slim-bookworm
+FROM python:3.14-slim-bookworm
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
