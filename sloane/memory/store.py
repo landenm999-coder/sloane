@@ -532,7 +532,7 @@ class Store:
     async def courses(self, semester: str | None = None) -> list[Row]:
         return await self._fetch(
             """
-            select id, period, name, teacher, semester, room
+            select id, period, name, teacher, semester, room, source, external_id
               from courses
              where active
                and (%s::text is null or semester = %s::text)
@@ -607,6 +607,112 @@ class Store:
             """,
             (starts_at, ends_at, kind, generated, note),
         )
+
+    async def unlinked_courses(self) -> list[Row]:
+        """Seeded courses no upstream id has claimed yet."""
+        return await self._fetch(
+            """
+            select id, name, period, teacher, semester
+              from courses
+             where active and external_id is null
+             order by period nulls last
+            """
+        )
+
+    async def link_course(self, course_id: str, *, source: str, external_id: str) -> None:
+        """Attach an upstream id to a course the seed already described."""
+        await self._exec(
+            "update courses set source = %s, external_id = %s where id = %s",
+            (source, external_id, course_id),
+        )
+
+    async def create_course(self, *, name: str, source: str, external_id: str) -> str:
+        """Record an upstream course the seed does not describe.
+
+        It gets no period and no teacher, which is honest: nothing here knows
+        them. Assignments still attach and still answer by name.
+        """
+        row = await self._one(
+            """
+            insert into courses (name, source, external_id)
+            values (%s, %s, %s)
+            on conflict (source, external_id) where external_id is not null
+            do update set name = excluded.name
+            returning id
+            """,
+            (name, source, external_id),
+        )
+        assert row is not None
+        return str(row["id"])
+
+    async def course_id_for(self, source: str, external_id: str) -> str | None:
+        row = await self._one(
+            "select id from courses where source = %s and external_id = %s",
+            (source, external_id),
+        )
+        return str(row["id"]) if row else None
+
+    # -- calendar events ------------------------------------------------------
+
+    async def upsert_event(
+        self,
+        *,
+        title: str,
+        starts_at: datetime,
+        ends_at: datetime | None = None,
+        all_day: bool = False,
+        location: str | None = None,
+        source: str = "ics",
+        external_id: str | None = None,
+    ) -> None:
+        """Idempotent on (source, external_id) so a re-sync never duplicates."""
+        await self._exec(
+            """
+            insert into events
+              (title, starts_at, ends_at, all_day, location, source, external_id)
+            values (%s, %s, %s, %s, %s, %s, %s)
+            on conflict (source, external_id) where external_id is not null
+            do update set title = excluded.title,
+                          starts_at = excluded.starts_at,
+                          ends_at = excluded.ends_at,
+                          all_day = excluded.all_day,
+                          location = excluded.location,
+                          updated_at = now()
+            """,
+            (title, starts_at, ends_at, all_day, location, source, external_id),
+        )
+
+    async def events_between(self, start: date, end: date) -> list[Row]:
+        return await self._fetch(
+            """
+            select id, title, starts_at, ends_at, all_day, location, trusted
+              from events
+             where (starts_at at time zone %(tz)s)::date between %(start)s and %(end)s
+             order by starts_at
+            """,
+            {"tz": self._config.timezone, "start": start, "end": end},
+        )
+
+    async def prune_events(self, before: date) -> int:
+        """Drop occurrences that have fallen out of the sync window.
+
+        Not a hard-line violation: these are regenerated copies of an upstream
+        feed, not anything Landen wrote. Without it, a weekly event accumulates
+        a row a week forever.
+        """
+        row = await self._one(
+            """
+            with gone as (
+              delete from events
+               where source = 'ics'
+                 and (starts_at at time zone %(tz)s)::date < %(before)s
+              returning 1
+            )
+            select count(*) as n from gone
+            """,
+            {"tz": self._config.timezone, "before": before},
+        )
+        return int(row["n"]) if row else 0
 
     async def people(self, limit: int = 50) -> list[Row]:
         return await self._fetch(

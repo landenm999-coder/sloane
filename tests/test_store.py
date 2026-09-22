@@ -314,8 +314,15 @@ async def main() -> None:
         check("degradation is visible in usage", summary[("anthropic", "reply")]["degraded"], 1)
 
         # -- jobs ------------------------------------------------------------
-        jobs = await store.jobs()
-        check("five jobs seeded", len(jobs), 5)
+        jobs = {j["name"] for j in await store.jobs()}
+        # Assert the jobs that must exist rather than a total: later migrations
+        # legitimately add more, and a count would fail for the wrong reason.
+        check(
+            "the five rhythm jobs are seeded",
+            {"morning_brief", "pre_shift", "post_shift", "wrap", "reflection"} <= jobs,
+            True,
+        )
+        check("and the P1 sync job", "entity_sync" in jobs, True)
         await store.mark_job("morning_brief", status="ok")
         brief = next(j for j in await store.jobs() if j["name"] == "morning_brief")
         check("marking a job records the run", brief["runs"], 1)

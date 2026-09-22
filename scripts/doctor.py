@@ -79,11 +79,18 @@ async def check_database(config: Settings) -> None:
         else:
             record("hard lines", FAIL, f"{len(lines)} rows, expected 6. Re-apply sql/001_init.sql.")
 
-        jobs = await store.jobs()
+        # Name-based, not a count: migrations add jobs over time and a total
+        # would go stale every phase.
+        required = {"morning_brief", "pre_shift", "post_shift", "wrap",
+                    "reflection", "entity_sync"}
+        names = {j["name"] for j in await store.jobs()}
+        missing = required - names
         record(
-            "jobs" if len(jobs) == 5 else "jobs",
-            PASS if len(jobs) == 5 else WARN,
-            f"{len(jobs)} seeded" + ("" if len(jobs) == 5 else ", expected 5"),
+            "jobs",
+            PASS if not missing else FAIL,
+            f"{len(names)} seeded"
+            if not missing
+            else f"missing {sorted(missing)}. Re-apply the sql/ migrations.",
         )
 
         state = await store.get_state()
@@ -146,6 +153,58 @@ async def check_fallbacks(config: Settings) -> None:
             )
             continue
         record(f"fallback: {name}", PASS, "ready to take over")
+
+
+async def check_school(config: Settings) -> None:
+    """Canvas and the calendar feed. Both read-only, both credentials."""
+    from sloane.school import SchoolError
+
+    if not config.canvas_token or not config.canvas_base_url:
+        record(
+            "canvas",
+            WARN,
+            "CANVAS_BASE_URL/CANVAS_TOKEN unset, so assignments will not sync. "
+            "Canvas → Account → Settings → New Access Token.",
+        )
+    else:
+        from sloane.school.canvas import CanvasClient
+
+        try:
+            courses = await CanvasClient(
+                config.canvas_base_url, config.canvas_token
+            ).courses()
+        except SchoolError as exc:
+            record("canvas", FAIL, str(exc))
+        else:
+            record("canvas", PASS, f"{len(courses)} active courses, read-only")
+
+    if not config.calendar_ics_url:
+        record(
+            "calendar",
+            WARN,
+            "CALENDAR_ICS_URL unset. Google Calendar → Settings for my calendars "
+            "→ Integrate calendar → Secret address in iCal format.",
+        )
+        return
+
+    from datetime import datetime, timedelta, timezone
+
+    from sloane.school.calendar import fetch as fetch_ics, parse as parse_ics
+
+    try:
+        body = await fetch_ics(config.calendar_ics_url)
+        now = datetime.now(timezone.utc)
+        events = parse_ics(
+            body,
+            window_start=now - timedelta(days=config.sync_past_days),
+            window_end=now + timedelta(days=config.sync_future_days),
+            tz=config.timezone,
+        )
+    except SchoolError as exc:
+        # The URL is a credential; report the failure, never the URL.
+        record("calendar", FAIL, str(exc))
+        return
+    record("calendar", PASS, f"{len(events)} events in the sync window")
 
 
 async def check_telegram(config: Settings) -> None:
@@ -269,6 +328,7 @@ async def main(warm: bool = False) -> int:
     await check_provider(config, config.main_provider, "main provider", bulk=False)
     await check_provider(config, config.bulk_provider, "bulk provider", bulk=True)
     await check_fallbacks(config)
+    await check_school(config)
     await check_telegram(config)
 
     width = max(len(name) for name, _, _ in results)

@@ -98,6 +98,21 @@ def create_app() -> FastAPI:
         rows = await store.get_state()
         return {"count": len(rows), "state": [dict(r) for r in rows]}
 
+    @app.post("/sync")
+    async def sync() -> dict:
+        """Run the entity sync now. Read-only against every upstream system."""
+        from sloane.school.sync import sync_all
+
+        report = await sync_all(store, config)
+        return {
+            "ok": report.ok,
+            "written": report.written,
+            "sources": [
+                {"name": s.name, "ok": s.ok, "written": s.written, "detail": s.detail}
+                for s in report.sources
+            ],
+        }
+
     @app.get("/facts")
     async def facts(days: int = 7) -> dict:
         """Tier 4 as JSON. What she would answer from, without the model."""
@@ -108,6 +123,7 @@ def create_app() -> FastAPI:
             "overdue": [dict(r) for r in await store.overdue_assignments()],
             "shifts": [dict(r) for r in await store.shifts_between(today, horizon)],
             "commitments": [dict(r) for r in await store.open_commitments()],
+            "events": [dict(r) for r in await store.events_between(today, horizon)],
         }
 
     return app

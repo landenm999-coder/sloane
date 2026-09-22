@@ -50,6 +50,22 @@ class Settings(BaseSettings):
     # unless both configured models accept it.
     anthropic_effort: str = ""
 
+    # --- school (P1). All read-only. ----------------------------------------
+    # Canvas. The token is a bearer credential with full read access to his
+    # coursework; it is never logged and never echoed into a reply.
+    canvas_base_url: str = ""
+    canvas_token: str = ""
+
+    # The calendar's secret .ics URL is itself the credential -- anyone holding
+    # it can read the whole calendar -- so it is treated like a password.
+    calendar_ics_url: str = ""
+
+    # How far either side of today to sync and to answer FACTS from.
+    sync_past_days: int = 7
+    sync_future_days: int = 45
+    # Shifts are generated, not scraped; this is how far ahead.
+    shift_weeks_ahead: int = 6
+
     # --- telegram ------------------------------------------------------------
     telegram_bot_token: str = ""
     telegram_chat_id: int = 0

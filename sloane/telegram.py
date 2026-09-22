@@ -119,16 +119,29 @@ class Bot:
             detail="\n".join(lines),
         )
 
+    async def _sync(self) -> Reply:
+        """Pull every upstream source now, rather than waiting for the job."""
+        from sloane.school.sync import sync_all
+
+        report = await sync_all(self._store, self._config)
+        return Reply(speech=report.speech(), detail=report.detail())
+
     async def _handle_command(self, command: str) -> Reply | None:
         name = command.split()[0].lstrip("/").split("@")[0].lower()
         if name == "usage":
             return await self._usage()
         if name == "state":
             return await self._state()
+        if name == "sync":
+            return await self._sync()
         if name in {"start", "help"}:
             return Reply(
                 speech="I am here. Text me or send a voice note.",
-                detail="`/usage` — model calls in the last 24h\n`/state` — the durable facts I hold",
+                detail=(
+                    "`/usage` — model calls in the last 24h\n"
+                    "`/state` — the durable facts I hold\n"
+                    "`/sync` — pull Canvas, the calendar and shifts now"
+                ),
             )
         return None
 

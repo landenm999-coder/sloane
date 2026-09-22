@@ -106,6 +106,7 @@ class Agent:
             "shifts": self._store.shifts_between(today, horizon),
             "courses": self._store.courses(),
             "commitments": self._store.open_commitments(),
+            "events": self._store.events_between(today, horizon),
         }
         settled = await asyncio.gather(*reads.values(), return_exceptions=True)
 
@@ -168,6 +169,7 @@ class Agent:
             shifts=tiers["shifts"],
             courses=tiers["courses"],
             commitments=tiers["commitments"],
+            events=tiers["events"],
             episodes=episodes,
             ingested=ingested,
             config=self._config,

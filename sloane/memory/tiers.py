@@ -132,6 +132,7 @@ def render_facts(
     courses: Sequence[Row] = (),
     commitments: Sequence[Row] = (),
     overdue: Sequence[Row] = (),
+    events: Sequence[Row] = (),
     budget: int,
     tz: str = "UTC",
 ) -> tuple[str, int]:
@@ -151,6 +152,14 @@ def render_facts(
         lines.append(
             f"- SHIFT {_when(s.get('starts_at'), tz)} to {_when(s.get('ends_at'), tz)}"
         )
+    for e in events:
+        where = f" at {e['location']}" if e.get("location") else ""
+        when = (
+            f"{_when(e.get('starts_at'), tz)}"
+            if not e.get("all_day")
+            else f"{_when(e.get('starts_at'), tz).rsplit(' ', 2)[0]} (all day)"
+        )
+        lines.append(f"- EVENT {when}: {e['title']}{where}")
     for c in commitments:
         who = f" (to {c['person']})" if c.get("person") else ""
         when = f", due {_when(c.get('due_at'), tz)}" if c.get("due_at") else ""
@@ -214,6 +223,7 @@ def assemble(
     courses: Sequence[Row] = (),
     commitments: Sequence[Row] = (),
     overdue: Sequence[Row] = (),
+    events: Sequence[Row] = (),
     episodes: Sequence[Row] = (),
     ingested: str = "",
     config: Settings | None = None,
@@ -231,6 +241,7 @@ def assemble(
         courses=courses,
         commitments=commitments,
         overdue=overdue,
+        events=events,
         budget=cfg.budget_entities,
         tz=tz,
     )

@@ -16,8 +16,9 @@ UNIT = [
     "test_router.py",
     "test_tiers.py",
     "test_embed.py",
+    "test_matching.py",
 ]
-INTEGRATION = ["test_store.py"]
+INTEGRATION = ["test_store.py", "test_school.py"]
 
 
 def run(name: str) -> bool:
