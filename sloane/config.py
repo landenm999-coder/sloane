@@ -166,6 +166,10 @@ class Settings(BaseSettings):
     trust_decay_days: int = 60
 
     log_level: str = "INFO"
+    # Loopback unless told otherwise. The container sets 0.0.0.0 and compose
+    # publishes it on 127.0.0.1 only; run bare, /facts and /state must not be
+    # on the LAN.
+    bind_host: str = "127.0.0.1"
 
     @property
     def total_budget(self) -> int:

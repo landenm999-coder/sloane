@@ -147,6 +147,41 @@ try:
 except NoProviderAvailable:
     pass
 
+# -- the Claude CLI gets no tools, no MCP, and none of Sloane's secrets --------
+import os as _os
+
+from sloane.providers import claude_code as _cc
+
+_os.environ.update({
+    "GMAIL_REFRESH_TOKEN": "secret-1", "TELEGRAM_BOT_TOKEN": "secret-2",
+    "DATABASE_URL": "secret-3", "ANTHROPIC_API_KEY": "secret-4", "CANVAS_TOKEN": "secret-5",
+})
+_env = _cc._cli_env()
+check("no Sloane credential reaches the CLI",
+      [k for k in _env if _env[k].startswith("secret-")], [])
+check("but it can still find itself and its login", ("PATH" in _env, "HOME" in _env), (True, True))
+
+_seen = {}
+
+
+async def _fake_exec(*argv, **kw):
+    _seen["argv"], _seen["kw"] = argv, kw
+    raise OSError("stop here")
+
+_real = _cc.asyncio.create_subprocess_exec
+_cc.asyncio.create_subprocess_exec = _fake_exec
+_cc.shutil.which = lambda name: "/usr/bin/claude"
+try:
+    run(_cc.ClaudeCodeProvider(Settings(database_url="")).complete("s", "p"))
+except Exception:  # noqa: BLE001 - the fake refuses to start, by design
+    pass
+finally:
+    _cc.asyncio.create_subprocess_exec = _real
+argv = list(_seen.get("argv", ()))
+check("tools are switched off", argv[argv.index("--tools") + 1] if "--tools" in argv else None, "")
+check("MCP servers are not loaded", "--strict-mcp-config" in argv, True)
+check("the environment is the scrubbed one", _seen.get("kw", {}).get("env") == _env, True)
+
 if FAILURES:
     print(f"FAIL ({len(FAILURES)})")
     for f in FAILURES:

@@ -227,6 +227,27 @@ async def bot_checks() -> None:
         await bot._handle_callback(press(chat, sender))
         check(f"{label}: nothing is decided", decided, [])
 
+    # -- no owner configured: a message gets its chat id back and nothing else --
+    class Agent:
+        asked = []
+
+        async def answer(self, *a, **k):
+            Agent.asked.append(a)
+
+    sent = []
+    bot = Bot(FakeStore(), Agent(), isolated(telegram_bot_token="x", telegram_chat_id=0))
+
+    async def capture(chat_id, reply):
+        sent.append((chat_id, reply))
+
+    bot.send = capture
+    for text in ("what's due today?", "/state", "/inbox"):
+        await bot._handle({"update_id": 7, "message": {"chat": {"id": 555}, "text": text}})
+    check("without an owner, the model is never asked", Agent.asked, [])
+    check("each message gets only its chat id",
+          [(c, "555" in r.detail and "TELEGRAM_CHAT_ID" in r.detail) for c, r in sent],
+          [(555, True)] * 3)
+
 
 asyncio.run(main())
 asyncio.run(bot_checks())

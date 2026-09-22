@@ -74,6 +74,10 @@ class Message:
     message_id: str  # RFC 822 Message-ID, for threading a reply
     references: str
     to: str = ""
+    # Google's own verdict that the From domain is genuine (DMARC pass on the
+    # header.from domain). Anyone can type any From line; only this says the
+    # message really came from that domain.
+    authenticated: bool = False
 
 
 def _b64(data: str) -> str:
@@ -113,12 +117,32 @@ def _body(payload: dict) -> str:
     return text[:BODY_LIMIT]
 
 
+_DMARC_PASS = re.compile(r"\bdmarc=pass\b[^;]*\bheader\.from=([A-Za-z0-9.-]+)", re.I)
+
+
+def _authenticated(first_auth_results: str, sender: str) -> bool:
+    """DMARC passed, per Google, for the domain in From.
+
+    Only the *first* Authentication-Results header counts: Google prepends its
+    own, and any further down were written by whoever sent the message.
+    """
+    value = (first_auth_results or "").strip()
+    if not value.lower().startswith("mx.google.com"):
+        return False
+    found = _DMARC_PASS.search(value)
+    domain = sender.rsplit("@", 1)[-1].lower() if "@" in sender else ""
+    return bool(found and domain and found.group(1).lower().rstrip(".") == domain)
+
+
 def parse_message(raw: dict) -> Message:
     payload = raw.get("payload") or {}
-    headers = {
-        (h.get("name") or "").lower(): h.get("value") or ""
-        for h in payload.get("headers") or []
-    }
+    headers: dict[str, str] = {}
+    first_auth = ""
+    for h in payload.get("headers") or []:
+        name = (h.get("name") or "").lower()
+        if name == "authentication-results" and not first_auth:
+            first_auth = h.get("value") or ""
+        headers.setdefault(name, h.get("value") or "")
     name, address = parseaddr(headers.get("from", ""))
     _, reply_to = parseaddr(headers.get("reply-to", ""))
     received: datetime | None = None
@@ -145,6 +169,7 @@ def parse_message(raw: dict) -> Message:
         message_id=safe_field(headers.get("message-id", ""), limit=500),
         references=safe_field(headers.get("references", ""), limit=2000),
         to=", ".join(a for _, a in getaddresses([headers.get("to", "")]) if a),
+        authenticated=_authenticated(first_auth, address.strip().lower()),
     )
 
 

@@ -9,11 +9,32 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import shutil
+import tempfile
 import time
 
 from sloane.config import Settings
 from sloane.providers.base import Completion, Provider, ProviderError, Usage
+
+
+# What the CLI needs to find itself, its login and the network. Nothing else:
+# every credential Sloane holds (Telegram, Canvas, Gmail, the database) lives
+# in this process's environment, and none of it is the CLI's business.
+# ANTHROPIC_API_KEY is left out on purpose -- with it set the CLI bills the API
+# instead of the Pro subscription, which is the one thing this lane exists for.
+_CLI_ENV_KEEP = {
+    "PATH", "HOME", "USER", "LANG", "LC_ALL", "TERM", "TMPDIR", "TZ",
+    "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "https_proxy", "http_proxy", "no_proxy",
+    "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS", "REQUESTS_CA_BUNDLE",
+}
+
+
+def _cli_env() -> dict[str, str]:
+    return {
+        k: v for k, v in os.environ.items()
+        if k in _CLI_ENV_KEEP or k.startswith("CLAUDE_CODE_") or k == "CLAUDE_CONFIG_DIR"
+    }
 
 
 class ClaudeCodeProvider(Provider):
@@ -41,6 +62,12 @@ class ClaudeCodeProvider(Provider):
             "json",
             "--append-system-prompt",
             system,
+            # No tools and no MCP servers. The prompt carries ingested text --
+            # email, calendar, Canvas -- and a model that can Read or Grep can
+            # be talked into reading .env. It only ever needs to write text.
+            "--tools",
+            "",
+            "--strict-mcp-config",
         ]
         if self._model:
             argv += ["--model", self._model]
@@ -51,6 +78,8 @@ class ClaudeCodeProvider(Provider):
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=_cli_env(),
+                cwd=tempfile.gettempdir(),
             )
         except OSError as exc:
             raise ProviderError(self.name, f"could not start {self._cli}: {exc}") from exc

@@ -43,9 +43,11 @@ COPY --chown=sloane:sloane . .
 
 USER sloane
 ENV HOME=/home/sloane \
-    PATH=/home/sloane/.local/bin:$PATH
+    PATH=/home/sloane/.local/bin:$PATH \
+    BIND_HOST=0.0.0.0
 
-# Loopback only. Nothing about Sloane needs an inbound port: Telegram is long
+# BIND_HOST=0.0.0.0 is inside the container only; compose publishes the port on
+# the host's 127.0.0.1. Loopback only. Nothing about Sloane needs an inbound port: Telegram is long
 # polling, which is outbound. See DEPLOY.md.
 EXPOSE 8000
 

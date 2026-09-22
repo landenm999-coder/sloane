@@ -53,3 +53,17 @@ def safe_field(text: object, *, limit: int = DEFAULT_LIMIT) -> str:
     if len(raw) > limit:
         raw = raw[: limit - 1].rstrip() + "…"
     return raw
+
+
+def unfence(text: object) -> str:
+    """Multi-line untrusted text that will sit inside a <<< >>> fence.
+
+    Keeps the line breaks (an email body is unreadable without them) but
+    defuses the fence markers, so a body containing `>>>` cannot close the
+    fence early and write text that appears to come from outside it.
+    """
+    if text is None:
+        return ""
+    raw = text if isinstance(text, str) else str(text)
+    raw = raw.translate(_BIDI)
+    return raw.replace("<<<", "‹‹‹").replace(">>>", "›››")

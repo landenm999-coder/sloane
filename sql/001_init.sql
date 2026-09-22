@@ -228,7 +228,10 @@ insert into trust (action, target, hard_line, reason) values
   ('contact', 'school_staff',  true, 'No unprompted mail to teachers, counsellors or admin.'),
   ('publish', 'public',        true, 'She never posts publicly as Landen.')
 on conflict (action, target) do update
-  set hard_line = true, reason = excluded.reason;
+  -- Re-running this also re-gates: a hard-line pair that somehow picked up a
+  -- streak or an unlock loses both, not just gains the flag back.
+  set hard_line = true, reason = excluded.reason, state = 'gated', clean_streak = 0,
+      unlocked_at = null;
 
 insert into jobs (name, cron) values
   ('morning_brief',  '35 6 * * *'),

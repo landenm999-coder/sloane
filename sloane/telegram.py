@@ -200,7 +200,10 @@ class Bot:
         if not path:
             raise RuntimeError("telegram returned no file_path for the voice note")
         response = await client.get(f"{API}/file/bot{self._token}/{path}")
-        response.raise_for_status()
+        # Not raise_for_status(): its message includes the URL, and this URL
+        # contains the bot token. It would land in the log and in the chat.
+        if response.status_code != 200:
+            raise RuntimeError(f"voice download failed: HTTP {response.status_code}")
         return response.content
 
     # -- commands --------------------------------------------------------------
@@ -363,6 +366,17 @@ class Bot:
         # the bot cannot be enumerated by strangers who guess the handle.
         if self._owner and chat_id != self._owner:
             log.warning("ignoring message from unexpected chat %s", chat_id)
+            return
+        # No owner configured yet: fail closed. The one thing anyone gets back
+        # is their own chat id, which is exactly what setup needs -- never her
+        # schedule, state or inbox to whoever found the bot first.
+        if not self._owner:
+            log.warning("TELEGRAM_CHAT_ID is unset; told chat %s its id and nothing else", chat_id)
+            await self.send(chat_id, Reply(
+                speech="I'm not set up yet.",
+                detail=f"Your chat id is `{chat_id}`. Put `TELEGRAM_CHAT_ID={chat_id}` "
+                       "in .env and restart me.",
+            ))
             return
 
         voice = message.get("voice") or message.get("audio")

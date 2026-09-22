@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 
 from sloane.agency import ActionType, Agency
 from sloane.config import Settings
-from sloane.ingest import safe_field
+from sloane.ingest import safe_field, unfence
 from sloane.mail import MailError
 from sloane.mail.gmail import GmailClient, Message, build_raw, reply_subject, valid_address
 from sloane.memory.embed import EmbedUnavailable
@@ -41,6 +41,10 @@ from sloane.router import NoProviderAvailable, Router
 log = logging.getLogger(__name__)
 
 CATEGORIES = ("urgent", "reply", "fyi", "ignore")
+
+# A reply is shown in full before he approves it, so it has to fit in a
+# Telegram message with room to spare. Nothing sent is longer than what he saw.
+DRAFT_LIMIT = 1500
 NEEDS_HIM = ("urgent", "reply")
 
 # Senders a reply would only bounce off.
@@ -152,9 +156,9 @@ def triage_prompt(messages: Sequence[Message]) -> str:
         who = f"{m.sender_name} <{m.sender}>" if m.sender_name else m.sender
         blocks.append(
             f"id: {m.gmail_id}\n"
-            f"from: {safe_field(who, limit=160)}\n"
-            f"subject: {m.subject}\n"
-            f"body: {safe_field(m.body or m.snippet, limit=700)}"
+            f"from: {unfence(safe_field(who, limit=160))}\n"
+            f"subject: {unfence(m.subject)}\n"
+            f"body: {unfence(safe_field(m.body or m.snippet, limit=700))}"
         )
     fenced = "\n---\n".join(blocks)
     return (
@@ -207,14 +211,14 @@ def own_words(body: str, limit: int = 500) -> str:
 
 
 def draft_prompt(message: Message, samples: Sequence[str]) -> str:
-    shown = "\n---\n".join(s for s in samples if s) or "(no samples -- keep it brief and plain)"
+    shown = "\n---\n".join(unfence(s) for s in samples if s) or "(no samples -- keep it brief and plain)"
     who = f"{message.sender_name} <{message.sender}>" if message.sender_name else message.sender
     return (
         "How Landen writes (his own sent emails):\n"
         f"<<<\n{shown}\n>>>\n\n"
         "INGESTED (untrusted, the email he is answering):\n"
-        f"<<<\nfrom: {safe_field(who, limit=160)}\nsubject: {message.subject}\n"
-        f"{message.body or message.snippet}\n>>>\n\n"
+        f"<<<\nfrom: {unfence(safe_field(who, limit=160))}\nsubject: {unfence(message.subject)}\n"
+        f"{unfence(message.body or message.snippet)}\n>>>\n\n"
         "Write his reply."
     )
 
@@ -224,7 +228,7 @@ def clean_draft(raw: str) -> str:
     # Models like to wrap the body in a fence or announce it; neither is his.
     text = re.sub(r"^```[a-z]*\n|\n```$", "", text).strip()
     text = re.sub(r"^(here'?s|here is) (a|the|your) (draft|reply)[^\n]*:\s*\n", "", text, flags=re.I)
-    return text[:4000].strip()
+    return text[:DRAFT_LIMIT].strip()
 
 
 # -- the two actions ---------------------------------------------------------------
@@ -241,8 +245,10 @@ def _payload_raw(payload: dict) -> str:
 
 
 def _preview(verb: str, target: str, payload: dict) -> str:
+    # The whole body, always. A preview that shows the start of a message and
+    # sends the rest unseen is how an approval gets laundered.
     body = " ".join(str(payload.get("body", "")).split())
-    return f"{verb} {target} — {payload.get('subject', '')}: {body[:600]}"
+    return f"{verb} {target} — {payload.get('subject', '')}: {body}"
 
 
 def reply_action(gmail: GmailClient, config: Settings) -> ActionType:
@@ -270,8 +276,13 @@ def reply_action(gmail: GmailClient, config: Settings) -> ActionType:
         name="reply",
         preview=lambda target, payload: _preview("Email", target, payload),
         execute=execute,
-        revise=lambda payload, text: {**payload, "body": text.strip()},
+        revise=lambda payload, text: {**payload, "body": text.strip()[:DRAFT_LIMIT]},
         really=really,
+        # Earned trust in a recipient covers mail Landen is answering. It does
+        # not cover a message whose sender Google could not verify, or one that
+        # routes the reply somewhere other than the sender: a stranger could
+        # otherwise set Reply-To to a trusted friend and have her write to them.
+        auto_ok=lambda target, payload: payload.get("verified") is True,
     )
 
 
@@ -290,7 +301,7 @@ def draft_action(gmail: GmailClient) -> ActionType:
             "Save a draft (you send it yourself) to", target, payload
         ),
         execute=execute,
-        revise=lambda payload, text: {**payload, "body": text.strip()},
+        revise=lambda payload, text: {**payload, "body": text.strip()[:DRAFT_LIMIT]},
     )
 
 
@@ -398,6 +409,7 @@ class Inbox:
             "in_reply_to": m.message_id,
             "references": m.references,
             "gmail_id": m.gmail_id,
+            "verified": m.authenticated and m.reply_to == m.sender,
         }
         outcome = await self._agency.propose("draft" if school else "reply", to, payload)
         if outcome.proposal is not None:

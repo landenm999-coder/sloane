@@ -46,6 +46,10 @@ _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 
 DECISIONS = {"a": "approve", "e": "edit", "d": "deny"}
 
+# Long enough to show everything an action will do. An action whose preview
+# would be cut must be made shorter, not approved half-seen.
+PREVIEW_LIMIT = 2500
+
 
 @dataclass(frozen=True)
 class ActionType:
@@ -62,6 +66,11 @@ class ActionType:
     # teacher is "contact school_staff" whatever the action is called, and a
     # hard line that only matched labels could be walked around by renaming.
     really: Callable[[str, dict], tuple[str, str] | None] | None = None
+    # Whether a *trusted* pair may run this particular one without asking.
+    # Trust is earned by (action, target); this is the per-instance veto --
+    # e.g. a reply drafted from an email whose sender could not be verified
+    # asks every time, however trusted the recipient is.
+    auto_ok: Callable[[str, dict], bool] | None = None
 
 
 @dataclass
@@ -166,9 +175,10 @@ class Agency:
             )
             return Outcome("refused", f"I don't have a way to '{action}'.", row)
 
-        preview = safe_field(kind.preview(target, payload), limit=1000)
+        preview = safe_field(kind.preview(target, payload), limit=PREVIEW_LIMIT)
 
-        if await self._trusted(action, target):
+        may_auto = kind.auto_ok is None or kind.auto_ok(target, payload)
+        if may_auto and await self._trusted(action, target):
             row = await self._store.create_proposal(
                 action=action, target=target, preview=preview, payload=payload,
                 status="approved", auto=True,
@@ -240,7 +250,7 @@ class Agency:
         if kind is None:
             return Outcome("failed", "I no longer know how to do that.", row)
         payload = kind.revise(dict(row["payload"]), text)
-        preview = safe_field(kind.preview(row["target"], payload), limit=1000)
+        preview = safe_field(kind.preview(row["target"], payload), limit=PREVIEW_LIMIT)
         revised = await self._store.revise_proposal(str(row["id"]), preview=preview, payload=payload)
         if revised is None:
             return Outcome("stale", "That one was already decided.")
