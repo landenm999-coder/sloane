@@ -13,6 +13,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -21,6 +24,7 @@ import httpx
 from sloane.agent import Agent
 from sloane.config import Settings, settings as default_settings
 from sloane.contract import Reply
+from sloane.ingest import safe_field
 from sloane.memory.store import Store, remember
 from sloane.providers.base import ProviderError
 from sloane.providers.groq import GroqProvider
@@ -28,6 +32,9 @@ from sloane.agency import Agency, callback_data, parse_callback
 from sloane.voice import Voice
 
 log = logging.getLogger(__name__)
+
+_REMIND_ME = re.compile(r"^\s*(?:hey\s+)?(?:sloane[,\s]+)?(?:please\s+)?remind\s+me\b[,:]?\s*(.*)$",
+                        re.I | re.S)
 
 API = "https://api.telegram.org"
 
@@ -272,15 +279,60 @@ class Bot:
             return Reply(speech="I didn't check your inbox.", detail=result.reason)
         return Reply(speech="Nothing new in your inbox needs you.", detail=result.reason)
 
+    # -- reminders ---------------------------------------------------------------
+
+    def _now(self) -> datetime:
+        return datetime.now(ZoneInfo(self._config.timezone))
+
+    async def _remind(self, rest: str) -> Reply:
+        """Schedule a reminder from his own words.
+
+        No approval step: this is Landen asking for it directly, and it touches
+        nothing outside his own chat. (Anything *she* decides to do still goes
+        through the agency.)
+        """
+        from sloane.reminders import parse, spoken
+
+        how = "Try: remind me at 5 to call Keegan, or /remind tomorrow 7am bring the lab."
+        if not rest.strip():
+            return Reply(speech="What should I remind you about, and when?", detail=how)
+        now = self._now()
+        parsed = parse(rest, now)
+        if parsed is None:
+            return Reply(speech="I couldn't tell when you want that reminder.", detail=how)
+        if not parsed.text:
+            return Reply(speech="What should the reminder say?", detail=how)
+        text = safe_field(parsed.text, limit=300)
+        await self._store.add_reminder(text=text, due_at=parsed.due)
+        return Reply(speech=f"Okay, I'll remind you {spoken(parsed.due, now)}: {text}.", detail="")
+
+    async def _reminders(self, command: str) -> Reply:
+        from sloane.reminders import spoken
+
+        rows = await self._store.upcoming_reminders(20)
+        parts = command.split()
+        if parts[0].lstrip("/").split("@")[0].lower() == "unremind":
+            if len(parts) != 2 or not parts[1].isdigit() or not 1 <= int(parts[1]) <= len(rows):
+                return Reply(speech="Use /unremind with a number from /reminders.", detail="")
+            row = await self._store.cancel_reminder(str(rows[int(parts[1]) - 1]["id"]))
+            if row is None:
+                return Reply(speech="That one already went out.", detail="")
+            return Reply(speech=f"Cancelled: {row['text']}.", detail="")
+        if not rows:
+            return Reply(speech="No reminders set.", detail="")
+        now = self._now()
+        zone = ZoneInfo(self._config.timezone)
+        lines = [f"{i}. {spoken(r['due_at'].astimezone(zone), now)}: {r['text']}"
+                 for i, r in enumerate(rows, 1)]
+        return Reply(
+            speech=f"{len(rows)} reminder{'s' if len(rows) != 1 else ''} set.",
+            detail="\n".join(lines) + "\n\n`/unremind <n>` cancels one.",
+        )
+
     async def _agency_command(self, name: str, command: str) -> Reply:
         if self.agency is None:
             return Reply(speech="Actions are off: set TELEGRAM_CHAT_ID so I know who approves.", detail="")
         rest = command.split(maxsplit=1)[1].strip() if " " in command.strip() else ""
-        if name == "remind":
-            if not rest:
-                return Reply(speech="Tell me what to remind you about: /remind take the lab to school.", detail="")
-            outcome = await self.agency.propose("remind", "self", {"text": rest})
-            return Reply(speech=outcome.message, detail="")
         if name == "cancel":
             outcome = await self.agency.cancel_edit()
             return Reply(speech=outcome.message if outcome else "Nothing is being edited.", detail="")
@@ -327,7 +379,12 @@ class Bot:
             return await self._sync()
         if name == "brief":
             return await self._brief()
-        if name in {"remind", "trust", "revoke", "cancel"}:
+        if name == "remind":
+            rest = command.split(maxsplit=1)[1] if len(command.split(maxsplit=1)) > 1 else ""
+            return await self._remind(rest)
+        if name in {"reminders", "unremind"}:
+            return await self._reminders(command)
+        if name in {"trust", "revoke", "cancel"}:
             return await self._agency_command(name, command)
         if name == "jobs":
             return await self._jobs()
@@ -343,7 +400,8 @@ class Bot:
                     "`/brief` — the morning brief, right now\n"
                     "`/jobs` — what ran, and whether it worked\n"
                     "`/inbox` — triage new email now\n"
-                    "`/remind <text>` — a reminder, through the approval flow\n"
+                    "`/remind 5pm call Keegan` — a reminder at a time (or just say \"remind me…\")\n"
+                    "`/reminders` — what's set; `/unremind <n>` cancels one\n"
                     "`/trust` — what I may do without asking\n"
                     "`/revoke <action> <target>` — make me ask again"
                 ),
@@ -429,6 +487,13 @@ class Bot:
             if revised is not None:
                 await self.send(chat_id, Reply(speech=revised.message, detail=""))
                 return
+
+        # "Remind me at 5 to call Keegan" -- typed or spoken -- is handled by
+        # rules, not the model, so it works when every provider is down.
+        asked = _REMIND_ME.match(body)
+        if asked:
+            await self.send(chat_id, await self._remind(asked.group(1)))
+            return
 
         if body.startswith("/"):
             reply = await self._handle_command(body)

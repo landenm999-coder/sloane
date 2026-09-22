@@ -20,7 +20,7 @@ Total running cost: **$0/mo**, every layer on a free tier.
 
 | | |
 |---|---|
-| Schema | 15 tables, idempotent, `vector(384)` + HNSW cosine index |
+| Schema | 16 tables, idempotent, `vector(384)` + HNSW cosine index |
 | Memory | all four tiers, with per-tier token budgets |
 | Embeddings | `bge-small-en-v1.5`, 384-dim, local, cached on a volume |
 | Retrieval | hybrid: vector + full-text fused with RRF, then aged |
@@ -28,7 +28,7 @@ Total running cost: **$0/mo**, every layer on a free tier.
 | Providers | `claude_code`, `groq`, `anthropic` behind one `Provider` base |
 | Contract | `Reply(speech, detail)` parsed from 5 model-output shapes |
 | Hard lines | 6 pairs, enforced in code before execution |
-| Interface | Telegram long polling: text, voice, buttons; `/brief` `/jobs` `/sync` `/inbox` `/remind` `/trust` `/revoke` `/usage` `/state` |
+| Interface | Telegram long polling: text, voice, buttons; `/brief` `/jobs` `/sync` `/inbox` `/remind` `/reminders` `/trust` `/revoke` `/usage` `/state` |
 | School | Canvas assignments + secret `.ics` calendar, both read-only |
 | Shifts | generated from the fixed 3–7 PM Mon–Fri rule, DST-correct |
 | Sync | `/sync` on Telegram, `POST /sync` over HTTP, `entity_sync` job every 4h |
@@ -36,6 +36,7 @@ Total running cost: **$0/mo**, every layer on a free tier.
 | Conflicts | computed in code and handed to her as findings, every turn |
 | Voice | a voice note in gets a voice note out; text is always the fallback |
 | Agency | every action proposed, approved with buttons, or run under earned trust |
+| Reminders | "remind me at 5 to call Keegan" — typed or spoken, times read by rules (no model), held through quiet hours |
 | Gmail | triage every 3h in one batched call; replies drafted in his voice, sent only on Approve |
 | HTTP | `/health`, `/usage`, `/state`, `/facts`, `/jobs`, `POST /sync`, `POST /jobs/{name}/run` |
 
@@ -66,9 +67,10 @@ set, nobody can. Decisions are one atomic SQL transition, so a double-tap or two
 racing callbacks execute once. Button payloads are validated like any other
 input.
 
-Three actions are registered: `remind` (`/remind <text>`, a reminder to
-yourself), and the two Gmail ones below — `reply` and `draft`. `/trust` shows
-the ledger.
+Three actions are registered: `remind` (a reminder she decides to send you),
+and the two Gmail ones below — `reply` and `draft`. `/trust` shows the ledger.
+A reminder *you* ask for (`/remind`, "remind me…") needs no approval: your own
+request is the approval, and it touches nothing outside your chat.
 
 ### Gmail (P4)
 
@@ -377,6 +379,7 @@ DATABASE_URL=... python tests/test_school.py   # runs a stub Canvas locally
 DATABASE_URL=... python tests/test_jobs.py     # governor, briefs, scheduler — no model
 DATABASE_URL=... python tests/test_agency.py   # ledger, decay, edits, hard lines, races
 DATABASE_URL=... python tests/test_mail.py     # stub Gmail: triage, fencing, approve-only sends
+DATABASE_URL=... python tests/test_reminders.py  # parser table, claim-once, quiet hours, bot paths
 
 # or all of it
 python tests/run.py
@@ -438,6 +441,7 @@ sloane/
     sync.py      one pass over every source, per-source failure
   voice.py       WAV → OGG/Opus voice note, budget; never costs a reply
   agency.py      propose → approve/trust → execute; hard lines first
+  reminders.py   "at 5", "tomorrow 7am", "in 20 min" → a time, by rules
   mail/
     gmail.py     OAuth refresh + five REST calls; no delete, no SDK
     inbox.py     batched triage, drafts in his voice, reply/draft actions
@@ -451,11 +455,13 @@ sql/
   003_school.sql   calendar events + the sync job, idempotent
   004_agency.sql   proposals for the approval flow, idempotent
   005_mail.sql     triaged email + the inbox job, idempotent
+  006_reminders.sql  timed reminders + the every-minute tick, idempotent
 scripts/
   doctor.py      validates every credential
   seed_state.py  tier 1 from a markdown file
   seed_courses.py  the real semester schedule into tier 4
   gmail_auth.py  one-time Gmail consent; writes the token into .env
+  dev_db.sh      local Postgres + pgvector for the tests, idempotent
   eval.py        golden questions through the real model, scored in code
 tests/           run.py plus one file per unit
 ```

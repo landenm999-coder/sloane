@@ -239,7 +239,7 @@ docker compose build && sudo systemctl restart sloane
 docker compose run --rm sloane sh -c 'for f in sql/*.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f "$f" || exit 1; done'
 ```
 
-On Telegram: `/remind <text>` runs the approval flow end to end (tap Approve).
+On Telegram: "remind me at 5 to call Keegan" (typed or as a voice note) or `/remind tomorrow 7am bring the lab` sets a reminder; `/reminders` lists them and `/unremind <n>` cancels one.
 `/trust` shows what she may do without asking. `/brief` gives the morning brief on demand. `/jobs` shows what
 ran and whether it worked. `/sync` pulls Canvas, the calendar and shifts now.
 `/usage` shows model calls in the last day. `/state` shows her durable facts.

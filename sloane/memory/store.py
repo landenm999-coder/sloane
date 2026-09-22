@@ -1049,6 +1049,57 @@ class Store:
             """
         )
 
+    # -- reminders ----------------------------------------------------------------
+
+    async def add_reminder(self, *, text: str, due_at: datetime, source: str = "telegram") -> Row:
+        row = await self._one(
+            "insert into reminders (text, due_at, source) values (%s, %s, %s) returning *",
+            (text, due_at, source),
+        )
+        assert row is not None
+        return row
+
+    async def claim_due_reminders(self, now: datetime, limit: int = 20) -> list[Row]:
+        """Mark due reminders sent and return them, atomically: each is claimed once."""
+        return await self._fetch(
+            """
+            update reminders set sent_at = %s
+             where id in (
+               select id from reminders
+                where due_at <= %s and sent_at is null and cancelled_at is null
+                order by due_at
+                limit %s
+                for update skip locked
+             )
+            returning *
+            """,
+            (now, now, limit),
+        )
+
+    async def unclaim_reminder(self, reminder_id: str) -> None:
+        await self._exec("update reminders set sent_at = null where id = %s", (reminder_id,))
+
+    async def upcoming_reminders(self, limit: int = 20) -> list[Row]:
+        return await self._fetch(
+            """
+            select * from reminders
+             where sent_at is null and cancelled_at is null
+             order by due_at
+             limit %s
+            """,
+            (limit,),
+        )
+
+    async def cancel_reminder(self, reminder_id: str) -> Row | None:
+        return await self._one(
+            """
+            update reminders set cancelled_at = now()
+             where id = %s and sent_at is null and cancelled_at is null
+             returning *
+            """,
+            (reminder_id,),
+        )
+
     # -- email (P4) -------------------------------------------------------------
 
     async def known_emails(self, gmail_ids: Sequence[str]) -> set[str]:

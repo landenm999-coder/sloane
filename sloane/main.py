@@ -42,7 +42,8 @@ def create_app() -> FastAPI:
     # httpx logs every request URL at INFO. Two of ours are credentials: the
     # Telegram API URL embeds the bot token, and the calendar's secret .ics URL
     # *is* the credential. Its warnings and errors still come through.
-    for noisy in ("httpx", "httpcore"):
+    # apscheduler logs every run of the every-minute reminders tick at INFO.
+    for noisy in ("httpx", "httpcore", "apscheduler"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
     store = Store(config)
@@ -105,6 +106,7 @@ def create_app() -> FastAPI:
         ctx = JobContext(
             store=store, agent=agent, governor=Governor(store, config),
             config=config, send=send, inbox=inbox,
+            say=bot.say if bot is not None and config.telegram_chat_id else None,
         )
         scheduler = Scheduler(ctx)
         state["scheduler"] = scheduler

@@ -37,11 +37,12 @@ deploying it.
 | P3 voice | voice note in → voice note out (Groq Orpheus TTS, Piper fallback, ffmpeg → OGG/Opus); text always survives | `providers/tts.py`, `voice.py` |
 | P4 agency | propose → hard lines (on name *and* `really`) → registered only → trusted pairs auto-run (10 clean approvals, 60-day decay, deny/revoke re-gates) → else Approve/Edit/Deny buttons; one edit open at a time | `sloane/agency.py` |
 | P4 Gmail | inbox job 7 AM–7 PM every 3h: one batched triage call, bodies stored untrusted + fenced, up to 3 drafts in his voice; `reply` sends only on Approve; school domain (`dcsdk12.org`) → `draft` only (he sends); auto-send only for DMARC-verified, Reply-To==From, non-list mail to a trusted exact pair | `sloane/mail/` |
+| Reminders | "remind me at 5 to call Keegan", typed or spoken, or `/remind tomorrow 7am …`. The time comes from a rule-based parser (number words included) and never touches a model. Delivered by an every-minute job; held through quiet hours and marked late; claimed once; retried if the send fails. `/reminders`, `/unremind <n>` | `sloane/reminders.py`, `jobs/briefs.py` `reminders`, `sql/006_reminders.sql` |
 | Security hardening | `claude -p` runs `--tools ""` `--strict-mcp-config` with a scrubbed env; bot fails closed with no chat id; httpx URL logging off (token/ICS URL); bind 127.0.0.1 unless `BIND_HOST` | various |
 | Ops | Dockerfile (arm64), compose (loopback port, `claude-auth` + `models` volumes), systemd unit, `doctor.py` (checks every credential), `seed_state.py`, `seed_courses.py`, `gmail_auth.py` (stdlib PKCE consent → writes `.env`), `eval.py` (golden questions, real model) | root, `scripts/` |
 | CI | `test.yml` (py3.12 + pgvector, migrations applied twice), `image.yml` (linux/arm64 build + smoke), Dependabot | `.github/` |
 
-Telegram commands: `/brief /jobs /sync /inbox /remind /trust /revoke /cancel /usage /state /help`.
+Telegram commands: `/brief /jobs /sync /inbox /remind /reminders /unremind /trust /revoke /cancel /usage /state /help`, plus plain "remind me …".
 HTTP (loopback only): `/health /usage /state /facts /jobs POST /sync POST /jobs/{name}/run`.
 
 ## Invariants (a violation is a bug even if tests pass)
@@ -57,18 +58,9 @@ HTTP (loopback only): `/health /usage /state /facts /jobs POST /sync POST /jobs/
 
 ---
 
-## In flight (started, NOT finished or committed yet)
+## In flight
 
-- **Timed reminders** (`/remind 5pm call Keegan`, "remind me tomorrow at 7 to…").
-  - Done but uncommitted: `sloane/reminders.py` (rule-based time parser, number words for voice),
-    `sql/006_reminders.sql` (table + `reminders` job every minute), store methods
-    (`add_reminder`, `claim_due_reminders`, `unclaim_reminder`, `upcoming_reminders`, `cancel_reminder`).
-  - Still to do: job handler in `jobs/briefs.py` HANDLERS (`reminders`: respect quiet hours, claim due, send via a
-    `say` callable on JobContext since Reply can't be built in jobs, unclaim on failure). Telegram: `/remind` parses
-    the time (no approval needed: his own explicit command is the approval), plain "remind me …" messages and voice
-    notes route there, `/reminders` lists, `/unremind <n>` cancels. Set the `apscheduler` logger to WARNING (minute
-    ticks). Add `tests/test_reminders.py` (parser table + store claim-once + quiet-hours deferral) to `tests/run.py`
-    INTEGRATION. Update README/DEPLOY and doctor `EXPECTED_TABLES` (+`reminders`).
+Nothing half-done. (Update this section before stopping if something is.)
 
 ## Backlog (ideas, in priority order)
 

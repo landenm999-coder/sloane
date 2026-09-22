@@ -61,6 +61,10 @@ class JobContext:
     send: Sender | None = None
     # P4. None until Gmail is configured; the inbox job says so and stops.
     inbox: Inbox | None = None
+    # Plain text to Landen's chat (the bot builds the Reply). For messages that
+    # are not an agent turn: a reminder is his own words, not something to ask
+    # a model about.
+    say: Callable[[str], Awaitable[None]] | None = None
 
     def today(self) -> date:
         return datetime.now(ZoneInfo(self.config.timezone)).date()
@@ -208,6 +212,43 @@ async def inbox(ctx: JobContext, now: datetime | None = None) -> JobResult:
     return JobResult("inbox", ran=True, sent=True, reason=summary, reply=reply)
 
 
+# A reminder this late says when it was for, so "call Keegan" at 6:30 AM is
+# not mistaken for something he meant for 6:30 AM.
+LATE_AFTER = timedelta(minutes=15)
+
+
+async def reminders(ctx: JobContext, now: datetime | None = None) -> JobResult:
+    """Deliver due reminders. No model call; quiet hours hold them till morning."""
+    from sloane.reminders import spoken
+
+    if ctx.say is None:
+        return JobResult("reminders", ran=False, reason="no chat to deliver to")
+    speaking = ctx.governor.may_send(now)
+    if not speaking:
+        return JobResult("reminders", ran=False, reason=speaking.reason)
+
+    zone = ZoneInfo(ctx.config.timezone)
+    moment = (now or datetime.now(zone)).astimezone(zone)
+    # UPDATE ... RETURNING has no order; deliver in the order they were due.
+    due = sorted(await ctx.store.claim_due_reminders(moment), key=lambda r: r["due_at"])
+    delivered = 0
+    for row in due:
+        text = f"⏰ {row['text']}"
+        due_at = row["due_at"].astimezone(zone)
+        if moment - due_at > LATE_AFTER:
+            text += f" (this was for {spoken(due_at, moment).removeprefix('at ')})"
+        try:
+            await ctx.say(text)
+            delivered += 1
+        except Exception as exc:  # noqa: BLE001 - unclaim and retry next tick
+            log.warning("reminder %s not delivered, will retry: %s", row["id"], exc)
+            await remember("unclaim reminder", ctx.store.unclaim_reminder(str(row["id"])))
+    return JobResult(
+        "reminders", ran=True, sent=delivered > 0,
+        reason=f"{delivered} delivered" + (f", {len(due) - delivered} retrying" if delivered < len(due) else ""),
+    )
+
+
 HANDLERS: dict[str, Callable[..., Awaitable[JobResult]]] = {
     "morning_brief": morning_brief,
     "pre_shift": pre_shift,
@@ -216,4 +257,5 @@ HANDLERS: dict[str, Callable[..., Awaitable[JobResult]]] = {
     "reflection": reflection,
     "entity_sync": entity_sync,
     "inbox": inbox,
+    "reminders": reminders,
 }
