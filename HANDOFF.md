@@ -40,6 +40,7 @@ deploying it.
 | Reminders | "remind me at 5 to call Keegan", typed or spoken, or `/remind tomorrow 7am …`. The time comes from a rule-based parser (number words included) and never touches a model. Delivered by an every-minute job; held through quiet hours and marked late; claimed once; retried if the send fails. `/reminders`, `/unremind <n>` | `sloane/reminders.py`, `jobs/briefs.py` `reminders`, `sql/006_reminders.sql` |
 | Security hardening | `claude -p` runs `--tools ""` `--strict-mcp-config` with a scrubbed env; bot fails closed with no chat id; httpx URL logging off (token/ICS URL); bind 127.0.0.1 unless `BIND_HOST` | various |
 | Ops | Dockerfile (arm64), compose (loopback port, `claude-auth` + `models` volumes), systemd unit, `doctor.py` (checks every credential), `seed_state.py`, `seed_courses.py`, `gmail_auth.py` (stdlib PKCE consent → writes `.env`), `eval.py` (golden questions, real model) | root, `scripts/` |
+| Agent setup | `CLAUDE.md` (invariants + how to work) and the `.claude/hooks/session-start.sh` web hook (creates `.venv`, starts pgvector Postgres, exports `DATABASE_URL`) | root, `.claude/` |
 | CI | `test.yml` (py3.12 + pgvector, migrations applied twice), `image.yml` (linux/arm64 build + smoke), Dependabot | `.github/` |
 
 Telegram commands: `/brief /jobs /sync /inbox /remind /reminders /unremind /trust /revoke /cancel /usage /state /help`, plus plain "remind me …".
@@ -73,12 +74,10 @@ Nothing half-done. (Update this section before stopping if something is.)
 4. **Capture intake API.** `POST /capture` with a bearer token (`CAPTURE_TOKEN`). Notes and transcripts are stored
    as Landen-authored episodes, with optional commitment extraction. Needs a documented safe way to expose it
    (Tailscale or a Cloudflare tunnel), because the API is loopback-only today.
-5. **Repo `CLAUDE.md` + SessionStart hook,** so future web sessions can set up the venv and a pgvector Postgres
-   and run tests unattended.
-6. Weekly JSON export of state/commitments/trust to the models volume (a cheap backup; Supabase free tier has no PITR).
-7. Infinite Campus (grades), deliberately out of v1. Needs district credentials, and repeated automated logins can
+5. Weekly JSON export of state/commitments/trust to the models volume (a cheap backup; Supabase free tier has no PITR).
+6. Infinite Campus (grades), deliberately out of v1. Needs district credentials, and repeated automated logins can
    lock the account.
-8. P5 phone calls, beyond v1.
+7. P5 phone calls, beyond v1.
 
 ## Only Landen can do (the whole list; see DEPLOY.md)
 
