@@ -2,7 +2,7 @@
 
 **Read this first if you are a new Claude Code session picking up Sloane.**
 This file records what exists, what's verified, what's in flight and what's left.
-It's kept up to date at the end of every work session. Last updated: 2026-09-22.
+It's kept up to date at the end of every work session. Last updated: 2026-09-22 (evening).
 
 - Repo: `github.com/landenm999-coder/sloane`, branch `main` (commit straight to main; CI runs on push).
 - Separate from **Capture** (`landenm999-coder/capture`), a voice-capture PWA that will later feed Sloane
@@ -18,11 +18,25 @@ It's kept up to date at the end of every work session. Last updated: 2026-09-22.
 v1 (build plan phases P0–P4) is **done, reviewed and green in CI**. Sloane is a Python service (FastAPI +
 Telegram long polling) with four-tier memory in Postgres/pgvector, read-only Canvas + calendar sync, generated
 work shifts, five daily briefs, voice replies, an approval/trust-ledger system for actions, and Gmail triage
-with approval-gated replies. Three adversarial review passes were run. The first two found real bugs, all fixed
-with regression tests. The third found nothing high or medium. **She has never run against the real services.**
-This sandbox can't reach Telegram, Groq, Canvas, Google or Supabase. Everything external is tested against
-local stubs, and the real-model eval (via `claude -p`) scores 21/21. The next real milestone is Landen
-deploying it.
+with approval-gated replies. Three adversarial review passes were run on v1. The first two found real bugs, all
+fixed with regression tests. The third found nothing high or medium.
+
+**After v1** (same day), these features were added, each with tests:
+- timed reminders (typed, spoken or captured)
+- `/today` and `/week` with no model involved
+- Canvas change alerts
+- a watchdog that messages him when something breaks
+- the `POST /capture` intake for the Capture app
+- promises
+- a Sunday weekly review
+- nightly JSON backups
+- `CLAUDE.md` and a SessionStart hook
+
+A review pass over those additions was started; check git log for any "review fixes" commits after `9cffd41`.
+
+**She has never run against the real services.** This sandbox can't reach Telegram, Groq, Canvas, Google or
+Supabase. Everything external is tested against local stubs, and the real-model eval (via `claude -p`) scores
+21/21. The next real milestone is Landen deploying it.
 
 ---
 
