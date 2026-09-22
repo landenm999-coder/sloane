@@ -30,7 +30,11 @@ class Settings(BaseSettings):
 
     # --- claude code CLI (draws on the Claude Pro subscription, not credits) --
     claude_cli: str = "claude"
-    claude_cli_timeout: int = 120
+    # A hung provider costs Landen this long before the router even tries the
+    # next one. Two minutes of silence on a Telegram reply reads as broken, and
+    # a fallback chain that slow is barely a fallback. Keep it under a minute;
+    # the batched P4 work that genuinely needs longer can raise it per call.
+    claude_cli_timeout: int = 45
 
     # --- groq ----------------------------------------------------------------
     groq_api_key: str = ""

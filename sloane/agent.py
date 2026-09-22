@@ -128,13 +128,18 @@ class Agent:
 
     async def _recall(self, question: str) -> list[dict]:
         """Tier 3. Never load-bearing: if it fails, the turn proceeds without it."""
+        vector: list[float] | None = None
         try:
             vector = await self._embedder.embed_one(question)
         except EmbedUnavailable as exc:
-            log.warning("recall skipped, no embedder: %s", exc)
-            return []
+            # Not fatal any more: the full-text arm answers on its own.
+            log.warning("recall running lexical-only, no embedder: %s", exc)
         try:
-            return await self._store.search_episodes(vector)
+            # Both arms. The lexical one carries the question's rare tokens --
+            # a course name, a teacher, a person -- which is exactly what the
+            # vector arm blurs. It also means recall still works when the
+            # embedder is unavailable and `vector` is None.
+            return await self._store.search_episodes(vector, text=question)
         except Exception:  # noqa: BLE001 - recall is context, not evidence
             log.exception("recall search failed")
             return []

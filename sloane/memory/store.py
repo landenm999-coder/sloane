@@ -28,6 +28,11 @@ log = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
+# Reciprocal Rank Fusion damping constant. 60 is the value from the paper
+# that introduced RRF; it flattens the influence of the very top ranks so one
+# arm cannot dominate the other.
+RRF_K = 60
+
 Row = dict[str, Any]
 
 
@@ -241,17 +246,25 @@ class Store:
         embedding: Sequence[float] | None = None,
         tokens: int | None = None,
         occurred_at: datetime | None = None,
+        trusted: bool = True,
+        source: str | None = None,
     ) -> str:
         """Record one episode. `occurred_at` defaults to now.
 
         It is settable because ingested content carries its own timestamp: an
         email from Tuesday should decay from Tuesday, not from when we read it.
+
+        `trusted` must be False for anything Landen did not write. The flag
+        lives on the row, not on the turn, so the label survives into every
+        later retrieval -- otherwise an injection read once becomes a standing
+        instruction the first time recall surfaces it again.
         """
         row = await self._one(
             """
             insert into episodes
-              (role, channel, content, summary, embedding, tokens, occurred_at)
-            values (%s, %s, %s, %s, %s::vector, %s, coalesce(%s, now()))
+              (role, channel, content, summary, embedding, tokens, occurred_at,
+               trusted, source)
+            values (%s, %s, %s, %s, %s::vector, %s, coalesce(%s, now()), %s, %s)
             returning id
             """,
             (
@@ -262,6 +275,8 @@ class Store:
                 as_vector(embedding) if embedding is not None else None,
                 tokens,
                 occurred_at,
+                trusted,
+                source,
             ),
         )
         assert row is not None
@@ -269,54 +284,137 @@ class Store:
 
     async def search_episodes(
         self,
-        embedding: Sequence[float],
+        embedding: Sequence[float] | None = None,
         *,
+        text: str = "",
         limit: int | None = None,
         half_life_days: float | None = None,
-        min_score: float = 0.0,
+        include_untrusted: bool = False,
     ) -> list[Row]:
-        """Cosine similarity discounted by age.
+        """Hybrid recall: semantic and lexical arms, fused, then aged.
 
-            score = cosine_similarity * 0.5 ** (age_days / half_life)
+            score = RRF(vector_rank, fulltext_rank) * 0.5 ** (age_days / half_life)
 
-        pgvector's `<=>` is cosine *distance*, so similarity is 1 - distance.
-        The half-life is 14 days by default: a perfect match from four weeks ago
-        scores 0.25 and loses to a decent match from this morning. That is the
-        behaviour we want -- recent context is usually the relevant context.
+        The two arms fail in opposite directions. Embeddings match paraphrase
+        but blur rare proper nouns; full-text nails the exact token but misses
+        a reworded question. Landen's history is dense with names that only
+        ever appear one way -- DECA, Babcock, Jewelry I, Keegan -- so the
+        lexical arm is doing real work here, not padding a benchmark.
+
+        Fusion is Reciprocal Rank Fusion: each arm contributes 1/(k + rank).
+        It needs no tuning and is immune to the two arms' incompatible score
+        scales (cosine distance vs ts_rank_cd), which is why it beats trying to
+        weight the raw scores against each other.
+
+        The recency decay is applied to the fused score, so the documented
+        14-day half-life still means what it meant: a hit twice that old is
+        worth a quarter as much, whichever arm found it.
+
+        Passing no embedding runs the lexical arm alone. That is the degraded
+        path when the ONNX weights are missing, and it is why recall no longer
+        dies with the embedder.
         """
         half_life = half_life_days or self._config.recency_half_life_days
-        return await self._fetch(
+        wanted = limit or self._config.retrieval_limit
+        # Over-fetch per arm so fusion has something to reorder. Cheap at this
+        # table size and the standard recommendation.
+        candidates = max(wanted * 4, 50)
+
+        params: dict[str, Any] = {
+            "half_life": half_life,
+            "limit": wanted,
+            "candidates": candidates,
+            "k": RRF_K,
+            "include_untrusted": include_untrusted,
+        }
+
+        arms = []
+        if embedding is not None:
+            params["q"] = as_vector(embedding)
+            arms.append(
+                """
+                vec as (
+                  select id, row_number() over (order by embedding <=> %(q)s::vector) as rank
+                    from episodes
+                   where embedding is not null
+                     and (%(include_untrusted)s or trusted)
+                   order by embedding <=> %(q)s::vector
+                   limit %(candidates)s
+                )
+                """
+            )
+        if text.strip():
+            params["text"] = text
+            arms.append(
+                """
+                qry as (
+                  -- websearch_to_tsquery ANDs every term, so a natural question
+                  -- ("what did Babcock say") would only match a row containing
+                  -- all of its content words -- which a real one never does, and
+                  -- the arm would silently contribute nothing. Rewriting & to |
+                  -- gives the any-of retrieval this arm exists for, and leaves
+                  -- ts_rank_cd to reward rows matching more and rarer terms.
+                  -- Postgres still does the parsing, so nothing is interpolated.
+                  select replace(
+                           websearch_to_tsquery('english', %(text)s)::text,
+                           '&', '|'
+                         )::tsquery as tq
+                ),
+                fts as (
+                  select e.id,
+                         row_number() over (order by ts_rank_cd(e.tsv, qry.tq) desc) as rank
+                    from episodes e, qry
+                   where qry.tq is not null
+                     and e.tsv @@ qry.tq
+                     and (%(include_untrusted)s or e.trusted)
+                   order by ts_rank_cd(e.tsv, qry.tq) desc
+                   limit %(candidates)s
+                                )
+                """
+            )
+
+        if not arms:
+            return []
+
+        if len(arms) == 2:
+            fused = """
+                fused as (
+                  select coalesce(v.id, f.id) as id,
+                         (coalesce(1.0 / (%(k)s + v.rank), 0)
+                           + coalesce(1.0 / (%(k)s + f.rank), 0))::float8 as rrf
+                    from vec v
+                    full outer join fts f on f.id = v.id
+                )
             """
-            select id,
-                   occurred_at,
-                   role,
-                   channel,
-                   coalesce(summary, content) as text,
-                   1 - (embedding <=> %(q)s::vector) as similarity,
-                   (1 - (embedding <=> %(q)s::vector))
-                     * power(
-                         0.5,
-                         (extract(epoch from (now() - occurred_at)) / 86400.0)
-                           / %(half_life)s
-                       ) as score
-              from episodes
-             where embedding is not null
-               and (1 - (embedding <=> %(q)s::vector))
-                     * power(
-                         0.5,
-                         (extract(epoch from (now() - occurred_at)) / 86400.0)
-                           / %(half_life)s
-                       ) >= %(min_score)s
+        else:
+            only = "vec" if embedding is not None else "fts"
+            fused = f"""
+                fused as (
+                  select id, (1.0 / (%(k)s + rank))::float8 as rrf from {only}
+                )
+            """
+
+        sql = f"""
+            with {",".join(arms)}, {fused}
+            select e.id,
+                   e.occurred_at,
+                   e.role,
+                   e.channel,
+                   e.trusted,
+                   e.source,
+                   coalesce(e.summary, e.content) as text,
+                   fused.rrf,
+                   fused.rrf * power(
+                       0.5,
+                       (extract(epoch from (now() - e.occurred_at)) / 86400.0)
+                         / %(half_life)s
+                   ) as score
+              from fused
+              join episodes e on e.id = fused.id
              order by score desc
              limit %(limit)s
-            """,
-            {
-                "q": as_vector(embedding),
-                "half_life": half_life,
-                "min_score": min_score,
-                "limit": limit or self._config.retrieval_limit,
-            },
-        )
+        """
+        return await self._fetch(sql, params)
 
     async def recent_episodes(self, limit: int = 10) -> list[Row]:
         return await self._fetch(

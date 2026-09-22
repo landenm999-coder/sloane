@@ -120,6 +120,34 @@ async def check_provider(config: Settings, name: str, label: str, *, bulk: bool)
     record(label, PASS, f"{name} answered ({completion.usage.model or 'model unreported'})")
 
 
+async def check_fallbacks(config: Settings) -> None:
+    """Check the providers the router would degrade *to*, not just the two set.
+
+    A fallback chain is only as good as its key wiring, and the usual way that
+    is discovered is a scheduled job failing at 6:35 AM with every provider in
+    the lane broken at once. Better to know now. These are warnings, not
+    failures: a configured provider that works is enough to run.
+    """
+    configured = {config.main_provider, config.bulk_provider}
+    spares = [n for n in MAIN_ORDER if n not in configured]
+    if not spares:
+        record("fallbacks", PASS, "every provider is already a configured lane")
+        return
+
+    for name in spares:
+        provider = build(name, config, bulk=False)
+        try:
+            await provider.complete("Reply with the single word: ok", "ok", max_tokens=16)
+        except ProviderError as exc:
+            record(
+                f"fallback: {name}",
+                WARN,
+                f"unavailable, so the router cannot degrade to it: {exc.message}",
+            )
+            continue
+        record(f"fallback: {name}", PASS, "ready to take over")
+
+
 async def check_telegram(config: Settings) -> None:
     if not config.telegram_bot_token:
         record("telegram", FAIL, "TELEGRAM_BOT_TOKEN is unset. Create a bot with @BotFather.")
@@ -240,6 +268,7 @@ async def main(warm: bool = False) -> int:
     check_embedder(config, warm=warm)
     await check_provider(config, config.main_provider, "main provider", bulk=False)
     await check_provider(config, config.bulk_provider, "bulk provider", bulk=True)
+    await check_fallbacks(config)
     await check_telegram(config)
 
     width = max(len(name) for name, _, _ in results)

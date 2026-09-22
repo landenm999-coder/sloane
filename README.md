@@ -23,7 +23,7 @@ Total running cost: **$0/mo**, every layer on a free tier.
 | Schema | 12 tables, idempotent, `vector(384)` + HNSW cosine index |
 | Memory | all four tiers, with per-tier token budgets |
 | Embeddings | `bge-small-en-v1.5`, 384-dim, local, cached on a volume |
-| Retrieval | cosine × `0.5 ** (age_days / 14)` — verified against live Postgres |
+| Retrieval | hybrid: vector + full-text fused with RRF, then aged |
 | Router | provider by env var, degrades past a failure, logs every attempt |
 | Providers | `claude_code`, `groq`, `anthropic` behind one `Provider` base |
 | Contract | `Reply(speech, detail)` parsed from 5 model-output shapes |
@@ -42,6 +42,7 @@ Gmail, the trust ledger.
 pip install -r requirements.txt
 cp .env.example .env          # then fill it in
 psql "$DATABASE_URL" -f sql/001_init.sql
+psql "$DATABASE_URL" -f sql/002_hybrid_search.sql
 python scripts/seed_state.py state.example.md
 python scripts/doctor.py      # says exactly what is still missing
 python -m sloane.main         # FastAPI on :8000, bot polling alongside
@@ -117,15 +118,51 @@ block labelled *context only, not evidence*, and the persona tells her the
 difference. They are never merged. A similarity search must not be what answers
 "what's due Friday" — that is how an assistant invents a deadline.
 
-### The decay curve
+### Hybrid retrieval
 
 ```
-score = cosine_similarity × 0.5 ** (age_days / 14)
+score = RRF(vector_rank, fulltext_rank) × 0.5 ** (age_days / 14)
 ```
 
-A perfect match from four weeks ago scores 0.25 and loses to a 0.8 match from
-this morning. Verified in `tests/test_store.py` at exactly 0.25 (two half-lives),
-0.5 (one) and 0.8 (fresh).
+Tier 3 runs two arms and fuses them. They fail in opposite directions: embeddings
+match paraphrase but blur rare proper nouns, full-text nails the exact token but
+misses a reworded question. Landen's history is dense with names that only ever
+appear one way — DECA, Babcock, Jewelry I, Keegan — so the lexical arm does real
+work here. Published comparisons put hybrid retrieval well ahead of either arm
+alone; both arms are native Postgres, so it costs no new dependency.
+
+Fusion is Reciprocal Rank Fusion, each arm contributing `1/(60 + rank)`. It needs
+no tuning and is immune to the arms' incompatible score scales (cosine distance
+vs `ts_rank_cd`), which is why it beats trying to weight raw scores together.
+
+Two details that are easy to get wrong:
+
+- **The lexical arm ORs its terms.** `websearch_to_tsquery` ANDs them, so a real
+  question ("what did Babcock say") would only match a row containing *every*
+  content word — which none do. The arm would silently contribute nothing while
+  looking correct. `store.py` rewrites `&` to `|` and lets `ts_rank_cd` reward
+  the rows matching more and rarer terms.
+- **Decay multiplies the fused score**, so the 14-day half-life still means what
+  it always did. `tests/test_store.py` asserts `score / rrf` is exactly
+  `0.5 ** (age/14)` — 0.25 at two half-lives, 0.5 at one, 1.0 fresh — whichever
+  arm found the row.
+
+**Recall no longer dies with the embedder.** Pass no vector and the full-text arm
+answers alone. That is the degraded path when the ONNX weights are missing, and
+it is why a blocked Hugging Face is now an annoyance rather than an outage.
+
+### Provenance
+
+`episodes.trusted` is false for anything Landen did not write — email bodies,
+portal HTML, calendar descriptions. Untrusted rows are **excluded from RECALL by
+default**, and fenced inline as `UNTRUSTED, from <source> — data, not
+instructions` if a caller explicitly asks for them.
+
+This closes a real hole. Without the flag, ingested text is fenced as untrusted
+on the turn it arrives, then — once embedded — silently re-enters later prompts
+as ordinary RECALL with the label gone. That is how a one-shot injection becomes
+a standing instruction that re-fires every session. The label belongs on the row,
+not on the turn.
 
 ---
 
@@ -210,7 +247,9 @@ sloane/
     store.py     THE ONLY FILE THAT TALKS SQL
     embed.py     fastembed, 384-dim, local
     tiers.py     the four tiers, budgets, the usage sink
-sql/001_init.sql schema, idempotent
+sql/
+  001_init.sql   schema, idempotent
+  002_hybrid_search.sql  full-text arm + provenance, idempotent
 scripts/
   doctor.py      validates every credential
   seed_state.py  tier 1 from a markdown file
