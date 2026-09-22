@@ -24,7 +24,7 @@ from sloane.router import MAIN_ORDER, build
 
 EXPECTED_TABLES = {
     "assignments", "commitments", "courses", "episodes", "jobs", "messages",
-    "people", "shifts", "state", "trust", "usage_log", "working_set",
+    "people", "proposals", "shifts", "state", "trust", "usage_log", "working_set", "events",
 }
 
 PASS, FAIL, SKIP, WARN = "PASS", "FAIL", "SKIP", "WARN"

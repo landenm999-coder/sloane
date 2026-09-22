@@ -128,6 +128,11 @@ class Settings(BaseSettings):
     daily_job_budget: int = 40
     daily_bulk_budget: int = 800  # Groq free tier is 1K/day; leave headroom
 
+    # P4. Ten clean approvals in a row unlock one exact (action, target) pair;
+    # trust lapses after this many days unused; any reversal re-gates it.
+    trust_unlock_streak: int = 10
+    trust_decay_days: int = 60
+
     log_level: str = "INFO"
 
     @property

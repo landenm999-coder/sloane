@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI
 
+from sloane.agency import Agency, reminder_action
 from sloane.agent import HARD_LINES, Agent
 from sloane.jobs.briefs import JobContext
 from sloane.jobs.governor import Governor
@@ -64,6 +65,12 @@ def create_app() -> FastAPI:
             log.info("telegram poller started")
         else:
             log.warning("TELEGRAM_BOT_TOKEN is unset; running without the bot")
+
+        # Actions need someone to approve them. No owner chat, no agency.
+        if bot is not None and config.telegram_chat_id:
+            agency = Agency(store, config, ask=bot.ask, tell=bot.say)
+            agency.register(reminder_action(bot.say))
+            bot.agency = agency
 
         # Briefs go to Landen's chat and nowhere else. Without a chat id there is
         # nobody to send to, so the jobs still run and record, but deliver

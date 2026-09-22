@@ -22,6 +22,7 @@ from sloane.contract import Reply
 from sloane.memory.store import Store, remember
 from sloane.providers.base import ProviderError
 from sloane.providers.groq import GroqProvider
+from sloane.agency import Agency, callback_data, parse_callback
 from sloane.voice import Voice
 
 log = logging.getLogger(__name__)
@@ -41,11 +42,13 @@ class Bot:
         config: Settings | None = None,
         *,
         voice: "Voice | None" = None,
+        agency: "Agency | None" = None,
     ) -> None:
         self._config = config or default_settings()
         self._store = store
         self._agent = agent
         self._voice = voice
+        self.agency = agency
         self._stt = GroqProvider(self._config)
         self._token = self._config.telegram_bot_token
         self._owner = self._config.telegram_chat_id
@@ -79,6 +82,76 @@ class Bot:
                 chat_id=chat_id, direction="out", kind="text", body=text[:4000]
             ),
         )
+
+    async def say(self, text: str) -> None:
+        """A plain line to Landen's chat. Nothing if there is no owner."""
+        if self._owner:
+            await self.send(self._owner, Reply(speech=text, detail=""))
+
+    async def ask(self, proposal: dict) -> int | None:
+        """Show a proposal with Approve / Edit / Deny. Returns the message id."""
+        if not self._owner:
+            return None
+        pid = str(proposal["id"])
+        keyboard = {"inline_keyboard": [[
+            {"text": "Approve", "callback_data": callback_data(pid, "a")},
+            {"text": "Edit", "callback_data": callback_data(pid, "e")},
+            {"text": "Deny", "callback_data": callback_data(pid, "d")},
+        ]]}
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                sent = await self._call(
+                    client, "sendMessage", chat_id=self._owner,
+                    text=f"OK to do this?\n\n{proposal['preview']}"[:4096],
+                    reply_markup=keyboard,
+                )
+        except (httpx.HTTPError, RuntimeError) as exc:
+            log.warning("could not ask for approval: %s", exc)
+            return None
+        return sent.get("message_id")
+
+    async def _handle_callback(self, update: dict) -> None:
+        """A button press. Only Landen's chat decides anything.
+
+        With no TELEGRAM_CHAT_ID there is no owner, and nobody may approve -- a
+        stricter rule than for questions, because a question costs a reply and
+        an approval can cost an email.
+        """
+        cq = update["callback_query"]
+        chat_id = ((cq.get("message") or {}).get("chat") or {}).get("id")
+        from_id = (cq.get("from") or {}).get("id")
+        if not self._owner or chat_id != self._owner or from_id != self._owner:
+            log.warning("ignoring a button press from chat %s / user %s", chat_id, from_id)
+            return
+        fresh = await self._store.log_message(
+            update_id=update.get("update_id"), chat_id=chat_id, direction="in",
+            kind="callback", body=(cq.get("data") or "")[:64],
+        )
+        if not fresh:
+            return
+
+        parsed = parse_callback(cq.get("data") or "")
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # Stop the button's spinner whatever happens next.
+            try:
+                await self._call(client, "answerCallbackQuery", callback_query_id=cq.get("id"))
+            except (httpx.HTTPError, RuntimeError) as exc:
+                log.warning("answerCallbackQuery failed: %s", exc)
+            if parsed is None or self.agency is None:
+                return
+            outcome = await self.agency.decide(*parsed)
+            # Take the buttons off the original message so it cannot be
+            # pressed again; the atomic transition already makes that harmless.
+            message_id = (cq.get("message") or {}).get("message_id")
+            if message_id and outcome.status != "stale":
+                try:
+                    await self._call(
+                        client, "editMessageReplyMarkup", chat_id=chat_id,
+                        message_id=message_id, reply_markup={"inline_keyboard": []},
+                    )
+                except (httpx.HTTPError, RuntimeError):
+                    pass
+        await self.send(chat_id, Reply(speech=outcome.message, detail=""))
 
     async def send_voice(self, chat_id: int, ogg: bytes) -> None:
         """Send an OGG/Opus clip as a Telegram voice note."""
@@ -178,6 +251,35 @@ class Bot:
 
         return await self._agent.answer(QUESTIONS["morning_brief"], channel="command:brief")
 
+    async def _agency_command(self, name: str, command: str) -> Reply:
+        if self.agency is None:
+            return Reply(speech="Actions are off: set TELEGRAM_CHAT_ID so I know who approves.", detail="")
+        rest = command.split(maxsplit=1)[1].strip() if " " in command.strip() else ""
+        if name == "remind":
+            if not rest:
+                return Reply(speech="Tell me what to remind you about: /remind take the lab to school.", detail="")
+            outcome = await self.agency.propose("remind", "self", {"text": rest})
+            return Reply(speech=outcome.message, detail="")
+        if name == "cancel":
+            outcome = await self.agency.cancel_edit()
+            return Reply(speech=outcome.message if outcome else "Nothing is being edited.", detail="")
+        if name == "revoke":
+            parts = rest.split()
+            if len(parts) != 2:
+                return Reply(speech="Use /revoke <action> <target>, for example /revoke remind self.", detail="")
+            outcome = await self.agency.revoke(parts[0], parts[1])
+            return Reply(speech=outcome.message, detail="")
+        rows = await self._store.trust_ledger()
+        lines = ["| action | target | state | streak | reversals |", "|---|---|---|---|---|"]
+        for r in rows:
+            state = "HARD LINE" if r["hard_line"] else r["state"]
+            lines.append(f"| {r['action']} | {r['target']} | {state} | {r['clean_streak']} | {r['reversals']} |")
+        trusted = sum(1 for r in rows if r["state"] == "trusted" and not r["hard_line"])
+        return Reply(
+            speech=f"{trusted} action{'s' if trusted != 1 else ''} trusted to run without asking.",
+            detail="\n".join(lines),
+        )
+
     async def _jobs(self) -> Reply:
         rows = await self._store.jobs()
         lines = ["| job | last run | status |", "|---|---|---|"]
@@ -204,6 +306,8 @@ class Bot:
             return await self._sync()
         if name == "brief":
             return await self._brief()
+        if name in {"remind", "trust", "revoke", "cancel"}:
+            return await self._agency_command(name, command)
         if name == "jobs":
             return await self._jobs()
         if name in {"start", "help"}:
@@ -214,7 +318,10 @@ class Bot:
                     "`/state` — the durable facts I hold\n"
                     "`/sync` — pull Canvas, the calendar and shifts now\n"
                     "`/brief` — the morning brief, right now\n"
-                    "`/jobs` — what ran, and whether it worked"
+                    "`/jobs` — what ran, and whether it worked\n"
+                    "`/remind <text>` — a reminder, through the approval flow\n"
+                    "`/trust` — what I may do without asking\n"
+                    "`/revoke <action> <target>` — make me ask again"
                 ),
             )
         return None
@@ -222,6 +329,9 @@ class Bot:
     # -- the loop --------------------------------------------------------------
 
     async def _handle(self, update: dict) -> None:
+        if "callback_query" in update:
+            await self._handle_callback(update)
+            return
         update_id = update.get("update_id")
         message = update.get("message") or update.get("edited_message") or {}
         chat_id = (message.get("chat") or {}).get("id")
@@ -277,6 +387,14 @@ class Bot:
         if not body:
             return
 
+        # While a proposal is being edited, his next plain message is the
+        # replacement, not a question. /cancel keeps the original.
+        if self.agency is not None and body and not body.startswith("/"):
+            revised = await self.agency.submit_edit(body)
+            if revised is not None:
+                await self.send(chat_id, Reply(speech=revised.message, detail=""))
+                return
+
         if body.startswith("/"):
             reply = await self._handle_command(body)
             if reply is not None:
@@ -304,7 +422,7 @@ class Bot:
                         "getUpdates",
                         offset=offset,
                         timeout=self._config.telegram_poll_timeout,
-                        allowed_updates=["message", "edited_message"],
+                        allowed_updates=["message", "edited_message", "callback_query"],
                     )
                     backoff = 1.0
                 except (httpx.HTTPError, RuntimeError) as exc:

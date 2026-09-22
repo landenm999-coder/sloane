@@ -3,8 +3,9 @@
 Always-on personal assistant for Landen. Reached by Telegram text and voice
 notes. She runs the day: what's due, what shift, what slipped, what's next.
 
-**P0 (the spine), P1 (memory + school), P2 (rhythm) and P3 (voice) are built.**
-Agency (P4) is in progress; see [ROADMAP.md](ROADMAP.md).
+**P0 (the spine), P1 (memory + school), P2 (rhythm), P3 (voice) and the P4
+trust machinery are built.** Gmail (the rest of P4) is next; see
+[ROADMAP.md](ROADMAP.md).
 
 Total running cost: **$0/mo**, every layer on a free tier.
 
@@ -19,7 +20,7 @@ Total running cost: **$0/mo**, every layer on a free tier.
 
 | | |
 |---|---|
-| Schema | 13 tables, idempotent, `vector(384)` + HNSW cosine index |
+| Schema | 14 tables, idempotent, `vector(384)` + HNSW cosine index |
 | Memory | all four tiers, with per-tier token budgets |
 | Embeddings | `bge-small-en-v1.5`, 384-dim, local, cached on a volume |
 | Retrieval | hybrid: vector + full-text fused with RRF, then aged |
@@ -27,16 +28,46 @@ Total running cost: **$0/mo**, every layer on a free tier.
 | Providers | `claude_code`, `groq`, `anthropic` behind one `Provider` base |
 | Contract | `Reply(speech, detail)` parsed from 5 model-output shapes |
 | Hard lines | 6 pairs, enforced in code before execution |
-| Interface | Telegram long polling: text, voice notes, `/usage`, `/state`, `/sync`, `/brief`, `/jobs` |
+| Interface | Telegram long polling: text, voice, buttons; `/brief` `/jobs` `/sync` `/remind` `/trust` `/revoke` `/usage` `/state` |
 | School | Canvas assignments + secret `.ics` calendar, both read-only |
 | Shifts | generated from the fixed 3–7 PM Mon–Fri rule, DST-correct |
 | Sync | `/sync` on Telegram, `POST /sync` over HTTP, `entity_sync` job every 4h |
 | Rhythm | five daily briefs on a scheduler, quiet hours, a budget that defers |
 | Conflicts | computed in code and handed to her as findings, every turn |
 | Voice | a voice note in gets a voice note out; text is always the fallback |
+| Agency | every action proposed, approved with buttons, or run under earned trust |
 | HTTP | `/health`, `/usage`, `/state`, `/facts`, `/jobs`, `POST /sync`, `POST /jobs/{name}/run` |
 
-Not built: Infinite Campus (deferred — see below), Gmail, the trust ledger.
+Not built: Infinite Campus (deferred — see below), Gmail.
+
+### Agency (P4)
+
+Anything she *does* goes through `sloane/agency.py`, in this order:
+
+1. **Hard lines first, in code.** Submitting schoolwork, placing a trade, moving
+   money, deleting anything, contacting school staff, publishing — refused and
+   recorded as refused before a proposal exists. No button can approve one and
+   no streak can unlock one; the ledger's SQL excludes those rows as well.
+2. **Registered actions only.** There is no "do what the model said" path.
+3. **Trusted pairs run**, and she tells you after the fact.
+4. **Everything else asks** — the preview with **Approve / Edit / Deny**.
+
+| Your decision | Ledger |
+|---|---|
+| Approve | streak +1; the **10th in a row** unlocks that exact pair for 60 days |
+| Edit | streak resets; approving the edited version doesn't count as clean |
+| Deny, or `/revoke` | straight back to gated |
+| 60 days unused | lapses back to gated; each use restarts the window |
+
+Pairs are exact: trusting "note → Keegan" earns nothing for "note → anyone".
+Only your chat, and only your own tap, can decide — with no `TELEGRAM_CHAT_ID`
+set, nobody can. Decisions are one atomic SQL transition, so a double-tap or two
+racing callbacks execute once. Button payloads are validated like any other
+input.
+
+The only built-in action today is `/remind <text>` — a reminder to yourself —
+so the whole flow can run end to end before anything with consequences is wired
+to it. `/trust` shows the ledger.
 
 ### Voice (P3)
 
@@ -145,6 +176,7 @@ cp .env.example .env          # then fill it in
 psql "$DATABASE_URL" -f sql/001_init.sql
 psql "$DATABASE_URL" -f sql/002_hybrid_search.sql
 psql "$DATABASE_URL" -f sql/003_school.sql
+psql "$DATABASE_URL" -f sql/004_agency.sql
 python scripts/seed_state.py state.example.md
 python scripts/seed_courses.py   # the real semester schedule
 python scripts/doctor.py      # says exactly what is still missing
@@ -310,6 +342,7 @@ python tests/test_voice.py      # real ffmpeg transcode; text always survives
 DATABASE_URL=... python tests/test_store.py
 DATABASE_URL=... python tests/test_school.py   # runs a stub Canvas locally
 DATABASE_URL=... python tests/test_jobs.py     # governor, briefs, scheduler — no model
+DATABASE_URL=... python tests/test_agency.py   # ledger, decay, edits, hard lines, races
 
 # or all of it
 python tests/run.py
@@ -370,6 +403,7 @@ sloane/
     matching.py  conservative course-name matching, refuses ties
     sync.py      one pass over every source, per-source failure
   voice.py       WAV → OGG/Opus voice note, budget; never costs a reply
+  agency.py      propose → approve/trust → execute; hard lines first
   memory/
     store.py     THE ONLY FILE THAT TALKS SQL
     embed.py     fastembed, 384-dim, local
@@ -378,6 +412,7 @@ sql/
   001_init.sql   schema, idempotent
   002_hybrid_search.sql  full-text arm + provenance, idempotent
   003_school.sql   calendar events + the sync job, idempotent
+  004_agency.sql   proposals for the approval flow, idempotent
 scripts/
   doctor.py      validates every credential
   seed_state.py  tier 1 from a markdown file

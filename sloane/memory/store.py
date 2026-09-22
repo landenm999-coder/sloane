@@ -20,6 +20,7 @@ from datetime import date, datetime
 from typing import Any, TypeVar
 
 from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 from sloane.config import Settings, settings as default_settings
@@ -822,6 +823,197 @@ class Store:
              where action = %s and target = %s
             """,
             (action, target),
+        )
+
+    async def trust_ledger(self) -> list[Row]:
+        return await self._fetch(
+            """
+            select action, target, state, clean_streak, reversals, hard_line,
+                   unlocked_at, decays_at
+              from trust
+             order by hard_line desc, state desc, action, target
+            """
+        )
+
+    async def is_trusted(self, action: str, target: str, now: datetime) -> bool:
+        """Trusted means unlocked, not yet decayed, and never a hard line.
+
+        The hard-line clause is belt and braces: ensure_allowed() has already
+        refused those pairs in code before this is ever asked.
+        """
+        row = await self._one(
+            """
+            select 1 as ok from trust
+             where action = %s and target = %s
+               and state = 'trusted' and not hard_line
+               and decays_at > %s
+            """,
+            (action, target, now),
+        )
+        return row is not None
+
+    async def record_trust(
+        self,
+        action: str,
+        target: str,
+        outcome: str,
+        *,
+        now: datetime,
+        unlock_after: int,
+        decay_days: int,
+    ) -> Row | None:
+        """Move the ledger for one exact pair. Hard-line rows are never touched.
+
+        outcome is one of:
+          clean     a straight approval -- the streak grows, and at
+                    `unlock_after` the pair becomes trusted for `decay_days`
+          edited    he had to change it -- the streak resets, still gated
+          reversal  a deny or a revoke -- straight back to gated
+          used      a trusted pair ran again -- the decay window restarts
+          expired   the decay window lapsed unused -- gated, streak reset
+        """
+        if outcome not in {"clean", "edited", "reversal", "used", "expired"}:
+            raise ValueError(f"unknown trust outcome {outcome!r}")
+
+        # Make sure the pair has a row. Exact pairs only: "reply to Keegan"
+        # earns nothing for "reply to anyone".
+        await self._exec(
+            """
+            insert into trust (action, target) values (%s, %s)
+            on conflict (action, target) do nothing
+            """,
+            (action, target),
+        )
+        return await self._one(
+            """
+            update trust t set
+              clean_streak = case %(o)s
+                when 'clean' then t.clean_streak + 1
+                when 'used' then t.clean_streak
+                else 0 end,
+              reversals = t.reversals + (case when %(o)s = 'reversal' then 1 else 0 end),
+              state = case
+                when %(o)s in ('edited', 'reversal', 'expired') then 'gated'
+                when %(o)s = 'clean' and t.clean_streak + 1 >= %(n)s then 'trusted'
+                else t.state end,
+              unlocked_at = case
+                when %(o)s = 'clean' and t.state = 'gated'
+                     and t.clean_streak + 1 >= %(n)s then %(now)s
+                when %(o)s in ('edited', 'reversal', 'expired') then null
+                else t.unlocked_at end,
+              decays_at = case
+                when %(o)s in ('edited', 'reversal', 'expired') then null
+                when %(o)s = 'used' and t.state = 'trusted'
+                     then %(now)s + make_interval(days => %(d)s)
+                when %(o)s = 'clean' and t.clean_streak + 1 >= %(n)s
+                     then %(now)s + make_interval(days => %(d)s)
+                else t.decays_at end,
+              last_change_at = %(now)s
+             where t.action = %(a)s and t.target = %(t)s and not t.hard_line
+             returning action, target, state, clean_streak, reversals, decays_at
+            """,
+            {"o": outcome, "n": unlock_after, "d": decay_days, "now": now,
+             "a": action, "t": target},
+        )
+
+    async def lapsed_trust(self, now: datetime) -> list[Row]:
+        return await self._fetch(
+            """
+            select action, target from trust
+             where state = 'trusted' and not hard_line
+               and (decays_at is null or decays_at <= %s)
+            """,
+            (now,),
+        )
+
+    # -- proposals --------------------------------------------------------------
+
+    async def create_proposal(
+        self,
+        *,
+        action: str,
+        target: str,
+        preview: str,
+        payload: dict,
+        status: str = "pending",
+        auto: bool = False,
+        result: str | None = None,
+    ) -> Row:
+        row = await self._one(
+            """
+            insert into proposals (action, target, preview, payload, status, auto, result)
+            values (%s, %s, %s, %s, %s, %s, %s)
+            returning *
+            """,
+            (action, target, preview, Jsonb(payload), status, auto, result),
+        )
+        assert row is not None
+        return row
+
+    async def get_proposal(self, proposal_id: str) -> Row | None:
+        return await self._one("select * from proposals where id = %s", (proposal_id,))
+
+    async def set_proposal_message(self, proposal_id: str, message_id: int) -> None:
+        await self._exec(
+            "update proposals set message_id = %s where id = %s", (message_id, proposal_id)
+        )
+
+    async def transition_proposal(
+        self, proposal_id: str, *, from_status: str, to_status: str
+    ) -> Row | None:
+        """Atomic: moves only if the row is still in `from_status`.
+
+        This is what makes a double-tapped button, or two racing callbacks,
+        execute once. The loser gets None.
+        """
+        return await self._one(
+            """
+            update proposals
+               set status = %s,
+                   decided_at = coalesce(decided_at, now()),
+                   edited = edited or %s = 'editing'
+             where id = %s and status = %s
+             returning *
+            """,
+            (to_status, to_status, proposal_id, from_status),
+        )
+
+    async def revise_proposal(self, proposal_id: str, *, preview: str, payload: dict) -> Row | None:
+        """Replace an editing proposal's content and put it back up for approval."""
+        return await self._one(
+            """
+            update proposals
+               set preview = %s, payload = %s, status = 'pending', decided_at = null
+             where id = %s and status = 'editing'
+             returning *
+            """,
+            (preview, Jsonb(payload), proposal_id),
+        )
+
+    async def finish_proposal(self, proposal_id: str, *, ok: bool, result: str) -> None:
+        await self._exec(
+            """
+            update proposals
+               set status = %s, result = %s, executed_at = now()
+             where id = %s
+            """,
+            ("executed" if ok else "failed", result[:2000], proposal_id),
+        )
+
+    async def editing_proposal(self) -> Row | None:
+        return await self._one(
+            """
+            select * from proposals where status = 'editing'
+             order by decided_at desc nulls last limit 1
+            """
+        )
+
+    async def open_proposals(self) -> list[Row]:
+        return await self._fetch(
+            """
+            select * from proposals where status in ('pending', 'editing')
+             order by created_at
+            """
         )
 
     # -- ops ------------------------------------------------------------------

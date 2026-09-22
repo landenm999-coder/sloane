@@ -16,7 +16,7 @@ consecutive passes find nothing actionable.
 ## In progress
 
 - [x] **P3 — voice out.** Telegram voice replies reading `speech` only; text always survives a TTS failure.
-- [ ] **P4 — agency machinery.** Trust ledger (10 clean approvals unlock an exact pair, 60-day decay, any reversal re-gates), Approve / Edit / Deny buttons, hard lines unlockable never.
+- [x] **P4 — agency machinery.** Trust ledger (10 clean approvals unlock an exact pair, 60-day decay, any reversal re-gates), Approve / Edit / Deny buttons, hard lines unlockable never.
 - [ ] Every confirmed finding from the correctness and security reviews fixed, each with a regression test.
 
 ## Remaining

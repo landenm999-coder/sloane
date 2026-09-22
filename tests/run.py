@@ -21,7 +21,7 @@ UNIT = [
     "test_agent.py",
     "test_voice.py",
 ]
-INTEGRATION = ["test_store.py", "test_school.py", "test_jobs.py"]
+INTEGRATION = ["test_store.py", "test_school.py", "test_jobs.py", "test_agency.py"]
 
 
 def run(name: str) -> bool:

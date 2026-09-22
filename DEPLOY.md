@@ -95,6 +95,7 @@ The image carries `psql`, so nothing extra to install:
 docker compose run --rm sloane sh -c 'psql "$DATABASE_URL" -f sql/001_init.sql'
 docker compose run --rm sloane sh -c 'psql "$DATABASE_URL" -f sql/002_hybrid_search.sql'
 docker compose run --rm sloane sh -c 'psql "$DATABASE_URL" -f sql/003_school.sql'
+docker compose run --rm sloane sh -c 'psql "$DATABASE_URL" -f sql/004_agency.sql'
 ```
 
 > The **single quotes matter**. Double quotes would expand `$DATABASE_URL` in
@@ -102,7 +103,7 @@ docker compose run --rm sloane sh -c 'psql "$DATABASE_URL" -f sql/003_school.sql
 > container, not exported to your session — and psql would get an empty
 > connection string.
 
-All three are idempotent — re-running them is safe and is how you upgrade later.
+All four are idempotent — re-running them is safe and is how you upgrade later.
 
 > If `001` fails on `create extension vector`, enable it first: Supabase →
 > **Database → Extensions** → search `vector` → toggle on.
@@ -197,7 +198,8 @@ docker compose build && sudo systemctl restart sloane
 docker compose run --rm sloane sh -c 'psql "$DATABASE_URL" -f sql/00N_whatever.sql'
 ```
 
-On Telegram: `/brief` gives the morning brief on demand. `/jobs` shows what
+On Telegram: `/remind <text>` runs the approval flow end to end (tap Approve).
+`/trust` shows what she may do without asking. `/brief` gives the morning brief on demand. `/jobs` shows what
 ran and whether it worked. `/sync` pulls Canvas, the calendar and shifts now.
 `/usage` shows model calls in the last day. `/state` shows her durable facts.
 
