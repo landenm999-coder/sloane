@@ -48,9 +48,11 @@ if [ ! -f .env ]; then
   cp .env.example .env
   chmod 600 .env
   set_env() {  # set_env KEY VALUE: replace the KEY= line, never echoing VALUE
-    python3 - "$1" "$2" <<'PY'
-import sys, pathlib
-key, value = sys.argv[1], sys.argv[2]
+    # The value travels in the environment, not argv: argv is world-readable
+    # in `ps`, /proc/<pid>/environ is readable only by this user.
+    SLOANE_VALUE="$2" python3 - "$1" <<'PY'
+import os, sys, pathlib
+key, value = sys.argv[1], os.environ["SLOANE_VALUE"]
 p = pathlib.Path(".env")
 lines = p.read_text().splitlines()
 out, done = [], False
@@ -82,6 +84,7 @@ say "Building the image (first time: a few minutes)"
 compose build -q
 
 say "Applying migrations"
+# shellcheck disable=SC2016  # $DATABASE_URL must expand inside the container, not here
 compose run --rm -T sloane sh -c \
   'for f in sql/*.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f "$f" || exit 1; done'
 
@@ -96,6 +99,7 @@ if compose run --rm -T sloane claude -p "reply with ok" >/dev/null 2>&1; then
   say "Claude CLI is already logged in"
 else
   say "Log the Claude CLI in (once). Follow the prompts, then type /exit"
+  # shellcheck disable=SC2094  # an interactive login reads and writes the terminal
   compose run --rm sloane claude <"$TTY" >"$TTY" 2>&1 || true
 fi
 

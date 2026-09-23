@@ -49,6 +49,9 @@ jobs:
       - name: Install
         run: pip install -r requirements.txt
 
+      - name: Shell scripts pass shellcheck
+        run: shellcheck scripts/*.sh .claude/hooks/*.sh
+
       - name: Apply migrations twice (they must be idempotent)
         run: |
           sudo apt-get install -y --no-install-recommends postgresql-client >/dev/null
