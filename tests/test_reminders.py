@@ -77,6 +77,16 @@ dst_eve = datetime(2026, 10, 31, 22, 0, tzinfo=DEN)
 check("DST: tomorrow 7am stays 7 AM local",
       parse("tomorrow 7am run", dst_eve).due.strftime("%H:%M %Z"), "07:00 MST")
 
+from sloane.reminders import parse_snooze, snooze_data, snoozed_until
+
+RID = "0f8e3d0e-1c2b-4a5b-9c8d-7e6f5a4b3c2d"
+check("snooze data round-trips", parse_snooze(snooze_data(RID, "60")), (RID, "60"))
+check("forged snooze data is nothing", [parse_snooze(x) for x in
+      ("r:not-a-uuid:10", f"r:{RID}:9999", f"p:{RID}:a", "", f"r:{RID}:10:extra")], [None] * 5)
+check("snooze 10", snoozed_until("10", NOW).strftime("%H:%M"), "10:10")
+check("snooze tomorrow is 7 AM", snoozed_until("tom", NOW).strftime("%a %H:%M"), "Wed 07:00")
+check("done is not a snooze", snoozed_until("ok", NOW), None)
+
 check("spoken today", spoken(NOW.replace(hour=17), NOW), "at 5:00 PM")
 check("spoken tomorrow", spoken(NOW + timedelta(days=1), NOW), "tomorrow at 10:00 AM")
 check("spoken this week", spoken(NOW + timedelta(days=3), NOW), "Friday at 10:00 AM")
@@ -174,6 +184,37 @@ async def integration() -> None:
         r = await message("/unremind 1")
         check("/unremind cancels by number", r.speech, "Cancelled: call Keegan.")
         check("and it is gone", [x["text"] for x in await store.upcoming_reminders()], ["bring the lab"])
+        # -- snooze buttons ---------------------------------------------------------
+        calls = []
+
+        async def fake_call(client, method, **kw):
+            calls.append((method, kw))
+            return {"message_id": 7}
+
+        bot._call = fake_call
+        row = await store.add_reminder(text="stretch", due_at=NOW)
+        await bot.remind("⏰ stretch", str(row["id"]))
+        keyboard = calls[-1][1]["reply_markup"]["inline_keyboard"][0]
+        check("a delivered reminder carries snooze buttons",
+              [b["text"] for b in keyboard], ["10 min", "1 hour", "Tomorrow 7am", "Done"])
+
+        def press(data, who=42):
+            nonlocal n
+            n += 1
+            return {"update_id": n, "callback_query": {
+                "id": "cb", "from": {"id": who}, "data": data,
+                "message": {"chat": {"id": 42}, "message_id": 7}}}
+
+        await bot._handle_callback(press(keyboard[1]["callback_data"]))
+        check("snooze 1 hour says when", sent[-1].speech, "Snoozed: I'll remind you at 11:00 AM.")
+        again = [x for x in await store.upcoming_reminders() if x["source"] == "snooze"]
+        check("and it comes back", [x["due_at"].astimezone(DEN).strftime("%H:%M") for x in again], ["11:00"])
+        check("the buttons come off", calls[-2][0] if calls[-1][0] == "sendMessage" else calls[-1][0],
+              "editMessageReplyMarkup")
+        before = len(await store.upcoming_reminders())
+        await bot._handle_callback(press(keyboard[0]["callback_data"], who=99))
+        check("someone else's press does nothing", len(await store.upcoming_reminders()), before)
+
         r = await message("/unremind 9")
         check("a bad number is refused", r.speech, "Use /unremind with a number from /reminders.")
 

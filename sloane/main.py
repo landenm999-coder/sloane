@@ -111,6 +111,7 @@ def create_app() -> FastAPI:
             store=store, agent=agent, governor=Governor(store, config),
             config=config, send=send, inbox=inbox,
             say=bot.say if bot is not None and config.telegram_chat_id else None,
+            remind=bot.remind if bot is not None and config.telegram_chat_id else None,
         )
         scheduler = Scheduler(ctx)
         state["scheduler"] = scheduler

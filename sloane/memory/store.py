@@ -1184,6 +1184,9 @@ class Store:
             (now, now, limit),
         )
 
+    async def get_reminder(self, reminder_id: str) -> Row | None:
+        return await self._one("select * from reminders where id = %s", (reminder_id,))
+
     async def unclaim_reminder(self, reminder_id: str) -> None:
         await self._exec("update reminders set sent_at = null where id = %s", (reminder_id,))
 

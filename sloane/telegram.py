@@ -119,6 +119,36 @@ class Bot:
             return None
         return sent.get("message_id")
 
+    async def remind(self, text: str, reminder_id: str) -> None:
+        """Deliver a reminder with snooze buttons. Raises if it could not be sent,
+        so the reminders job can put it back and retry."""
+        from sloane.reminders import SNOOZE_CODES, snooze_data
+
+        if not self._owner:
+            return
+        keyboard = {"inline_keyboard": [
+            [{"text": label, "callback_data": snooze_data(reminder_id, code)}
+             for code, label in SNOOZE_CODES.items()],
+        ]}
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            await self._call(client, "sendMessage", chat_id=self._owner, text=text[:4096],
+                             reply_markup=keyboard)
+        await remember("outbound reminder", self._store.log_message(
+            chat_id=self._owner, direction="out", kind="text", body=text[:4000]))
+
+    async def _snooze(self, reminder_id: str, code: str) -> str:
+        from sloane.reminders import snoozed_until, spoken
+
+        if code == "ok":
+            return "👍"
+        original = await self._store.get_reminder(reminder_id)
+        if original is None:
+            return "I can't find that reminder any more."
+        now = self._now()
+        due = snoozed_until(code, now)
+        await self._store.add_reminder(text=original["text"], due_at=due, source="snooze")
+        return f"Snoozed: I'll remind you {spoken(due, now)}."
+
     async def _handle_callback(self, update: dict) -> None:
         """A button press. Only Landen's chat decides anything.
 
@@ -139,6 +169,9 @@ class Bot:
         if not fresh:
             return
 
+        from sloane.reminders import parse_snooze
+
+        snooze = parse_snooze(cq.get("data") or "")
         parsed = parse_callback(cq.get("data") or "")
         async with httpx.AsyncClient(timeout=30.0) as client:
             # Stop the button's spinner whatever happens next.
@@ -146,6 +179,20 @@ class Bot:
                 await self._call(client, "answerCallbackQuery", callback_query_id=cq.get("id"))
             except (httpx.HTTPError, RuntimeError) as exc:
                 log.warning("answerCallbackQuery failed: %s", exc)
+            if snooze is not None:
+                message = await self._snooze(*snooze)
+                message_id = (cq.get("message") or {}).get("message_id")
+                if message_id:
+                    try:  # one press per reminder
+                        await self._call(
+                            client, "editMessageReplyMarkup", chat_id=chat_id,
+                            message_id=message_id, reply_markup={"inline_keyboard": []},
+                        )
+                    except (httpx.HTTPError, RuntimeError):
+                        pass
+                if message != "👍":
+                    await self.send(chat_id, Reply(speech=message, detail=""))
+                return
             if parsed is None or self.agency is None:
                 return
             outcome = await self.agency.decide(*parsed)
@@ -369,6 +416,36 @@ class Bot:
         return Reply(speech=f"{len(rows)} open promise{'s' if len(rows) != 1 else ''}.",
                      detail="\n".join(lines) + "\n\n`/kept <n>` marks one done.")
 
+    async def _status(self) -> Reply:
+        """Is she healthy? From her own bookkeeping, no model call."""
+        from sloane.reminders import spoken
+
+        now = self._now()
+        zone = ZoneInfo(self._config.timezone)
+        alerts = await self._store.open_alerts()
+        jobs = {j["name"]: j for j in await self._store.jobs()}
+        health = await self._store.provider_health(24)
+        lines = []
+        if alerts:
+            lines += [f"⚠️ {a['message']}" for a in alerts]
+        sync = jobs.get("entity_sync", {})
+        if sync.get("last_run_at"):
+            hours = (now - sync["last_run_at"].astimezone(zone)).total_seconds() / 3600
+            lines.append(f"• Last school sync: {hours:.0f}h ago ({sync.get('last_status') or '-'})")
+        else:
+            lines.append("• School sync has not run yet")
+        for row in sorted(health, key=lambda r: r["provider"]):
+            ok = int(row["calls"]) - int(row["failures"])
+            lines.append(f"• {row['provider']}: {ok}/{row['calls']} calls ok in 24h")
+        brief = jobs.get("morning_brief", {})
+        if brief.get("last_run_at"):
+            when = spoken(brief["last_run_at"].astimezone(zone), now).removeprefix("at ")
+            lines.append(f"• Last morning brief: {when} ({brief.get('last_status') or '-'})")
+        lines.append(f"• Gmail: {'connected' if self._config.gmail_refresh_token else 'not set up'}")
+        speech = (f"{len(alerts)} problem{'s' if len(alerts) != 1 else ''} open." if alerts
+                  else "All good: nothing is broken that I know of.")
+        return Reply(speech=speech, detail="\n".join(lines))
+
     async def _grades(self) -> Reply:
         """Current course grades as Canvas last reported them. No model."""
         rows = [c for c in await self._store.courses() if c.get("current_score") is not None]
@@ -472,6 +549,8 @@ class Bot:
             return await self._agency_command(name, command)
         if name == "grades":
             return await self._grades()
+        if name == "status":
+            return await self._status()
         if name in {"today", "week"}:
             return await self._view(name)
         if name == "jobs":
@@ -487,6 +566,7 @@ class Bot:
                     "`/sync` — pull Canvas, the calendar and shifts now\n"
                     "`/today` · `/week` — the schedule straight from the database, no AI\n"
                     "`/grades` — current course grades from Canvas\n"
+                    "`/status` — is anything broken? (no AI)\n"
                     "`/brief` — the morning brief, right now\n"
                     "`/jobs` — what ran, and whether it worked\n"
                     "`/inbox` — triage new email now\n"

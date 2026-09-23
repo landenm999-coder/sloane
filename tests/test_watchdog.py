@@ -118,6 +118,17 @@ async def integration() -> None:
         check("an all-failing main lane is told with the fix",
               "the Claude CLI login has probably expired" in said[-1], True)
 
+        # /status reads the same bookkeeping, with no model.
+        from sloane.telegram import Bot
+
+        status = await Bot(store, None, cfg)._status()
+        check("/status counts open problems", status.speech, "1 problem open.")
+        check("and names them first", status.detail.splitlines()[0].startswith("⚠️ Every main-lane call"), True)
+        check("with provider health", "• claude_code: 0/3 calls ok in 24h" in status.detail, True)
+        await store._exec("truncate alerts, usage_log restart identity")
+        check("healthy says so", (await Bot(store, None, cfg)._status()).speech,
+              "All good: nothing is broken that I know of.")
+
 
 asyncio.run(integration())
 

@@ -68,6 +68,8 @@ class JobContext:
     # are not an agent turn: a reminder is his own words, not something to ask
     # a model about.
     say: Callable[[str], Awaitable[None]] | None = None
+    # A reminder with snooze buttons: (text, reminder id). Falls back to `say`.
+    remind: Callable[[str, str], Awaitable[None]] | None = None
 
     def today(self) -> date:
         return datetime.now(ZoneInfo(self.config.timezone)).date()
@@ -254,7 +256,10 @@ async def reminders(ctx: JobContext, now: datetime | None = None) -> JobResult:
         if moment - due_at > LATE_AFTER:
             text += f" (this was for {spoken(due_at, moment).removeprefix('at ')})"
         try:
-            await ctx.say(text)
+            if ctx.remind is not None:
+                await ctx.remind(text, str(row["id"]))
+            else:
+                await ctx.say(text)
             delivered += 1
         except Exception as exc:  # noqa: BLE001 - unclaim and retry next tick
             log.warning("reminder %s not delivered, will retry: %s", row["id"], exc)

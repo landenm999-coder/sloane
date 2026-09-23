@@ -28,7 +28,7 @@ Total running cost: **$0/mo**, every layer on a free tier.
 | Providers | `claude_code`, `groq`, `anthropic` behind one `Provider` base |
 | Contract | `Reply(speech, detail)` parsed from 5 model-output shapes |
 | Hard lines | 6 pairs, enforced in code before execution |
-| Interface | Telegram long polling: text, voice, buttons; `/today` `/week` `/grades` `/brief` `/jobs` `/sync` `/inbox` `/remind` `/reminders` `/promise` `/promises` `/kept` `/trust` `/revoke` `/usage` `/state` |
+| Interface | Telegram long polling: text, voice, buttons; `/today` `/week` `/grades` `/status` `/brief` `/jobs` `/sync` `/inbox` `/remind` `/reminders` `/promise` `/promises` `/kept` `/trust` `/revoke` `/usage` `/state` |
 | School | Canvas assignments + secret `.ics` calendar, both read-only |
 | Shifts | generated from the fixed 3–7 PM Mon–Fri rule, DST-correct |
 | Sync | `/sync` on Telegram, `POST /sync` over HTTP, `entity_sync` job every 4h |
@@ -44,7 +44,8 @@ Total running cost: **$0/mo**, every layer on a free tier.
 | Promises | `/promise send Keegan the outline by friday` tracks what he owes and to whom ("by friday" = end of that day); shown in FACTS and briefs until `/kept` |
 | Weekly review | Sunday 7 PM: the week behind (grades, missing work, promises kept — from her own records) and the week ahead from FACTS |
 | Backups | 12:30 AM, silent: state, promises, people, courses, trust, reminders and jobs as JSON on the `models` volume, 14 kept |
-| Reminders | "remind me at 5 to call Keegan" — typed or spoken, times read by rules (no model), held through quiet hours |
+| Reminders | "remind me at 5 to call Keegan" — typed or spoken, times read by rules (no model), held through quiet hours; each arrives with Snooze 10 min / 1 hour / Tomorrow 7am / Done buttons |
+| Status | `/status`: open problems, last sync, provider health, last brief, Gmail — from her own bookkeeping, no model |
 | Gmail | triage every 3h in one batched call; replies drafted in his voice, sent only on Approve |
 | HTTP | `/health`, `/usage`, `/state`, `/facts`, `/jobs`, `POST /sync`, `POST /jobs/{name}/run`, `POST /capture` (token) |
 

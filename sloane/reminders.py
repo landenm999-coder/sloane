@@ -80,6 +80,35 @@ REMIND_ME = re.compile(
 )
 
 
+# Buttons under a delivered reminder: "r:<uuid>:<code>", well under Telegram's
+# 64-byte callback limit, and validated like any other input on the way back.
+SNOOZE_CODES = {"10": "10 min", "60": "1 hour", "tom": "Tomorrow 7am", "ok": "Done"}
+_SNOOZE = re.compile(r"^r:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}):(10|60|tom|ok)$")
+
+
+def snooze_data(reminder_id: str, code: str) -> str:
+    return f"r:{reminder_id}:{code}"
+
+
+def parse_snooze(data: str) -> tuple[str, str] | None:
+    found = _SNOOZE.match(data or "")
+    return (found.group(1), found.group(2)) if found else None
+
+
+def snoozed_until(code: str, now: datetime) -> datetime | None:
+    """When a snoozed reminder comes back. None for "Done"."""
+    if code == "10":
+        return (now + timedelta(minutes=10)).replace(second=0, microsecond=0)
+    if code == "60":
+        return (now + timedelta(hours=1)).replace(second=0, microsecond=0)
+    if code == "tom":
+        day = now.date() + timedelta(days=1)
+        return now.replace(year=day.year, month=day.month, day=day.day,
+                           hour=DEFAULT_DAY_TIME.hour, minute=DEFAULT_DAY_TIME.minute,
+                           second=0, microsecond=0)
+    return None
+
+
 @dataclass(frozen=True)
 class Parsed:
     due: datetime
