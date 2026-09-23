@@ -211,6 +211,9 @@ async def integration() -> None:
         check("and it comes back", [x["due_at"].astimezone(DEN).strftime("%H:%M") for x in again], ["11:00"])
         check("the buttons come off", calls[-2][0] if calls[-1][0] == "sendMessage" else calls[-1][0],
               "editMessageReplyMarkup")
+        await bot._handle_callback(press(keyboard[0]["callback_data"]))
+        check("a double tap snoozes once",
+              len([x for x in await store.upcoming_reminders() if x["source"] == "snooze"]), 1)
         before = len(await store.upcoming_reminders())
         await bot._handle_callback(press(keyboard[0]["callback_data"], who=99))
         check("someone else's press does nothing", len(await store.upcoming_reminders()), before)

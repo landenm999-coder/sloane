@@ -358,6 +358,13 @@ async def main() -> None:
         COURSES[0]["enrollments"][0].update(computed_current_score=88.4)
         await sync_all(store, config)
         check("a half-point wobble is not", await announce(store, say), 0)
+        COURSES[0]["enrollments"][0].pop("computed_current_score")
+        await sync_all(store, config)
+        stale = {c["external_id"]: c for c in await store.courses() if c.get("external_id")}
+        check("a grade Canvas stops showing is cleared, not kept as current",
+              stale["101"]["current_score"], None)
+        COURSES[0]["enrollments"][0]["computed_current_score"] = 88.4
+        await sync_all(store, config)
 
         from sloane.telegram import Bot
 
@@ -374,6 +381,16 @@ async def main() -> None:
               "I don't see an open assignment like that.")
         several = await bot._done("stat")
         check("an ambiguous match asks for more", several.speech, "2 match; say a bit more.")
+        # Titles that differ only by a number are told apart by whole words.
+        for i, title in enumerate(["Lab 5", "Lab 6", "Unit 1 Test", "Unit 10 Test"]):
+            await store.upsert_assignment(title=title, source="canvas", external_id=f"num-{i}",
+                                          due_at=datetime(2027, 2, 1, tzinfo=UTC))
+        check("'unit test' matches both and asks", (await bot._done("unit test")).speech,
+              "2 match; say a bit more.")
+        check("'Lab 5' is not 'Lab 6'", (await bot._done("Lab 5")).speech,
+              "Marked done: Lab 5. I'll stop counting it as due.")
+        check("'Unit 1 Test' is not 'Unit 10 Test'", (await bot._done("unit 1 test")).speech,
+              "Marked done: Unit 1 Test. I'll stop counting it as due.")
         done = await bot._done("unit 2 project")
         check("/done marks it", done.speech, "Marked done: Unit 2 project. I'll stop counting it as due.")
         due_titles = [a["title"] for a in await store.assignments_due(date(2026, 9, 1), date(2027, 12, 1))]

@@ -124,11 +124,14 @@ async def sync_courses_and_assignments(store: Store, config: Settings) -> list[S
     # Current grades, where Canvas shows them. A move of GRADE_STEP points or
     # more is news; the first grade ever seen is the baseline.
     for course in courses:
-        if course.get("score") is None:
-            continue
         try:
             cid = await store.course_id_for("canvas", course["external_id"])
             if cid is None:
+                continue
+            if course.get("score") is None:
+                # Totals hidden now: clear the old grade rather than keep
+                # presenting a stale number as current.
+                await store.set_course_grade(cid, score=None, grade=None)
                 continue
             previous = await store.set_course_grade(cid, score=course["score"], grade=course.get("grade"))
             if previous is not None and abs(course["score"] - previous) >= GRADE_STEP:

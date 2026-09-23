@@ -1202,6 +1202,17 @@ class Store:
             (now, now, limit),
         )
 
+    async def claim_snooze(self, reminder_id: str) -> Row | None:
+        """Mark a reminder snoozed, once. None if it already was (or is gone)."""
+        return await self._one(
+            """
+            update reminders set snoozed_at = now()
+             where id = %s and snoozed_at is null
+             returning *
+            """,
+            (reminder_id,),
+        )
+
     async def get_reminder(self, reminder_id: str) -> Row | None:
         return await self._one("select * from reminders where id = %s", (reminder_id,))
 

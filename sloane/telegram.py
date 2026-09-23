@@ -162,9 +162,9 @@ class Bot:
 
         if code == "ok":
             return "👍"
-        original = await self._store.get_reminder(reminder_id)
+        original = await self._store.claim_snooze(reminder_id)
         if original is None:
-            return "I can't find that reminder any more."
+            return "👍"  # already snoozed: a second tap on the same button is a no-op
         now = self._now()
         due = snoozed_until(code, now)
         await self._store.add_reminder(text=original["text"], due_at=due, source="snooze")
@@ -469,12 +469,18 @@ class Bot:
 
     async def _done(self, rest: str) -> Reply:
         """/done <part of a title>: he turned it in; Canvas just hasn't noticed."""
-        words = [w for w in re.findall(r"\w+", rest.lower()) if len(w) > 1]
+        words = re.findall(r"\w+", rest.lower())
         if not words:
             return Reply(speech="Which one? Try /done lab writeup.", detail="")
         rows = await self._store.outstanding_assignments()
-        hits = [r for r in rows if all(w in r["title"].lower() or w in (r.get("course") or "").lower()
-                                       for w in words)]
+
+        def tokens(r):  # noqa: ANN001, ANN202 - whole words, so "Lab 5" is not "Lab 6"
+            return set(re.findall(r"\w+", f"{r['title']} {r.get('course') or ''}".lower()))
+
+        hits = [r for r in rows if set(words) <= tokens(r)]
+        exact = [r for r in hits if " ".join(re.findall(r"\w+", r["title"].lower())) == " ".join(words)]
+        if len(exact) == 1:
+            hits = exact
         if not hits:
             return Reply(speech="I don't see an open assignment like that.", detail="")
         if len(hits) > 1:
