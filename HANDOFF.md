@@ -32,7 +32,7 @@ fixed with regression tests. The third found nothing high or medium.
 - nightly JSON backups
 - `CLAUDE.md` and a SessionStart hook
 
-A review pass over those additions was started; check git log for any "review fixes" commits after `9cffd41`.
+Those additions were reviewed by hand (`c7c88a7`), because the review agent was cut off by the session limit. Two fixes came out of it, and the real-model eval still scores 21/21.
 
 **She has never run against the real services.** This sandbox can't reach Telegram, Groq, Canvas, Google or
 Supabase. Everything external is tested against local stubs, and the real-model eval (via `claude -p`) scores
