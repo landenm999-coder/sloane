@@ -379,6 +379,43 @@ def check_timezone(config: Settings) -> None:
     record("timezone", PASS, config.timezone)
 
 
+def check_extras(config: Settings) -> None:
+    """The post-v1 settings: Capture, backups and voice briefs."""
+    from pathlib import Path
+
+    from sloane.capture import MIN_TOKEN
+    from sloane.jobs.briefs import SPEAKING
+
+    token = config.capture_token or ""
+    if not token:
+        record("capture", SKIP, "CAPTURE_TOKEN unset, so POST /capture is off (DEPLOY §7d)")
+    elif len(token) < MIN_TOKEN:
+        record("capture", FAIL, f"CAPTURE_TOKEN is under {MIN_TOKEN} characters, so capture stays off")
+    else:
+        record("capture", PASS, "POST /capture is on (reach it over Tailscale, never a public port)")
+
+    folder = config.backup_dir or (str(Path(config.embed_cache_dir) / "backups")
+                                   if config.embed_cache_dir else "")
+    if not folder:
+        record("backups", WARN, "no BACKUP_DIR or EMBED_CACHE_DIR: nightly backups have nowhere to go")
+    else:
+        try:
+            Path(folder).mkdir(parents=True, exist_ok=True)
+            probe = Path(folder) / ".doctor"
+            probe.write_text("ok")
+            probe.unlink()
+            record("backups", PASS, f"nightly JSON to {folder}, {config.backup_keep} kept")
+        except OSError as exc:
+            record("backups", FAIL, f"{folder} is not writable: {exc}")
+
+    unknown = sorted(config.voice_brief_names - SPEAKING - {"weekly_review"})
+    if unknown:
+        record("voice briefs", WARN, f"VOICE_BRIEFS names no such brief: {', '.join(unknown)} "
+               f"(choose from {', '.join(sorted(SPEAKING | {'weekly_review'}))})")
+    elif config.voice_brief_names:
+        record("voice briefs", PASS, ", ".join(sorted(config.voice_brief_names)))
+
+
 async def main(warm: bool = False) -> int:
     config = load_settings()
 
@@ -394,6 +431,7 @@ async def main(warm: bool = False) -> int:
     await check_gmail(config)
     await check_voice(config, warm=warm)
     await check_telegram(config)
+    check_extras(config)
 
     width = max(len(name) for name, _, _ in results)
     for name, status, detail in results:

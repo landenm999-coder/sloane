@@ -317,10 +317,11 @@ async def weekly_review(ctx: JobContext, now: datetime | None = None) -> JobResu
     ] + [f"- PROMISE {k['status'].upper()}: {safe_field(k['what'], limit=120)}" for k in kept]
     question = WEEKLY_QUESTION + "\n\nThis week's record:\n" + ("\n".join(record) or "- (nothing recorded)")
     reply = await ctx.agent.answer(question, channel="job:weekly_review", today=ctx.today())
-    if ctx.send is None:
+    deliver = ctx.speak if (ctx.speak and "weekly_review" in ctx.config.voice_brief_names) else ctx.send
+    if deliver is None:
         return JobResult("weekly_review", ran=True, sent=False, reply=reply)
     try:
-        await ctx.send(reply)
+        await deliver(reply)
     except Exception as exc:  # noqa: BLE001
         return JobResult("weekly_review", ran=True, sent=False, reason=f"delivery failed: {exc}", reply=reply)
     return JobResult("weekly_review", ran=True, sent=True, reply=reply)
