@@ -2,7 +2,7 @@
 
 **Read this first if you are a new Claude Code session picking up Sloane.**
 This file records what exists, what's verified, what's in flight and what's left.
-It's kept up to date at the end of every work session. Last updated: 2026-09-22 (evening).
+It's kept up to date at the end of every work session. Last updated: 2026-09-23.
 
 - Repo: `github.com/landenm999-coder/sloane`, branch `main` (commit straight to main; CI runs on push).
 - Separate from **Capture** (`landenm999-coder/capture`), a voice-capture PWA that will later feed Sloane
@@ -21,18 +21,21 @@ work shifts, five daily briefs, voice replies, an approval/trust-ledger system f
 with approval-gated replies. Three adversarial review passes were run on v1. The first two found real bugs, all
 fixed with regression tests. The third found nothing high or medium.
 
-**After v1** (same day), these features were added, each with tests:
-- timed reminders (typed, spoken or captured)
-- `/today` and `/week` with no model involved
-- Canvas change alerts
+**After v1**, these were added, each with tests:
+- timed reminders (typed, spoken or captured) with snooze buttons
+- `/today`, `/week`, `/grades` and `/status`, all with no model involved
+- Canvas change alerts, including course-grade moves
 - a watchdog that messages him when something breaks
 - the `POST /capture` intake for the Capture app
 - promises
 - a Sunday weekly review
-- nightly JSON backups
+- optional voice briefs
+- nightly JSON backups, with a merge-restore script
+- `scripts/install.sh`, the one-command deploy and upgrade
 - `CLAUDE.md` and a SessionStart hook
 
-Those additions were reviewed by hand (`c7c88a7`), because the review agent was cut off by the session limit. Two fixes came out of it, and the real-model eval still scores 30/30.
+Everything after v1 was reviewed by hand (`c7c88a7`). The real-model eval grew to 30 checks and passes 30/30.
+Test suites: 21/21.
 
 **She has never run against the real services.** This sandbox can't reach Telegram, Groq, Canvas, Google or
 Supabase. Everything external is tested against local stubs, and the real-model eval (via `claude -p`) scores
@@ -66,7 +69,7 @@ Supabase. Everything external is tested against local stubs, and the real-model 
 | Agent setup | `CLAUDE.md` (invariants + how to work) and the `.claude/hooks/session-start.sh` web hook (creates `.venv`, starts pgvector Postgres, exports `DATABASE_URL`) | root, `.claude/` |
 | CI | `test.yml` (py3.12 + pgvector, migrations applied twice), `image.yml` (linux/arm64 build + smoke), Dependabot | `.github/` |
 
-Telegram commands: `/today /week /grades /status /brief /jobs /sync /inbox /remind /reminders /unremind /promise /promises /kept /trust /revoke /cancel /usage /state /help`, plus plain "remind me …".
+Telegram commands (all listed by `/help`): `/today /week /grades /status /brief /jobs /sync /inbox /remind /reminders /unremind /promise /promises /kept /trust /revoke /cancel /usage /state /help`, plus plain "remind me …".
 HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /state /facts /jobs POST /sync POST /jobs/{name}/run`, plus `POST /capture` (token).
 
 ## Invariants (a violation is a bug even if tests pass)
