@@ -366,6 +366,25 @@ async def main() -> None:
               "Lowest right now is Stat Reasoning at 88.4 percent.")
         check("and lists only courses with a grade", grades.detail, "• P2 Stat Reasoning: 88.4% (B+)")
 
+        # -- /done: handed in on paper, Canvas hasn't caught up ------------------
+        from sloane.telegram import Bot as _Bot
+
+        bot = _Bot(store, None, config)
+        check("no match says so", (await bot._done("dragon essay")).speech,
+              "I don't see an open assignment like that.")
+        several = await bot._done("stat")
+        check("an ambiguous match asks for more", several.speech, "2 match; say a bit more.")
+        done = await bot._done("unit 2 project")
+        check("/done marks it", done.speech, "Marked done: Unit 2 project. I'll stop counting it as due.")
+        due_titles = [a["title"] for a in await store.assignments_due(date(2026, 9, 1), date(2027, 12, 1))]
+        check("and it stops being due", "Unit 2 project" in due_titles, False)
+        await sync_all(store, config)
+        due_titles = [a["title"] for a in await store.assignments_due(date(2026, 9, 1), date(2027, 12, 1))]
+        check("a Canvas re-sync does not undo it", "Unit 2 project" in due_titles, False)
+        ASSIGNMENTS["101"][2]["submission"] = {"missing": True}
+        await sync_all(store, config)
+        check("and Canvas lagging to 'missing' is not an alert", await announce(store, say), 0)
+
         # -- calendar --------------------------------------------------------
         events = parse_ics(
             ICS,

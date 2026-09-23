@@ -223,7 +223,7 @@ class Store:
                    'assignments',
                    a.id
               from assignments a
-             where a.status = 'open'
+             where a.status = 'open' and not a.done_locally
                and a.due_at is not null
                and a.due_at < now() + interval '7 days'
                and not exists (
@@ -246,7 +246,7 @@ class Store:
                and w.ref_table = 'assignments'
                and not exists (
                      select 1 from assignments a
-                      where a.id = w.ref_id and a.status = 'open'
+                      where a.id = w.ref_id and a.status = 'open' and not a.done_locally
                    )
             """
         )
@@ -491,7 +491,7 @@ class Store:
               left join courses c on c.id = a.course_id
              where a.due_at is not null
                and (a.due_at at time zone %(tz)s)::date between %(start)s and %(end)s
-               and (%(include_done)s or a.status = 'open')
+               and (%(include_done)s or (a.status = 'open' and not a.done_locally))
              order by a.due_at, c.period nulls last
             """,
             {
@@ -508,7 +508,7 @@ class Store:
             select a.id, a.title, a.due_at, a.status, c.name as course
               from assignments a
               left join courses c on c.id = a.course_id
-             where a.status in ('open', 'missing')
+             where a.status in ('open', 'missing') and not a.done_locally
                and a.due_at is not null
                and a.due_at < now()
              order by a.due_at desc  -- most recent first: the ones still worth saving
@@ -571,7 +571,7 @@ class Store:
                           points_earned = excluded.points_earned,
                           url = excluded.url,
                           updated_at = now()
-            returning id, status, due_at, points_earned, points_possible
+            returning id, status, due_at, points_earned, points_possible, done_locally
             """,
             (title, source, external_id, due_at, course_id, status, all_day,
              points_possible, points_earned, url),
@@ -611,6 +611,24 @@ class Store:
     async def unclaim_school_changes(self, ids: Sequence[str]) -> None:
         await self._exec(
             "update school_changes set notified_at = null where id = any(%s::uuid[])", (list(ids),)
+        )
+
+    async def outstanding_assignments(self) -> list[Row]:
+        """Open or missing, not marked done by him: what /done can match against."""
+        return await self._fetch(
+            """
+            select a.id, a.title, a.due_at, a.status, c.name as course
+              from assignments a
+              left join courses c on c.id = a.course_id
+             where a.status in ('open', 'missing') and not a.done_locally
+             order by a.due_at nulls last
+            """
+        )
+
+    async def mark_done_locally(self, assignment_id: str, done: bool = True) -> Row | None:
+        return await self._one(
+            "update assignments set done_locally = %s where id = %s returning id, title",
+            (done, assignment_id),
         )
 
     async def courses(self, semester: str | None = None) -> list[Row]:

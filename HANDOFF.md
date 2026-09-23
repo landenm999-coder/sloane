@@ -62,6 +62,7 @@ Supabase. Everything external is tested against local stubs, and the real-model 
 | Weekly review + backup | `weekly_review` Sunday 19:00 (agent turn with this week's graded/missing/kept record); `backup` 00:30 → JSON of `Store.BACKUP_TABLES` to BACKUP_DIR or `<EMBED_CACHE_DIR>/backups`, atomic write, 14 kept; `scripts/restore_backup.py FILE [--tables] [--apply]` merges rows back (existing rows win, column names checked against the schema) | `jobs/briefs.py`, `sql/009_weekly.sql`, `tests/test_weekly.py` |
 | Voice briefs | `VOICE_BRIEFS` (comma job names) → those briefs go via `JobContext.speak` (= `bot.reply(as_voice=True)`, text fallback) | `jobs/briefs.py` `_brief`, `main.py` |
 | Snooze + status | delivered reminders carry Snooze 10m / 1h / Tomorrow 7am / Done buttons (`r:<uuid>:<code>` callbacks, same owner-only checks as approvals; a snooze is a new reminder row, source=snooze); `/status` health summary with no model | `reminders.py` snooze helpers, `telegram.py` `remind`/`_snooze`/`_status` |
+| Done locally | `/done <words>` (unique match over open/missing titles+course) → `assignments.done_locally` (sql/011), excluded from due/overdue/working set, never written by sync; suppresses a later Canvas "missing" alert | `telegram.py` `_done`, `store.outstanding_assignments` |
 | Grades | Canvas `courses?include[]=total_scores` → `courses.current_score/current_grade` (sql/010); in FACTS CLASS lines and `/grades`; ≥2-point moves become a `grade` change alert; hidden totals stay unknown | `school/canvas.py` `_current_grade`, `school/sync.py` |
 | Views | `/today`, `/week`: schedule + due + computed conflicts from SQL, no model | `sloane/views.py`, `tests/test_views.py` |
 | Security hardening | `claude -p` runs `--tools ""` `--strict-mcp-config` with a scrubbed env; bot fails closed with no chat id; httpx URL logging off (token/ICS URL); bind 127.0.0.1 unless `BIND_HOST` | various |
@@ -69,7 +70,7 @@ Supabase. Everything external is tested against local stubs, and the real-model 
 | Agent setup | `CLAUDE.md` (invariants + how to work) and the `.claude/hooks/session-start.sh` web hook (creates `.venv`, starts pgvector Postgres, exports `DATABASE_URL`) | root, `.claude/` |
 | CI | `test.yml` (py3.12 + pgvector, migrations applied twice), `image.yml` (linux/arm64 build + smoke), Dependabot | `.github/` |
 
-Telegram commands (all listed by `/help`): `/today /week /grades /status /brief /jobs /sync /inbox /remind /reminders /unremind /promise /promises /kept /trust /revoke /cancel /usage /state /help`, plus plain "remind me …".
+Telegram commands (all listed by `/help`): `/today /week /grades /done /status /brief /jobs /sync /inbox /remind /reminders /unremind /promise /promises /kept /trust /revoke /cancel /usage /state /help`, plus plain "remind me …".
 HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /state /facts /jobs POST /sync POST /jobs/{name}/run`, plus `POST /capture` (token).
 
 ## Invariants (a violation is a bug even if tests pass)

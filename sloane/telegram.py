@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from collections.abc import Awaitable, Callable
@@ -466,6 +467,23 @@ class Bot:
                   else "All good: nothing is broken that I know of.")
         return Reply(speech=speech, detail="\n".join(lines))
 
+    async def _done(self, rest: str) -> Reply:
+        """/done <part of a title>: he turned it in; Canvas just hasn't noticed."""
+        words = [w for w in re.findall(r"\w+", rest.lower()) if len(w) > 1]
+        if not words:
+            return Reply(speech="Which one? Try /done lab writeup.", detail="")
+        rows = await self._store.outstanding_assignments()
+        hits = [r for r in rows if all(w in r["title"].lower() or w in (r.get("course") or "").lower()
+                                       for w in words)]
+        if not hits:
+            return Reply(speech="I don't see an open assignment like that.", detail="")
+        if len(hits) > 1:
+            listing = "\n".join(f"• {r['title']}" + (f" [{r['course']}]" if r.get("course") else "")
+                                 for r in hits[:10])
+            return Reply(speech=f"{len(hits)} match; say a bit more.", detail=listing)
+        row = await self._store.mark_done_locally(str(hits[0]["id"]))
+        return Reply(speech=f"Marked done: {row['title']}. I'll stop counting it as due.", detail="")
+
     async def _grades(self) -> Reply:
         """Current course grades as Canvas last reported them. No model."""
         rows = [c for c in await self._store.courses() if c.get("current_score") is not None]
@@ -569,6 +587,9 @@ class Bot:
             return await self._agency_command(name, command)
         if name == "grades":
             return await self._grades()
+        if name == "done":
+            rest = command.split(maxsplit=1)[1] if len(command.split(maxsplit=1)) > 1 else ""
+            return await self._done(rest)
         if name == "status":
             return await self._status()
         if name in {"today", "week"}:
@@ -586,6 +607,7 @@ class Bot:
                     "`/sync` — pull Canvas, the calendar and shifts now\n"
                     "`/today` · `/week` — the schedule straight from the database, no AI\n"
                     "`/grades` — current course grades from Canvas\n"
+                    "`/done <assignment>` — handed it in; stop counting it as due\n"
                     "`/status` — is anything broken? (no AI)\n"
                     "`/brief` — the morning brief, right now\n"
                     "`/jobs` — what ran, and whether it worked\n"

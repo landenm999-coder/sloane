@@ -28,7 +28,7 @@ Total running cost: **$0/mo**, every layer on a free tier.
 | Providers | `claude_code`, `groq`, `anthropic` behind one `Provider` base |
 | Contract | `Reply(speech, detail)` parsed from 5 model-output shapes |
 | Hard lines | 6 pairs, enforced in code before execution |
-| Interface | Telegram long polling: text, voice, buttons; `/today` `/week` `/grades` `/status` `/brief` `/jobs` `/sync` `/inbox` `/remind` `/reminders` `/promise` `/promises` `/kept` `/trust` `/revoke` `/usage` `/state` |
+| Interface | Telegram long polling: text, voice, buttons; `/today` `/week` `/grades` `/done` `/status` `/brief` `/jobs` `/sync` `/inbox` `/remind` `/reminders` `/promise` `/promises` `/kept` `/trust` `/revoke` `/usage` `/state` |
 | School | Canvas assignments + secret `.ics` calendar, both read-only |
 | Shifts | generated from the fixed 3–7 PM Mon–Fri rule, DST-correct |
 | Sync | `/sync` on Telegram, `POST /sync` over HTTP, `entity_sync` job every 4h |
@@ -37,6 +37,7 @@ Total running cost: **$0/mo**, every layer on a free tier.
 | Voice | a voice note in gets a voice note out; text is always the fallback |
 | Agency | every action proposed, approved with buttons, or run under earned trust |
 | Views | `/today` and `/week` render the schedule, due work and conflicts straight from SQL — no model, so they answer even when every provider is down |
+| Done locally | `/done lab writeup` — handed in on paper, Canvas hasn't caught up: it stops counting as due, a re-sync can't undo it, and a lagging "missing" isn't alerted |
 | Grades | current course grade per class from Canvas (read-only; only where the teacher shows totals) in FACTS and `/grades`; a 2+ point move is an alert |
 | Canvas alerts | after each sync, one message for what changed: new assignments, grades (with the score), newly missing, moved due dates, course grades that moved. The first sync is a silent baseline; alerts wait out quiet hours |
 | Watchdog | every 30 min, no model: failing or partial jobs, a main/bulk model failing every call (e.g. an expired Claude login — with the fix), a dead Gmail grant. Told after an hour, repeated daily, "✅ working again" when it clears |
@@ -475,6 +476,7 @@ sql/
   008_watchdog.sql  what is broken and whether he's been told, idempotent
   009_weekly.sql   the Sunday review and the nightly backup jobs, idempotent
   010_grades.sql   course grades on courses; 'grade' change kind, idempotent
+  011_done_locally.sql  his own "handed it in" mark, never touched by sync
 scripts/
   doctor.py      validates every credential
   seed_state.py  tier 1 from a markdown file

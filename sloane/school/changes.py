@@ -55,7 +55,8 @@ def classify(before: Row | None, after: Row | None, *, now: datetime, tz: str) -
         earned, possible = after.get("points_earned"), after.get("points_possible")
         found.append(("graded", f"{_score(earned)}/{_score(possible)}"
                       if earned is not None and possible else ""))
-    if status == "missing" and before.get("status") != "missing":
+    # He said he handed it in (/done); Canvas lagging behind is not news.
+    if status == "missing" and before.get("status") != "missing" and not after.get("done_locally"):
         found.append(("missing", ""))
     old_due = before.get("due_at")
     if (
