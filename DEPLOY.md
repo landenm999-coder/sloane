@@ -32,6 +32,23 @@ no TLS certificate and no tunnel in this design.
 
 ---
 
+## The fast way: one command (steps 2–8)
+
+Once you can SSH into the instance, this does everything below for you.
+It installs Docker, clones the repo and asks for the seven `.env` values
+(secrets are hidden as you type). Then it builds, applies migrations, seeds,
+walks you through the one Claude login, runs doctor and starts the service:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/landenm999-coder/sloane/main/scripts/install.sh | bash
+```
+
+Run the same command again any time to upgrade. It never overwrites your `.env`.
+The numbered steps below are the same thing by hand, if you'd rather see each
+part (or the script stops somewhere).
+
+---
+
 ## 2. Install Docker
 
 SSH in, then:

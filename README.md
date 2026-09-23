@@ -210,7 +210,8 @@ Three things worth knowing:
 
 ## Setup
 
-> Deploying to a real box? **[DEPLOY.md](DEPLOY.md)** is the full walkthrough —
+> Deploying to a real box? `scripts/install.sh` does it in one command (see
+> [DEPLOY.md](DEPLOY.md) "The fast way"); DEPLOY.md is also the full walkthrough —
 > Oracle instance, Docker, migrations, systemd. This section is for running her
 > locally.
 
@@ -479,6 +480,7 @@ scripts/
   seed_state.py  tier 1 from a markdown file
   seed_courses.py  the real semester schedule into tier 4
   gmail_auth.py  one-time Gmail consent; writes the token into .env
+  install.sh     fresh Ubuntu box → Sloane under systemd, one command; also upgrades
   dev_db.sh      local Postgres + pgvector for the tests, idempotent
   restore_backup.py  merge a nightly backup back in (dry run by default)
   eval.py        golden questions through the real model, scored in code

@@ -97,13 +97,13 @@ Nothing half-done. (Update this section before stopping if something is.)
 ## Only Landen can do (the whole list; see DEPLOY.md)
 
 1. Create the Oracle Cloud ARM instance (DEPLOY §1).
-2. On the box: clone, fill `.env` (he already has the values), `docker compose build`, apply migrations with the
-   one-liner loop (DEPLOY §2–5).
-3. `docker compose run --rm sloane claude` once to log the Claude CLI in (DEPLOY §6).
-4. Seed + `doctor.py --warm`, then `systemctl enable --now sloane` (DEPLOY §7–8).
-5. Optional Gmail (DEPLOY §7c): a Google Cloud Desktop OAuth client, **published In production** (Testing tokens
+2. SSH in and run the one-command installer (DEPLOY "The fast way"):
+   `curl -fsSL https://raw.githubusercontent.com/landenm999-coder/sloane/main/scripts/install.sh | bash`.
+   It asks for the seven `.env` values and walks him through the one Claude login. It's also the upgrade
+   command. (The manual steps are DEPLOY §2–8.)
+3. Optional Gmail (DEPLOY §7c): a Google Cloud Desktop OAuth client, **published In production** (Testing tokens
    die after 7 days), then `python3 scripts/gmail_auth.py` on the box.
-6. Open decision, not set up: a nightly cloud routine that keeps improving the repo. It would spend his Claude limits.
+4. Open decision, not set up: a nightly cloud routine that keeps improving the repo. It would spend his Claude limits.
 
 Security rules he follows: never paste tokens or credentials into chat. Credentials live only in `.env`
 (gitignored, chmod 600). The ICS URL and the Canvas token are passwords.
