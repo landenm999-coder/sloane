@@ -31,7 +31,7 @@ Update its "In flight" and "Backlog" sections before you stop.
 - Lint: `python -m pyflakes sloane scripts tests`. The two known hits are intentional:
   `doctor.py` fastembed import and `test_router.py` `import sloane.main`.
 - Real-model check: `python scripts/eval.py 'postgresql://postgres@/sloane_eval?host=/tmp&port=5433'`
-  (about 7 `claude -p` calls; must stay 21/21).
+  (about 11 `claude -p` calls; must stay 30/30).
 - Every bug fix gets a regression test that fails on the old code. Confirm that by stashing the fix and rerunning.
 - New migrations are `sql/00N_*.sql` and must be idempotent (CI applies them twice). If a migration adds a
   table, add it to `EXPECTED_TABLES` in `scripts/doctor.py`. If it adds a job, add the handler to

@@ -32,11 +32,11 @@ fixed with regression tests. The third found nothing high or medium.
 - nightly JSON backups
 - `CLAUDE.md` and a SessionStart hook
 
-Those additions were reviewed by hand (`c7c88a7`), because the review agent was cut off by the session limit. Two fixes came out of it, and the real-model eval still scores 21/21.
+Those additions were reviewed by hand (`c7c88a7`), because the review agent was cut off by the session limit. Two fixes came out of it, and the real-model eval still scores 30/30.
 
 **She has never run against the real services.** This sandbox can't reach Telegram, Groq, Canvas, Google or
 Supabase. Everything external is tested against local stubs, and the real-model eval (via `claude -p`) scores
-21/21. The next real milestone is Landen deploying it.
+30/30. The next real milestone is Landen deploying it.
 
 ---
 
@@ -117,7 +117,7 @@ Security rules he follows: never paste tokens or credentials into chat. Credenti
 python3.11 -m venv /tmp/sv2 && /tmp/sv2/bin/pip install -r requirements.txt pyflakes
 sh scripts/dev_db.sh      # Postgres 16 + pgvector on /tmp:5433; creates sloane, sloane_eval, sloane_review; applies sql/*
 DATABASE_URL="postgresql://postgres@/sloane?host=/tmp&port=5433" /tmp/sv2/bin/python tests/run.py   # all suites
-/tmp/sv2/bin/python scripts/eval.py 'postgresql://postgres@/sloane_eval?host=/tmp&port=5433'       # real model, ~7 calls
+/tmp/sv2/bin/python scripts/eval.py 'postgresql://postgres@/sloane_eval?host=/tmp&port=5433'       # real model, ~11 calls
 ```
 
 - Integration tests are **destructive**: point them at a throwaway database. Give review agents their own
