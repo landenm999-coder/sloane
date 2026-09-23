@@ -31,7 +31,10 @@ fixed with regression tests. The third found nothing high or medium.
 - a Sunday weekly review
 - optional voice briefs
 - nightly JSON backups, with a merge-restore script
-- `scripts/install.sh`, the one-command deploy and upgrade
+- `scripts/install.sh`, the one-command deploy and upgrade (shellchecked in CI)
+- `/done` for work handed in on paper
+- long replies split across messages instead of truncated
+- `CAPTURE_API.md`, the contract for the Capture client
 - `CLAUDE.md` and a SessionStart hook
 
 Everything after v1 was reviewed by hand (`c7c88a7`). The real-model eval grew to 30 checks and passes 30/30.
