@@ -88,6 +88,23 @@ async def main() -> None:
         check("no temp file left behind", list(Path(folder).glob("*.tmp")), [])
         check("reported", res.reason.endswith("sloane-2026-09-29.json"), True)
 
+        # -- restore merges back what was lost, and changes nothing else ------------
+        await store._exec("delete from commitments")
+        kept_now = await store.add_commitment("a promise made after the backup")
+        restored = await store.restore_rows("commitments", data["tables"]["commitments"])
+        check("the lost promise comes back", restored, 1)
+        check("and the newer one is untouched",
+              sorted(c["what"] for c in await store._fetch("select what from commitments")),
+              ["a promise made after the backup", "send Keegan the outline"])
+        check("running it again adds nothing", await store.restore_rows("commitments", data["tables"]["commitments"]), 0)
+        hostile = [{"what": "x", "id": str(kept_now["id"]), 'bad") values (1); drop table state; --': 1}]
+        check("unknown (hostile) column names are ignored", await store.restore_rows("commitments", hostile), 0)
+        try:
+            await store.restore_rows("usage_log", [{"id": 1}])
+            FAILURES.append("restore must refuse tables that are not backed up")
+        except ValueError:
+            pass
+
         nowhere = JobContext(store=store, agent=agent, governor=Governor(store, config),
                              config=isolated(database_url=os.environ["DATABASE_URL"]))
         check("no folder configured: says so", (await backup(nowhere, SUNDAY)).ran, False)

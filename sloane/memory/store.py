@@ -1254,6 +1254,40 @@ class Store:
     # re-sync; these were typed, promised, earned or decided by Landen.
     BACKUP_TABLES = ("state", "commitments", "people", "courses", "trust", "reminders", "jobs")
 
+    async def restore_rows(self, table: str, rows: Sequence[Row]) -> int:
+        """Merge backed-up rows back in. Existing rows win; returns rows inserted.
+
+        Merge, never overwrite: a restore brings back what was lost without
+        undoing anything changed since the backup. Column names come from the
+        file, so only columns the table really has are used.
+        """
+        if table not in self.BACKUP_TABLES:
+            raise ValueError(f"{table} is not a backed-up table")
+        if not rows:
+            return 0
+        real = {
+            r["column_name"] for r in await self._fetch(
+                "select column_name from information_schema.columns "
+                "where table_schema = 'public' and table_name = %s",
+                (table,),
+            )
+        }
+        inserted = 0
+        for row in rows:
+            cols = [c for c in row if c in real]
+            if not cols:
+                continue
+            names = ", ".join(f'"{c}"' for c in cols)
+            marks = ", ".join(["%s"] * len(cols))
+            # Identifiers are checked against information_schema above.
+            done = await self._one(
+                f"insert into {table} ({names}) values ({marks}) "  # noqa: S608
+                "on conflict do nothing returning 1 as ok",
+                [row[c] for c in cols],
+            )
+            inserted += 1 if done else 0
+        return inserted
+
     async def export(self) -> dict[str, list[Row]]:
         out: dict[str, list[Row]] = {}
         for table in self.BACKUP_TABLES:

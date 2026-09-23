@@ -289,6 +289,9 @@ ran and whether it worked. `/sync` pulls Canvas, the calendar and shifts now.
 `/var/lib/sloane/models/backups/sloane-YYYY-MM-DD.json` inside the `models`
 volume, keeping 14. Copy one off the box with
 `docker cp sloane:/var/lib/sloane/models/backups ./sloane-backups`.
+To bring lost rows back (it merges; nothing current is overwritten; dry run
+unless `--apply`):
+`docker compose run --rm sloane python scripts/restore_backup.py /var/lib/sloane/models/backups/sloane-YYYY-MM-DD.json --apply`
 
 ## When something is wrong
 

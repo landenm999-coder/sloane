@@ -476,6 +476,7 @@ scripts/
   seed_courses.py  the real semester schedule into tier 4
   gmail_auth.py  one-time Gmail consent; writes the token into .env
   dev_db.sh      local Postgres + pgvector for the tests, idempotent
+  restore_backup.py  merge a nightly backup back in (dry run by default)
   eval.py        golden questions through the real model, scored in code
 tests/           run.py plus one file per unit
 ```
