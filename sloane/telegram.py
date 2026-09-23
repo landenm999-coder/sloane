@@ -30,12 +30,24 @@ from sloane.memory.store import Store, remember
 from sloane.providers.base import ProviderError
 from sloane.providers.groq import GroqProvider
 from sloane.agency import Agency, callback_data, parse_callback
+from sloane.skills import Answer, Registry
 from sloane.voice import Voice
 
 log = logging.getLogger(__name__)
 
 # Telegram's hard cap on one message. Longer replies are split, never cut.
 TELEGRAM_LIMIT = 4096
+
+# Answered by _handle_command itself. A skill may not claim one of these.
+BUILTIN_COMMANDS = frozenset({
+    "usage", "state", "sync", "brief", "remind", "promise", "promises", "kept",
+    "reminders", "unremind", "trust", "revoke", "cancel", "grades", "done",
+    "status", "today", "week", "jobs", "inbox", "start", "help",
+})
+
+
+def _reply(answer: Answer) -> Reply:
+    return Reply(speech=answer.speech, detail=answer.detail)
 
 
 def split_message(text: str, limit: int = TELEGRAM_LIMIT) -> list[str]:
@@ -70,12 +82,14 @@ class Bot:
         *,
         voice: "Voice | None" = None,
         agency: "Agency | None" = None,
+        skills: "Registry | None" = None,
     ) -> None:
         self._config = config or default_settings()
         self._store = store
         self._agent = agent
         self._voice = voice
         self.agency = agency
+        self.skills = skills
         # Set by main once the scheduler exists: runs a named job now.
         self.run_job: Callable[[str], Awaitable[Any]] | None = None
         self._stt = GroqProvider(self._config)
@@ -605,26 +619,33 @@ class Bot:
         if name == "inbox":
             return await self._inbox()
         if name in {"start", "help"}:
+            skill_help = self.skills.help_lines() if self.skills is not None else []
             return Reply(
                 speech="I am here. Text me or send a voice note.",
-                detail=(
-                    "`/usage` — model calls in the last 24h\n"
-                    "`/state` — the durable facts I hold\n"
-                    "`/sync` — pull Canvas, the calendar and shifts now\n"
-                    "`/today` · `/week` — the schedule straight from the database, no AI\n"
-                    "`/grades` — current course grades from Canvas\n"
-                    "`/done <assignment>` — handed it in; stop counting it as due\n"
-                    "`/status` — is anything broken? (no AI)\n"
-                    "`/brief` — the morning brief, right now\n"
-                    "`/jobs` — what ran, and whether it worked\n"
-                    "`/inbox` — triage new email now\n"
-                    "`/remind 5pm call Keegan` — a reminder at a time (or just say \"remind me…\")\n"
-                    "`/reminders` — what's set; `/unremind <n>` cancels one\n"
-                    "`/promise <what> by <when>` — track a promise; `/promises`, `/kept <n>`\n"
-                    "`/trust` — what I may do without asking\n"
-                    "`/revoke <action> <target>` — make me ask again"
-                ),
+                detail="\n".join([
+                    "`/usage` — model calls in the last 24h",
+                    "`/state` — the durable facts I hold",
+                    "`/sync` — pull Canvas, the calendar and shifts now",
+                    "`/today` · `/week` — the schedule straight from the database, no AI",
+                    "`/grades` — current course grades from Canvas",
+                    "`/done <assignment>` — handed it in; stop counting it as due",
+                    "`/status` — is anything broken? (no AI)",
+                    "`/brief` — the morning brief, right now",
+                    "`/jobs` — what ran, and whether it worked",
+                    "`/inbox` — triage new email now",
+                    "`/remind 5pm call Keegan` — a reminder at a time (or just say \"remind me…\")",
+                    "`/reminders` — what's set; `/unremind <n>` cancels one",
+                    "`/promise <what> by <when>` — track a promise; `/promises`, `/kept <n>`",
+                    "`/trust` — what I may do without asking",
+                    "`/revoke <action> <target>` — make me ask again",
+                    *skill_help,
+                ]),
             )
+        if self.skills is not None:
+            rest = command.split(maxsplit=1)[1] if len(command.split(maxsplit=1)) > 1 else ""
+            answer = await self.skills.command(name, rest)
+            if answer is not None:
+                return _reply(answer)
         return None
 
     # -- the loop --------------------------------------------------------------
@@ -718,6 +739,13 @@ class Bot:
             reply = await self._handle_command(body)
             if reply is not None:
                 await self.send(chat_id, reply)
+                return
+        elif self.skills is not None:
+            # An open session (a quiz) first, then each skill's own rules
+            # ("add milk to my grocery list"). No model unless the skill uses one.
+            answer = await self.skills.route(body)
+            if answer is not None:
+                await self.reply(chat_id, _reply(answer), as_voice=bool(voice))
                 return
 
         reply = await self._agent.answer(body, channel=kind)

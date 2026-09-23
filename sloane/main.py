@@ -30,6 +30,7 @@ from sloane.voice import Voice
 from sloane.config import settings
 from sloane.memory.embed import Embedder
 from sloane.memory.store import Store
+from sloane.skills import SkillContext, load as load_skills
 from sloane.telegram import Bot
 
 log = logging.getLogger(__name__)
@@ -59,10 +60,15 @@ def create_app() -> FastAPI:
         embedder = Embedder(config)
         # One router for text and speech, so /usage accounts for both.
         router = Router(config, usage_sink=usage_sink(store))
-        agent = Agent(store, config, router=router, embedder=embedder)
+        # Skills see the same store, router and embedder as everything else;
+        # `say` is filled in once the bot exists.
+        skill_ctx = SkillContext(store=store, config=config, router=router, embedder=embedder)
+        skills = load_skills(skill_ctx)
+        agent = Agent(store, config, router=router, embedder=embedder, skills=skills)
         voice = Voice(router, store, config)
         state["agent"] = agent
         state["embedder"] = embedder
+        state["skills"] = skills
 
         # Load the ONNX weights now so the first message of the day is not the
         # one that waits for a 130 MB model to come off disk.
@@ -71,8 +77,10 @@ def create_app() -> FastAPI:
         task: asyncio.Task | None = None
         bot: Bot | None = None
         if config.telegram_bot_token:
-            bot = Bot(store, agent, config, voice=voice)
+            bot = Bot(store, agent, config, voice=voice, skills=skills)
             state["bot"] = bot
+            if config.telegram_chat_id:
+                skill_ctx.say = bot.say
             task = asyncio.create_task(bot.poll_forever())
             log.info("telegram poller started")
         else:
@@ -117,6 +125,7 @@ def create_app() -> FastAPI:
             config=config, send=send, speak=speak, inbox=inbox,
             say=bot.say if bot is not None and config.telegram_chat_id else None,
             remind=bot.remind if bot is not None and config.telegram_chat_id else None,
+            skills=skills,
         )
         scheduler = Scheduler(ctx)
         state["scheduler"] = scheduler
@@ -150,6 +159,7 @@ def create_app() -> FastAPI:
             "bulk_provider": config.bulk_provider,
             "bot": "polling" if "bot" in state else "off",
             "hard_lines": len(HARD_LINES),
+            "skills": state["skills"].names if "skills" in state else [],
         }
 
     @app.get("/usage")

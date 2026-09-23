@@ -151,6 +151,14 @@ class Settings(BaseSettings):
     backup_dir: str = ""
     backup_keep: int = 14
 
+    # --- skills (sloane/skills/) ----------------------------------------------
+    # Comma-separated skill names to switch off without removing their code.
+    skills_disabled: str = ""
+
+    @property
+    def disabled_skills(self) -> frozenset[str]:
+        return frozenset(n.strip() for n in self.skills_disabled.split(",") if n.strip())
+
     # --- behaviour -----------------------------------------------------------
     timezone: str = "America/Denver"
     max_reply_tokens: int = 1024

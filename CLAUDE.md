@@ -21,10 +21,23 @@ Update its "In flight" and "Backlog" sections before you stop.
 9. Anything Sloane *initiates* goes through `Agency.propose()`. A thing Landen explicitly asks for (e.g. `/remind`)
    is its own approval.
 
+## Skills: how a new feature plugs in
+
+New capabilities are skills: one module `sloane/skills/<name>.py` exposing `build(ctx) -> Skill | None`
+(None when unconfigured). They are discovered at startup, so adding one never edits the bot or the agent.
+The contract (commands, plain-message rules, sessions, FACTS lines, TV panel, heartbeat nudges, and the
+rules a skill keeps) is the docstring of `sloane/skills/__init__.py`. A skill's SQL goes in its own
+`sql/0NN_<name>.sql` and its own section at the end of the `Store` class, headed `# -- <name> (sql/0NN) --`.
+Its tests are `tests/test_<name>.py`, listed in `tests/run.py`. `SKILLS_DISABLED` switches one off.
+
 ## Working
 
 - The environment comes from `.claude/hooks/session-start.sh` on the web (`.venv`, plus Postgres at
   `/tmp:5433` from `scripts/dev_db.sh`). Locally, run those two yourself.
+- On Landen's Windows PC, run everything in Docker instead:
+  `powershell -File C:\Users\lande\sloane-dev\test.ps1 -Repo <repo or worktree> -Database <db>` applies every
+  migration twice, then runs shellcheck, pyflakes and the suite on Python 3.12 against pgvector. `-Cmd "..."` runs
+  one command instead. Give each worktree its own `-Database`.
 - Tests: `python tests/run.py` (unit suites always; integration ones when `DATABASE_URL` is set).
   Integration tests are **destructive**, so point them only at the local `sloane` db. Give a review agent
   `sloane_review` so it doesn't clobber yours.

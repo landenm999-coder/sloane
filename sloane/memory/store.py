@@ -1520,6 +1520,52 @@ class Store:
             (status, error, name),
         )
 
+    # -- skills: sessions (sql/013) ---------------------------------------------
+    #
+    # Each skill's queries get their own section below this one, headed with the
+    # skill and its migration, like this one.
+
+    async def active_session(self, idle_minutes: int) -> Row | None:
+        """The open skill session. One left idle too long is closed first."""
+        await self._exec(
+            """
+            update skill_sessions set ended_at = now()
+             where ended_at is null and touched_at < now() - make_interval(mins => %s)
+            """,
+            (idle_minutes,),
+        )
+        return await self._one("select * from skill_sessions where ended_at is null")
+
+    async def start_session(self, skill: str, state: dict) -> Row:
+        """Open a session, ending whichever one was open."""
+        await self._exec("update skill_sessions set ended_at = now() where ended_at is null")
+        row = await self._one(
+            "insert into skill_sessions (skill, state) values (%s, %s) returning *",
+            (skill, Jsonb(state)),
+        )
+        assert row is not None
+        return row
+
+    async def touch_session(self, session_id: str, state: dict) -> None:
+        await self._exec(
+            """
+            update skill_sessions set state = %s, touched_at = now()
+             where id = %s and ended_at is null
+            """,
+            (Jsonb(state), session_id),
+        )
+
+    async def end_session(self, session_id: str | None = None) -> Row | None:
+        """End one session, or whichever is open. None if nothing was open."""
+        if session_id is None:
+            return await self._one(
+                "update skill_sessions set ended_at = now() where ended_at is null returning *"
+            )
+        return await self._one(
+            "update skill_sessions set ended_at = now() where id = %s and ended_at is null returning *",
+            (session_id,),
+        )
+
 
 async def remember(what: str, coro: Awaitable[T]) -> T | None:
     """Run a memory write that must never cost us the reply.

@@ -138,6 +138,7 @@ def render_facts(
     events: Sequence[Row] = (),
     conflicts: Sequence[str] = (),
     reminders: Sequence[Row] = (),
+    extra: Sequence[str] = (),
     budget: int,
     tz: str = "UTC",
 ) -> tuple[str, int]:
@@ -166,6 +167,9 @@ def render_facts(
         lines.append(f"- EVENT {when}: {e['title']}{where}")
     for r in reminders:
         lines.append(f"- REMINDER set for {_when(r.get('due_at'), tz)}: {r['text']}")
+    # Skill lines (weather, lists, countdowns ...). Each is already one exact
+    # "- ..." line, and each skill keeps its own few.
+    lines.extend(extra)
     for a in assignments:
         course = f" [{a['course']}]" if a.get("course") else ""
         lines.append(f"- DUE {_when(a.get('due_at'), tz)}: {a['title']}{course}")
@@ -255,6 +259,7 @@ def assemble(
     events: Sequence[Row] = (),
     conflicts: Sequence[str] = (),
     reminders: Sequence[Row] = (),
+    skill_facts: Sequence[str] = (),
     episodes: Sequence[Row] = (),
     ingested: str = "",
     config: Settings | None = None,
@@ -275,6 +280,7 @@ def assemble(
         events=events,
         conflicts=conflicts,
         reminders=reminders,
+        extra=skill_facts,
         budget=cfg.budget_entities,
         tz=tz,
     )

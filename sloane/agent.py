@@ -27,6 +27,7 @@ from sloane.memory.store import Store, remember
 from sloane.memory.tiers import assemble, usage_sink
 from sloane.persona import system_prompt
 from sloane.router import NoProviderAvailable, Router
+from sloane.skills import Registry
 
 log = logging.getLogger(__name__)
 
@@ -94,11 +95,13 @@ class Agent:
         *,
         router: Router | None = None,
         embedder: Embedder | None = None,
+        skills: Registry | None = None,
     ) -> None:
         self._config = config or default_settings()
         self._store = store
         self._router = router or Router(self._config, usage_sink=usage_sink(store))
         self._embedder = embedder or Embedder(self._config)
+        self.skills = skills
 
     # -- reading ---------------------------------------------------------------
 
@@ -125,6 +128,8 @@ class Agent:
                                  tzinfo=ZoneInfo(self._config.timezone)),
             ),
         }
+        if self.skills is not None:
+            reads["skills"] = self.skills.facts()
         settled = await asyncio.gather(*reads.values(), return_exceptions=True)
 
         out: dict = {}
@@ -134,8 +139,12 @@ class Agent:
                 log.warning("tier read %s failed: %s", name, result)
                 out[name] = []
                 notes.append(f"{name} could not be read this turn")
+            elif name == "skills":
+                out[name], skill_notes = result
+                notes.extend(skill_notes)
             else:
                 out[name] = result
+        out.setdefault("skills", [])
 
         if notes:
             notes.append(
@@ -203,6 +212,7 @@ class Agent:
             commitments=tiers["commitments"],
             events=tiers["events"],
             reminders=tiers["reminders"],
+            skill_facts=tiers["skills"],
             conflicts=render_conflicts(collisions, self._config.timezone),
             episodes=episodes,
             ingested=ingested,

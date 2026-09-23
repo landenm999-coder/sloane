@@ -37,6 +37,7 @@ from sloane.memory.store import Store, remember
 
 if TYPE_CHECKING:
     from sloane.mail.inbox import Inbox
+    from sloane.skills import Registry
 
 log = logging.getLogger(__name__)
 
@@ -72,6 +73,8 @@ class JobContext:
     speak: Sender | None = None
     # A reminder with snooze buttons: (text, reminder id). Falls back to `say`.
     remind: Callable[[str, str], Awaitable[None]] | None = None
+    # Every loaded skill (sloane.skills.Registry), for jobs that ask them things.
+    skills: Registry | None = None
 
     def today(self) -> date:
         return datetime.now(ZoneInfo(self.config.timezone)).date()
