@@ -14,3 +14,6 @@ venv/
 .local_cache/
 
 .DS_Store
+
+# Agent worktrees (Claude Code isolation); never part of the repo.
+.claude/worktrees/
