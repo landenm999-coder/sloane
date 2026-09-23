@@ -58,6 +58,13 @@ class Settings(BaseSettings):
     # Groq's free TTS allowance is about 100 requests a day, and a long reply
     # can take two. Past this she answers in text and says so in the log.
     daily_speak_budget: int = 80
+    # Scheduled briefs to deliver as voice notes, comma-separated job names,
+    # e.g. "morning_brief". Empty: all text. A voice failure still sends text.
+    voice_briefs: str = ""
+
+    @property
+    def voice_brief_names(self) -> frozenset[str]:
+        return frozenset(n.strip() for n in self.voice_briefs.split(",") if n.strip())
 
     # --- anthropic api (the paid destination of the upgrade lever) -----------
     anthropic_api_key: str = ""

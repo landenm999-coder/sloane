@@ -100,16 +100,19 @@ def create_app() -> FastAPI:
         # Briefs go to Landen's chat and nowhere else. Without a chat id there is
         # nobody to send to, so the jobs still run and record, but deliver
         # nothing -- which /jobs will show plainly.
-        send = None
+        send = speak = None
         if bot is not None and config.telegram_chat_id:
             async def deliver(reply):  # noqa: ANN001
                 await bot.send(config.telegram_chat_id, reply)
 
             send = deliver
 
+            async def speak(reply):  # noqa: ANN001 - voice note, text if voice fails
+                await bot.reply(config.telegram_chat_id, reply, as_voice=True)
+
         ctx = JobContext(
             store=store, agent=agent, governor=Governor(store, config),
-            config=config, send=send, inbox=inbox,
+            config=config, send=send, speak=speak, inbox=inbox,
             say=bot.say if bot is not None and config.telegram_chat_id else None,
             remind=bot.remind if bot is not None and config.telegram_chat_id else None,
         )

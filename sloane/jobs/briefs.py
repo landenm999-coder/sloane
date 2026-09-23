@@ -68,6 +68,8 @@ class JobContext:
     # are not an agent turn: a reminder is his own words, not something to ask
     # a model about.
     say: Callable[[str], Awaitable[None]] | None = None
+    # A brief as a voice note (text if voice fails). Used for VOICE_BRIEFS.
+    speak: Sender | None = None
     # A reminder with snooze buttons: (text, reminder id). Falls back to `say`.
     remind: Callable[[str, str], Awaitable[None]] | None = None
 
@@ -111,9 +113,10 @@ async def _brief(name: str, ctx: JobContext, now: datetime | None = None) -> Job
     reply = await ctx.agent.answer(QUESTIONS[name], channel=f"job:{name}", today=ctx.today())
 
     sent = False
-    if ctx.send is not None:
+    deliver = ctx.speak if (ctx.speak is not None and name in ctx.config.voice_brief_names) else ctx.send
+    if deliver is not None:
         try:
-            await ctx.send(reply)
+            await deliver(reply)
             sent = True
         except Exception as exc:  # noqa: BLE001 - a send failure is recorded, not raised
             log.warning("%s could not be delivered: %s", name, exc)

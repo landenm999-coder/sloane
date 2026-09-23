@@ -114,6 +114,17 @@ async def main() -> None:
         check("with the agent's reply", outbox.sent[0].speech, "Two things are due today.")
         check("tagged as a job turn, not a user turn", agent.asked, ["job:morning_brief"])
 
+        # -- VOICE_BRIEFS routes a brief to the voice sender ----------------
+        spoken_out = Outbox()
+        voiced = JobContext(store=store, agent=FakeAgent(), governor=Governor(store, config),
+                            config=isolated(database_url=os.environ["DATABASE_URL"], timezone="America/Denver",
+                                            daily_job_budget=3, voice_briefs="morning_brief"),
+                            send=Outbox(), speak=spoken_out)
+        await HANDLERS["morning_brief"](voiced, local(6, 35))
+        check("a voice brief goes to the voice sender", len(spoken_out.sent), 1)
+        await HANDLERS["wrap"](voiced, local(22))
+        check("others stay text", len(spoken_out.sent), 1)
+
         # -- a delivery failure is recorded, not raised ----------------------
         broken = await HANDLERS["wrap"](context(Outbox(fail=True)), local(22))
         check("a dead Telegram does not raise out of the job", broken.ran, True)

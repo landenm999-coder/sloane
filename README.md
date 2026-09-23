@@ -45,6 +45,7 @@ Total running cost: **$0/mo**, every layer on a free tier.
 | Weekly review | Sunday 7 PM: the week behind (grades, missing work, promises kept — from her own records) and the week ahead from FACTS |
 | Backups | 12:30 AM, silent: state, promises, people, courses, trust, reminders and jobs as JSON on the `models` volume, 14 kept |
 | Reminders | "remind me at 5 to call Keegan" — typed or spoken, times read by rules (no model), held through quiet hours; each arrives with Snooze 10 min / 1 hour / Tomorrow 7am / Done buttons |
+| Voice briefs | `VOICE_BRIEFS=morning_brief` sends that brief as a voice note (text if voice fails) |
 | Status | `/status`: open problems, last sync, provider health, last brief, Gmail — from her own bookkeeping, no model |
 | Gmail | triage every 3h in one batched call; replies drafted in his voice, sent only on Approve |
 | HTTP | `/health`, `/usage`, `/state`, `/facts`, `/jobs`, `POST /sync`, `POST /jobs/{name}/run`, `POST /capture` (token) |
