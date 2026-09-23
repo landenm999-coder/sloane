@@ -128,6 +128,11 @@ class Settings(BaseSettings):
     # 32 characters, means the endpoint is off. Generate one with:
     #   python3 -c "import secrets; print(secrets.token_urlsafe(32))"
     capture_token: str = ""
+    # Web origins allowed to call /capture from a browser (the Capture app on
+    # his phone), comma-separated, e.g. "https://capture.example.app". Empty:
+    # no cross-origin access, which is right until Capture is connected.
+    # Scoped to the token-checked endpoints only; see sloane/cors.py.
+    cors_origins: str = ""
 
     # --- telegram ------------------------------------------------------------
     telegram_bot_token: str = ""

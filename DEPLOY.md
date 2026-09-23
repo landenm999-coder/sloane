@@ -261,6 +261,16 @@ checks a password, and it stays off until you set one.
    Whatever you capture is stored in your own voice, so she can recall it later. A captured
    "remind me …" becomes a real reminder.
 
+4. Capture is a web page, so its POST to Sloane is cross-origin and the browser checks with
+   Sloane first. Allow Capture's address (the one in your phone's address bar) in `.env`, then restart:
+
+   ```bash
+   echo 'CORS_ORIGINS=https://<your-capture-app>.vercel.app' >> .env
+   sudo systemctl restart sloane
+   ```
+
+   Only `/capture` answers cross-origin; `/facts`, `/state` and the rest never do.
+
 ## 8. Run her
 
 ```bash

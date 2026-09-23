@@ -19,6 +19,7 @@ from fastapi.responses import JSONResponse
 
 from sloane.agency import Agency, reminder_action
 from sloane.agent import HARD_LINES, Agent
+from sloane.cors import ScopedCORS, origins as cors_origins
 from sloane.jobs.briefs import JobContext
 from sloane.jobs.governor import Governor
 from sloane.jobs.scheduler import Scheduler
@@ -36,6 +37,9 @@ from sloane.telegram import Bot
 log = logging.getLogger(__name__)
 
 MAX_CAPTURE_BYTES = 64_000
+
+# Endpoints a browser app may call cross-origin. Each checks its own token.
+CORS_PATHS = frozenset({"/capture"})
 
 
 def create_app() -> FastAPI:
@@ -148,6 +152,8 @@ def create_app() -> FastAPI:
             await store.close()
 
     app = FastAPI(title="Sloane", version="0.1.0", lifespan=lifespan)
+    # Browser apps (Capture) may call the token-checked endpoints, and only those.
+    app.add_middleware(ScopedCORS, origins=cors_origins(config.cors_origins), paths=CORS_PATHS)
 
     @app.get("/health")
     async def health() -> dict:

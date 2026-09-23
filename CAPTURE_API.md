@@ -13,6 +13,9 @@ Content-Type: application/json
 
 - The address comes from `tailscale serve` on the box (DEPLOY.md §7d). The phone must be on the same tailnet.
   The address is never public.
+- The request comes from the browser on his phone, so it is cross-origin. Sloane answers the CORS preflight
+  (and Chrome's Private Network Access preflight) only for origins listed in `CORS_ORIGINS`, and only on
+  `/capture`. A preflight that fails shows up in the browser as a network error.
 - The token is `CAPTURE_TOKEN` from the box's `.env`. It must be at least 32 characters, or the endpoint is off.
   Store it the way the app stores any secret, and never put it in a URL.
 
