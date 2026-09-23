@@ -92,8 +92,9 @@ Nothing half-done. (Update this section before stopping if something is.)
 
 ## Backlog (ideas, in priority order)
 
-1. **Capture → Sloane client** (in the capture repo): a settings screen for URL + token, and a POST after each
-   transcription. Sloane's side (`POST /capture`) is done and documented in DEPLOY §7d.
+1. **Capture → Sloane client** (in the capture repo): settings for URL + token, a POST after each transcription,
+   and an offline retry queue. Sloane's side (`POST /capture`) is done. The exact contract is in
+   **`CAPTURE_API.md`**, with the setup in DEPLOY §7d.
 2. Infinite Campus (grades), deliberately out of v1. Needs district credentials, and repeated automated logins can
    lock the account.
 3. P5 phone calls, beyond v1.

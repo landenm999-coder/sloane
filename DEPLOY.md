@@ -249,7 +249,7 @@ checks a password, and it stays off until you set one.
    your own devices. **Never use `tailscale funnel`**: that would put her on the
    public internet.
 
-3. In Capture's settings, enter that URL and the token. Test it from any
+3. In Capture's settings, enter that URL and the token (the full request/response contract is in `CAPTURE_API.md`). Test it from any
    device on your tailnet:
 
    ```bash
