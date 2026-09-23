@@ -107,8 +107,10 @@ def create_app() -> FastAPI:
 
             send = deliver
 
-            async def speak(reply):  # noqa: ANN001 - voice note, text if voice fails
+            async def voice_note(reply):  # noqa: ANN001 - voice note, text if voice fails
                 await bot.reply(config.telegram_chat_id, reply, as_voice=True)
+
+            speak = voice_note
 
         ctx = JobContext(
             store=store, agent=agent, governor=Governor(store, config),
