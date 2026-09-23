@@ -131,6 +131,12 @@ check("overdue is capped and counted", ("Old log 8" in light.facts, "12 more, ol
       (False, True))
 check("an uncut list carries no cut note", "not listed" in light.facts, False)
 
+# --- a course grade rides on its CLASS line --------------------------------
+graded_facts, _ = render_facts(courses=[{"period": 2, "name": "Stat", "teacher": "Austin",
+                                         "current_score": 88.4, "current_grade": "B+"}],
+                               budget=500, tz="America/Denver")
+check("the current grade is in FACTS", "CLASS period 2: Stat, Austin — current grade 88.4% (B+)" in graded_facts, True)
+
 # --- empty tiers render as nothing, not as empty headers ------------------
 ctx = assemble(config=CFG)
 check("an empty context has no stray headers", ctx.to_prompt("hi").strip(), "LANDEN:\nhi")

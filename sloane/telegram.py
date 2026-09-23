@@ -369,6 +369,24 @@ class Bot:
         return Reply(speech=f"{len(rows)} open promise{'s' if len(rows) != 1 else ''}.",
                      detail="\n".join(lines) + "\n\n`/kept <n>` marks one done.")
 
+    async def _grades(self) -> Reply:
+        """Current course grades as Canvas last reported them. No model."""
+        rows = [c for c in await self._store.courses() if c.get("current_score") is not None]
+        if not rows:
+            return Reply(speech="I don't have any course grades from Canvas yet.",
+                         detail="Grades arrive with the Canvas sync, if your teachers show totals. `/sync` pulls now.")
+        rows.sort(key=lambda c: c["current_score"])
+        lines = []
+        for c in sorted(rows, key=lambda c: (c.get("period") is None, c.get("period") or 0)):
+            letter = f" ({c['current_grade']})" if c.get("current_grade") else ""
+            period = f"P{c['period']} " if c.get("period") is not None else ""
+            lines.append(f"• {period}{c['name']}: {c['current_score']:g}%{letter}")
+        low = rows[0]
+        return Reply(
+            speech=f"Lowest right now is {low['name']} at {low['current_score']:g} percent.",
+            detail="\n".join(lines),
+        )
+
     async def _reminders(self, command: str) -> Reply:
         from sloane.reminders import spoken
 
@@ -452,6 +470,8 @@ class Bot:
             return await self._reminders(command)
         if name in {"trust", "revoke", "cancel"}:
             return await self._agency_command(name, command)
+        if name == "grades":
+            return await self._grades()
         if name in {"today", "week"}:
             return await self._view(name)
         if name == "jobs":
@@ -466,6 +486,7 @@ class Bot:
                     "`/state` — the durable facts I hold\n"
                     "`/sync` — pull Canvas, the calendar and shifts now\n"
                     "`/today` · `/week` — the schedule straight from the database, no AI\n"
+                    "`/grades` — current course grades from Canvas\n"
                     "`/brief` — the morning brief, right now\n"
                     "`/jobs` — what ran, and whether it worked\n"
                     "`/inbox` — triage new email now\n"

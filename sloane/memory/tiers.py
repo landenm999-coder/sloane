@@ -183,7 +183,11 @@ def render_facts(
     for c in courses:
         period = f"period {c['period']}" if c.get("period") is not None else "unscheduled"
         teacher = f", {c['teacher']}" if c.get("teacher") else ""
-        lines.append(f"- CLASS {period}: {c['name']}{teacher}")
+        score = ""
+        if c.get("current_score") is not None:
+            letter = f" ({c['current_grade']})" if c.get("current_grade") else ""
+            score = f" — current grade {c['current_score']:g}%{letter}"
+        lines.append(f"- CLASS {period}: {c['name']}{teacher}{score}")
 
     kept, used = fit(lines, budget)
     if len(kept) < len(lines):

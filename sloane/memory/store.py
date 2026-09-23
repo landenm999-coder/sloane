@@ -616,7 +616,8 @@ class Store:
     async def courses(self, semester: str | None = None) -> list[Row]:
         return await self._fetch(
             """
-            select id, period, name, teacher, semester, room, source, external_id
+            select id, period, name, teacher, semester, room, source, external_id,
+                   current_score, current_grade, grade_updated_at
               from courses
              where active
                and (%s::text is null or semester = %s::text)
@@ -709,6 +710,21 @@ class Store:
             "update courses set source = %s, external_id = %s where id = %s",
             (source, external_id, course_id),
         )
+
+    async def set_course_grade(self, course_id: str, *, score: float | None,
+                               grade: str | None) -> float | None:
+        """Store the current grade; returns the score it replaced (None if none)."""
+        row = await self._one(
+            """
+            with before as (select current_score from courses where id = %s)
+            update courses
+               set current_score = %s, current_grade = %s, grade_updated_at = now()
+             where id = %s
+            returning (select current_score from before) as previous
+            """,
+            (course_id, score, grade, course_id),
+        )
+        return row["previous"] if row else None
 
     async def create_course(self, *, name: str, source: str, external_id: str) -> str:
         """Record an upstream course the seed does not describe.

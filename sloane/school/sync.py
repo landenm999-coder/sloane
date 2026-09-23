@@ -29,6 +29,9 @@ from sloane.school.shifts import planned_shifts
 
 log = logging.getLogger(__name__)
 
+# Percentage points a course grade must move before it's worth a message.
+GRADE_STEP = 2.0
+
 
 @dataclass
 class SourceResult:
@@ -117,6 +120,25 @@ async def sync_courses_and_assignments(store: Store, config: Settings) -> list[S
             linked += 1
         except Exception as exc:  # noqa: BLE001 - one bad course is not the sync
             log.warning("could not link course %s: %s", course["external_id"], exc)
+
+    # Current grades, where Canvas shows them. A move of GRADE_STEP points or
+    # more is news; the first grade ever seen is the baseline.
+    for course in courses:
+        if course.get("score") is None:
+            continue
+        try:
+            cid = await store.course_id_for("canvas", course["external_id"])
+            if cid is None:
+                continue
+            previous = await store.set_course_grade(cid, score=course["score"], grade=course.get("grade"))
+            if previous is not None and abs(course["score"] - previous) >= GRADE_STEP:
+                letter = f" ({course['grade']})" if course.get("grade") else ""
+                await remember("grade change", store.record_school_change(
+                    assignment_id=None, kind="grade", title=course["name"], course=None,
+                    detail=f"{previous:g}% → {course['score']:g}%{letter}",
+                ))
+        except Exception as exc:  # noqa: BLE001 - a grade is context, never the sync
+            log.warning("could not store grade for %s: %s", course["external_id"], exc)
 
     results = [
         SourceResult(

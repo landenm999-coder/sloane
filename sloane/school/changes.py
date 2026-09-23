@@ -1,11 +1,12 @@
 """What changed in Canvas since the last sync, said once, in one message.
 
-Four kinds, and only these, because they are the ones he would act on:
+Five kinds, and only these, because they are the ones he would act on:
 
     new        a new assignment that isn't already past due
     graded     it just got a grade (with the score when Canvas gives one)
     missing    Canvas just flagged it missing
     due_moved  the due date moved, and it's still ahead
+    grade      a course's overall grade moved by 2+ points
 
 The first sync ever is a baseline and announces nothing; otherwise the first
 message would be every assignment of the semester. Rendering is rules, not a
@@ -23,7 +24,8 @@ from sloane.memory.store import Store
 
 Row = dict[str, Any]
 
-LABELS = {"new": "NEW", "graded": "GRADED", "missing": "MISSING", "due_moved": "MOVED"}
+LABELS = {"new": "NEW", "graded": "GRADED", "missing": "MISSING", "due_moved": "MOVED",
+          "grade": "GRADE"}
 MAX_LINES = 12
 
 
@@ -69,14 +71,14 @@ def render(rows: Sequence[Row]) -> str:
     counts: dict[str, int] = {}
     for r in rows:
         counts[r["kind"]] = counts.get(r["kind"], 0) + 1
-    order = ["new", "graded", "missing", "due_moved"]
+    order = ["grade", "new", "graded", "missing", "due_moved"]
     head = ", ".join(f"{counts[k]} {LABELS[k].lower()}" for k in order if counts.get(k))
     lines = [f"📚 Canvas: {head}"]
     ranked = sorted(rows, key=lambda r: (order.index(r["kind"]), r.get("detected_at") or 0))
     for r in ranked[:MAX_LINES]:
         course = f" [{r['course']}]" if r.get("course") else ""
         detail = r.get("detail") or ""
-        sep = ": " if r["kind"] == "graded" and detail else (" — " if detail else "")
+        sep = ": " if r["kind"] in ("graded", "grade") and detail else (" — " if detail else "")
         lines.append(f"• {LABELS[r['kind']]} {r['title']}{course}{sep}{detail}")
     if len(rows) > MAX_LINES:
         lines.append(f"…and {len(rows) - MAX_LINES} more")

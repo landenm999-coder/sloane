@@ -43,8 +43,11 @@ def check(label: str, got, want) -> None:
 # --- a stubbed Canvas, paginated like the real one --------------------------
 
 COURSES = [
-    {"id": 101, "name": "Statistical Reasoning - P2"},
-    {"id": 102, "name": "Physics"},
+    {"id": 101, "name": "Statistical Reasoning - P2",
+     "enrollments": [{"type": "student", "computed_current_score": 91.26,
+                      "computed_current_grade": "A-"}]},
+    # Totals hidden by the teacher: no enrollment score, and none is guessed.
+    {"id": 102, "name": "Physics", "enrollments": [{"type": "student"}]},
     # Canvas hides these; they must not become course rows.
     {"id": 103, "name": "Old Course", "access_restricted_by_date": True},
 ]
@@ -298,6 +301,12 @@ async def main() -> None:
             shifts_before,
         )
 
+        # -- course grades -----------------------------------------------------
+        graded = {c["external_id"]: c for c in await store.courses() if c.get("external_id")}
+        check("the current grade is stored, rounded", (graded["101"]["current_score"], graded["101"]["current_grade"]),
+              (91.3, "A-"))
+        check("a hidden total stays unknown", graded["102"]["current_score"], None)
+
         # -- Canvas change alerts ----------------------------------------------
         from sloane.school.changes import announce
 
@@ -340,6 +349,22 @@ async def main() -> None:
         check("a failed alert is kept for next time", await announce(store, say), 1)
         check("a moved due date is news", said[-1].splitlines()[1],
               "• MOVED Unit 2 project [Statistical Reasoning - P2] — now due Tue Jan 19 11:59 PM")
+
+        COURSES[0]["enrollments"][0].update(computed_current_score=87.9, computed_current_grade="B+")
+        await sync_all(store, config)
+        await announce(store, say)
+        check("a course grade that moves 2+ points is news", said[-1].splitlines()[1],
+              "• GRADE Statistical Reasoning - P2: 91.3% → 87.9% (B+)")
+        COURSES[0]["enrollments"][0].update(computed_current_score=88.4)
+        await sync_all(store, config)
+        check("a half-point wobble is not", await announce(store, say), 0)
+
+        from sloane.telegram import Bot
+
+        grades = await Bot(store, None, config)._grades()
+        check("/grades names the lowest", grades.speech,
+              "Lowest right now is Stat Reasoning at 88.4 percent.")
+        check("and lists only courses with a grade", grades.detail, "• P2 Stat Reasoning: 88.4% (B+)")
 
         # -- calendar --------------------------------------------------------
         events = parse_ics(

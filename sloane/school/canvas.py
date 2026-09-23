@@ -77,6 +77,24 @@ def _status(assignment: dict) -> str:
     return "open"
 
 
+def _current_grade(course: dict) -> tuple[float | None, str | None]:
+    """His current score and letter, from the student enrollment, if Canvas shows it.
+
+    Teachers can hide totals; then both are None and nothing is guessed.
+    """
+    for e in course.get("enrollments") or []:
+        if not isinstance(e, dict) or e.get("type", "student") not in ("student", "StudentEnrollment"):
+            continue
+        raw = e.get("computed_current_score")
+        try:
+            score = round(float(raw), 1) if raw is not None else None
+        except (TypeError, ValueError):
+            score = None
+        grade = safe_field(e.get("computed_current_grade"), limit=10) or None
+        return score, grade
+    return None, None
+
+
 class CanvasClient:
     def __init__(self, base_url: str, token: str, *, timeout: float = 30.0) -> None:
         self._base = base_url.rstrip("/")
@@ -138,6 +156,7 @@ class CanvasClient:
             "/api/v1/courses",
             enrollment_state="active",
             state=["available"],
+            **{"include[]": "total_scores"},
         )
         courses = []
         for c in raw:
@@ -146,7 +165,9 @@ class CanvasClient:
             name = safe_field(c.get("name"), limit=120)
             if not name or c.get("id") is None:
                 continue
-            courses.append({"external_id": str(c["id"]), "name": name})
+            score, grade = _current_grade(c)
+            courses.append({"external_id": str(c["id"]), "name": name,
+                            "score": score, "grade": grade})
         return courses
 
     async def assignments(self, course_id: str) -> list[dict]:

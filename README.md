@@ -28,7 +28,7 @@ Total running cost: **$0/mo**, every layer on a free tier.
 | Providers | `claude_code`, `groq`, `anthropic` behind one `Provider` base |
 | Contract | `Reply(speech, detail)` parsed from 5 model-output shapes |
 | Hard lines | 6 pairs, enforced in code before execution |
-| Interface | Telegram long polling: text, voice, buttons; `/today` `/week` `/brief` `/jobs` `/sync` `/inbox` `/remind` `/reminders` `/promise` `/promises` `/kept` `/trust` `/revoke` `/usage` `/state` |
+| Interface | Telegram long polling: text, voice, buttons; `/today` `/week` `/grades` `/brief` `/jobs` `/sync` `/inbox` `/remind` `/reminders` `/promise` `/promises` `/kept` `/trust` `/revoke` `/usage` `/state` |
 | School | Canvas assignments + secret `.ics` calendar, both read-only |
 | Shifts | generated from the fixed 3–7 PM Mon–Fri rule, DST-correct |
 | Sync | `/sync` on Telegram, `POST /sync` over HTTP, `entity_sync` job every 4h |
@@ -37,7 +37,8 @@ Total running cost: **$0/mo**, every layer on a free tier.
 | Voice | a voice note in gets a voice note out; text is always the fallback |
 | Agency | every action proposed, approved with buttons, or run under earned trust |
 | Views | `/today` and `/week` render the schedule, due work and conflicts straight from SQL — no model, so they answer even when every provider is down |
-| Canvas alerts | after each sync, one message for what changed: new assignments, grades (with the score), newly missing, moved due dates. The first sync is a silent baseline; alerts wait out quiet hours |
+| Grades | current course grade per class from Canvas (read-only; only where the teacher shows totals) in FACTS and `/grades`; a 2+ point move is an alert |
+| Canvas alerts | after each sync, one message for what changed: new assignments, grades (with the score), newly missing, moved due dates, course grades that moved. The first sync is a silent baseline; alerts wait out quiet hours |
 | Watchdog | every 30 min, no model: failing or partial jobs, a main/bulk model failing every call (e.g. an expired Claude login — with the fix), a dead Gmail grant. Told after an hour, repeated daily, "✅ working again" when it clears |
 | Capture intake | `POST /capture` with a bearer token: what he says in Capture is stored in his own voice (recallable), and "remind me …" becomes a reminder. Off until `CAPTURE_TOKEN` is set; reached over Tailscale, never a public port |
 | Promises | `/promise send Keegan the outline by friday` tracks what he owes and to whom ("by friday" = end of that day); shown in FACTS and briefs until `/kept` |
@@ -470,6 +471,7 @@ sql/
   007_school_changes.sql  Canvas changes waiting to be announced, idempotent
   008_watchdog.sql  what is broken and whether he's been told, idempotent
   009_weekly.sql   the Sunday review and the nightly backup jobs, idempotent
+  010_grades.sql   course grades on courses; 'grade' change kind, idempotent
 scripts/
   doctor.py      validates every credential
   seed_state.py  tier 1 from a markdown file
