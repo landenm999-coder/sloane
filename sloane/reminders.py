@@ -194,6 +194,12 @@ def parse(text: str, now: datetime) -> Parsed | None:
     if hour is None:
         chosen = part_time or DEFAULT_DAY_TIME
         hour, minute = chosen.hour, chosen.minute
+        # "Tonight" said after 8 PM still means tonight: the next of 10 or 11 PM.
+        if part_time == PARTS["tonight"] and target == today:
+            for late in (hour, 22, 23):
+                if now.replace(hour=late, minute=0, second=0, microsecond=0) > now:
+                    hour, minute = late, 0
+                    break
 
     def at(d, h):  # noqa: ANN001, ANN202
         return now.replace(year=d.year, month=d.month, day=d.day, hour=h,

@@ -186,9 +186,19 @@ def create_app() -> FastAPI:
         """Capture's intake. The only endpoint that checks a credential; see capture.py."""
         from sloane.capture import ingest
 
-        raw = await request.body()
-        if len(raw) > MAX_CAPTURE_BYTES:
-            return JSONResponse({"error": "body too large"}, status_code=413)
+        too_big = JSONResponse({"error": "body too large"}, status_code=413)
+        declared = request.headers.get("content-length", "")
+        if declared.isdigit() and int(declared) > MAX_CAPTURE_BYTES:
+            return too_big
+        # Read in chunks and stop at the cap: a chunked upload with no length
+        # must not be able to fill the box's memory before we look at it.
+        chunks, size = [], 0
+        async for chunk in request.stream():
+            size += len(chunk)
+            if size > MAX_CAPTURE_BYTES:
+                return too_big
+            chunks.append(chunk)
+        raw = b"".join(chunks)
         try:
             payload = json.loads(raw or b"null")
         except ValueError:

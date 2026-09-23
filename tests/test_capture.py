@@ -84,6 +84,26 @@ async def main() -> None:
         vague = await post({"text": "remind me about the lab thing"})
         check("no time: stored as a note, and says so", (vague.status, vague.body.get("reminder")), (201, None))
 
+    # -- the route caps the body before reading it all -------------------------------
+    import httpx
+
+    from sloane.main import create_app as _make
+
+    app = _make()
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://box") as client:
+        big = await client.post("/capture", content=b"x" * 70_000,
+                                headers={"Authorization": f"Bearer {TOKEN}"})
+        check("an oversized body is refused", big.status_code, 413)
+
+        async def chunked():
+            for _ in range(80):
+                yield b"x" * 1000
+
+        sneaky = await client.post("/capture", content=chunked(),
+                                   headers={"Authorization": f"Bearer {TOKEN}"})
+        check("so is one with no declared length", sneaky.status_code, 413)
+
     # -- the route exists and is the only POST besides the loopback admin ones ----
     from sloane.main import create_app
     posts = sorted(r.path for r in create_app().routes if "POST" in getattr(r, "methods", set()))

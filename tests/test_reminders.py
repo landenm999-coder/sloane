@@ -68,6 +68,10 @@ for text, want in CASES.items():
 for text in ("read chapter 5", "today at 8am x", "remind about 20 pages", "at 25 go", "in 0 minutes x"):
     check(f"no guess for {text!r}", parse(text, NOW), None)
 
+late = datetime(2026, 9, 22, 21, 0, tzinfo=DEN)
+check("'tonight' after 8 PM is later tonight", parse("tonight call mom", late).due.strftime("%H:%M"), "22:00")
+check("and at 11:30 PM there is no tonight left to set", parse("tonight call mom", late.replace(hour=23, minute=30)), None)
+
 # Across the November DST change the wall clock holds: "tomorrow 7am" is 7 AM.
 dst_eve = datetime(2026, 10, 31, 22, 0, tzinfo=DEN)
 check("DST: tomorrow 7am stays 7 AM local",
