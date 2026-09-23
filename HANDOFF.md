@@ -37,7 +37,7 @@ fixed with regression tests. The third found nothing high or medium.
 - `CAPTURE_API.md`, the contract for the Capture client
 - `CLAUDE.md` and a SessionStart hook
 
-Everything after v1 was reviewed by hand (`c7c88a7`). The real-model eval grew to 30 checks and passes 30/30.
+The post-v1 work was reviewed twice: by hand (`c7c88a7`), then by an adversarial review agent (`217d9ae`, no high findings; the medium and every low were fixed with tests, including the installer running correctly under `curl | bash`). The real-model eval grew to 30 checks and passes 30/30.
 Test suites: 21/21.
 
 **She has never run against the real services.** This sandbox can't reach Telegram, Groq, Canvas, Google or
