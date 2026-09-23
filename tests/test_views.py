@@ -69,6 +69,17 @@ check("an empty day is a dash", blocks[5], "Sun Sep 27\n• —")
 check("nothing due", views.week(TUE, assignments=[], shifts=[], events=[], tz=TZ)[0],
       "Nothing due in the next week.")
 
+# -- long replies are split for Telegram, never cut ------------------------------
+from sloane.telegram import split_message
+
+long = "\n".join(f"• line {i} " + "x" * 90 for i in range(120))
+parts = split_message(long)
+check("every part fits", all(len(p) <= 4096 for p in parts), True)
+check("nothing is lost", "\n".join(parts), long)
+check("splits fall on line breaks", all(p.startswith("• line") for p in parts), True)
+check("short text is one part", split_message("hi"), ["hi"])
+check("one unbroken run still splits", [len(p) for p in split_message("y" * 9000)], [4096, 4096, 808])
+
 if FAILURES:
     print(f"FAIL ({len(FAILURES)})")
     for f in FAILURES:

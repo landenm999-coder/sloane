@@ -33,6 +33,25 @@ from sloane.voice import Voice
 
 log = logging.getLogger(__name__)
 
+# Telegram's hard cap on one message. Longer replies are split, never cut.
+TELEGRAM_LIMIT = 4096
+
+
+def split_message(text: str, limit: int = TELEGRAM_LIMIT) -> list[str]:
+    """Split at line breaks (then spaces, then anywhere) so each part fits."""
+    parts: list[str] = []
+    rest = text
+    while len(rest) > limit:
+        cut = rest.rfind("\n", 0, limit)
+        if cut < limit // 2:
+            cut = rest.rfind(" ", 0, limit)
+        if cut < limit // 2:
+            cut = limit
+        parts.append(rest[:cut].rstrip())
+        rest = rest[cut:].lstrip("\n ")
+    parts.append(rest)
+    return [p for p in parts if p] or [""]
+
 
 API = "https://api.telegram.org"
 
@@ -84,7 +103,8 @@ class Bot:
         if detail and detail != reply.speech.strip():
             text = f"{text}\n\n{detail}"
         async with httpx.AsyncClient(timeout=30.0) as client:
-            await self._call(client, "sendMessage", chat_id=chat_id, text=text[:4096])
+            for part in split_message(text):
+                await self._call(client, "sendMessage", chat_id=chat_id, text=part)
         await remember(
             "outbound message",
             self._store.log_message(
