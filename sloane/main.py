@@ -76,8 +76,10 @@ def create_app() -> FastAPI:
         state["skills"] = skills
 
         # Load the ONNX weights now so the first message of the day is not the
-        # one that waits for a 130 MB model to come off disk.
+        # one that waits for a 130 MB model to come off disk. Likewise the model
+        # lane: a claude process started now answers the first message warm.
         asyncio.create_task(embedder.warm())
+        asyncio.create_task(agent.prewarm())
 
         task: asyncio.Task | None = None
         bot: Bot | None = None
@@ -150,6 +152,12 @@ def create_app() -> FastAPI:
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
+            # The last replies' memory writes, then no CLI left waiting.
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(agent.settle(), timeout=10)
+            from sloane.providers.claude_code import ClaudeCodeProvider
+
+            ClaudeCodeProvider.close_all()
             await store.close()
 
     app = FastAPI(title="Sloane", version="0.1.0", lifespan=lifespan)

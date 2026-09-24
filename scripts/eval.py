@@ -263,6 +263,7 @@ async def main(url: str) -> int:
               f"via {config.main_provider}\n")
         for case in cases(day, later):
             reply = await agent.answer(case.question, channel="eval", today=day)
+            await agent.settle()  # this turn's memory is written before the next question
             text = f"{reply.speech}\n{reply.detail}"
             print(f"Q: {case.question}\n   {reply.speech}")
             if reply.speech.startswith("I cannot reach a model"):

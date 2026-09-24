@@ -95,8 +95,13 @@ class Router:
 
     # -- lanes ----------------------------------------------------------------
 
-    async def reply(self, system: str, prompt: str, *, max_tokens: int = 0) -> str:
-        """The main lane: one turn, the answer Landen reads."""
+    async def reply(self, system: str, prompt: str, *, max_tokens: int = 0, on_text=None) -> str:  # noqa: ANN001
+        """The main lane: one turn, the answer Landen reads.
+
+        `on_text(text_so_far)` sees the reply as it is written, when the
+        provider can stream. If a provider fails part-way, the next one starts
+        from nothing and `on_text` sees its text instead.
+        """
         return await self._run(
             _lane(self._config.main_provider, MAIN_ORDER),
             system,
@@ -104,7 +109,15 @@ class Router:
             max_tokens or self._config.max_reply_tokens,
             bulk=False,
             purpose="job" if SCHEDULED.get() else "reply",
+            on_text=on_text,
         )
+
+    async def prewarm(self, system: str) -> None:
+        """Have the main lane's first provider ready for this system prompt."""
+        try:
+            await self._provider(self._config.main_provider, False).prewarm(system)
+        except Exception:  # noqa: BLE001 - warming up is an optimisation, never a failure
+            log.exception("could not prewarm %s", self._config.main_provider)
 
     async def bulk(self, system: str, prompt: str, *, max_tokens: int = 2048) -> str:
         """The bulk lane: batched triage and summarising, where volume beats polish."""
@@ -161,6 +174,7 @@ class Router:
         *,
         bulk: bool,
         purpose: str,
+        on_text=None,  # noqa: ANN001
     ) -> str:
         configured = lane[0]
         failures: list[str] = []
@@ -176,9 +190,12 @@ class Router:
                 continue
 
             try:
-                completion: Completion = await provider.complete(
-                    system, prompt, max_tokens=max_tokens
-                )
+                if on_text is not None:
+                    completion: Completion = await provider.stream(
+                        system, prompt, max_tokens=max_tokens, on_text=on_text
+                    )
+                else:
+                    completion = await provider.complete(system, prompt, max_tokens=max_tokens)
             except ProviderError as exc:
                 log.warning("provider %s failed: %s", name, exc.message)
                 failures.append(exc.message)

@@ -110,6 +110,19 @@ class Agent:
         self._router = router or Router(self._config, usage_sink=usage_sink(store))
         self._embedder = embedder or Embedder(self._config)
         self.skills = skills
+        # Memory writes run after the reply is on its way (invariant 5, taken
+        # literally). settle() waits for them: shutdown, tests, the eval.
+        self._pending: set[asyncio.Task] = set()
+
+    def _later(self, coro) -> None:  # noqa: ANN001
+        task = asyncio.get_running_loop().create_task(coro)
+        self._pending.add(task)
+        task.add_done_callback(self._pending.discard)
+
+    async def settle(self) -> None:
+        """Wait for memory writes still under way."""
+        while self._pending:
+            await asyncio.gather(*list(self._pending), return_exceptions=True)
 
     # -- reading ---------------------------------------------------------------
 
@@ -196,6 +209,7 @@ class Agent:
         ingested: str = "",
         channel: str = "telegram",
         today: date | None = None,
+        on_text=None,  # noqa: ANN001 - async (raw text so far) -> None, to show it as it's written
     ) -> Reply:
         """One turn. Returns a Reply even when the model is unreachable."""
         # Landen's clock, never the container's. Docker runs in UTC, and from
@@ -259,19 +273,24 @@ class Agent:
         )
 
         try:
-            raw = await self._router.reply(system_prompt(address=self._config.address_as), prompt)
+            raw = await self._router.reply(system_prompt(address=self._config.address_as), prompt,
+                                           on_text=on_text)
         except NoProviderAvailable as exc:
             log.error("every provider failed: %s", exc)
             reply = Reply(
                 speech="I cannot reach a model right now, so I have not answered that.",
                 detail=f"Every provider in the main lane failed: {exc}",
             )
-            await self._persist(question, reply, channel=channel, answered=False)
+            self._later(self._persist(question, reply, channel=channel, answered=False))
             return reply
 
         reply = parse(raw)
-        await self._persist(question, reply, channel=channel, answered=True)
+        self._later(self._persist(question, reply, channel=channel, answered=True))
         return reply
+
+    async def prewarm(self) -> None:
+        """Have the model lane ready for her system prompt before the first message."""
+        await self._router.prewarm(system_prompt(address=self._config.address_as))
 
     # -- writing ---------------------------------------------------------------
 

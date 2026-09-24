@@ -9,13 +9,18 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import shutil
 import tempfile
 import time
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 
 from sloane.config import Settings
 from sloane.providers.base import Completion, Provider, ProviderError, Usage
+
+log = logging.getLogger(__name__)
 
 
 # What the CLI needs to find itself, its login and the network. Nothing else:
@@ -74,15 +79,49 @@ def _unknown_option(stderr: str) -> bool:
     return "unknown option" in low or "unrecognized option" in low or "unknown argument" in low
 
 
+# A warm process older than this is replaced rather than used: an idle
+# process is memory the box could use, and a login may have moved on.
+WARM_MAX_AGE = 20 * 60
+
+TextSink = Callable[[str], Awaitable[None]]
+
+
+@dataclass
+class _Warm:
+    proc: asyncio.subprocess.Process
+    born: float
+
+
 class ClaudeCodeProvider(Provider):
+    """`claude -p`, kept warm and streamed.
+
+    Starting the CLI is most of the wait -- about two of every four seconds. So
+    one process is started ahead of time, idle on its input, for the system
+    prompt she answers with (`prewarm`); a turn hands it the prompt, reads the
+    reply as it streams, and lets it exit. A fresh one is started behind it
+    straight away. Each process answers exactly one turn: nothing piles up in
+    a session between them, and each turn's context is still built by us.
+
+    Every fallback leads back to the plain one-shot call: an old CLI that
+    rejects a flag, a warm process that died, streaming that isn't supported.
+    """
+
     name = "claude_code"
-    # Set once a CLI has refused the fast flags; shared by every instance.
+    # Set once a CLI has refused the fast flags, or streaming; shared by every
+    # instance, because a CLI doesn't change under a running process.
     legacy = False
+    no_stream = False
+    # One idle process per (cli, system prompt, model): the "primary" one.
+    _idle: dict[tuple[str, str, str], _Warm] = {}
+    _primary: tuple[str, str, str] | None = None
+    _spawning: set[asyncio.Task] = set()
 
     def __init__(self, settings: Settings) -> None:
         self._cli = settings.claude_cli
         self._timeout = settings.claude_cli_timeout
         self._model = settings.claude_cli_model.strip()
+
+    # -- the one-shot call (the floor every fallback lands on) --------------------
 
     async def complete(
         self,
@@ -91,8 +130,24 @@ class ClaudeCodeProvider(Provider):
         *,
         max_tokens: int = 1024,
     ) -> Completion:
+        return await self.stream(system, prompt, max_tokens=max_tokens)
+
+    async def stream(
+        self,
+        system: str,
+        prompt: str,
+        *,
+        max_tokens: int = 1024,
+        on_text: TextSink | None = None,
+    ) -> Completion:
         if shutil.which(self._cli) is None:
             raise ProviderError(self.name, f"{self._cli} is not on PATH")
+        if not (ClaudeCodeProvider.legacy or ClaudeCodeProvider.no_stream):
+            try:
+                return await self._streamed(system, prompt, on_text)
+            except _OldCli:
+                ClaudeCodeProvider.no_stream = True
+                self.close_all()
         try:
             return await self._once(system, prompt, legacy=ClaudeCodeProvider.legacy)
         except _OldCli:
@@ -149,6 +204,166 @@ class ClaudeCodeProvider(Provider):
                 latency_ms=latency_ms,
             ),
         )
+
+    # -- warm, streamed calls ---------------------------------------------------------
+
+    def _key(self, system: str) -> tuple[str, str, str]:
+        return (self._cli, system, self._model)
+
+    async def _spawn(self, system: str) -> asyncio.subprocess.Process:
+        argv = build_argv(self._cli, system, model=self._model, streaming=True)
+        try:
+            return await asyncio.create_subprocess_exec(
+                *argv,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=_cli_env(),
+                cwd=tempfile.gettempdir(),
+            )
+        except OSError as exc:
+            raise ProviderError(self.name, f"could not start {self._cli}: {exc}") from exc
+
+    async def prewarm(self, system: str) -> None:
+        """Make `system` the prompt kept warm, and start its process now."""
+        if shutil.which(self._cli) is None or ClaudeCodeProvider.legacy or ClaudeCodeProvider.no_stream:
+            return
+        ClaudeCodeProvider._primary = self._key(system)
+        await self._fill(system)
+
+    async def _fill(self, system: str) -> None:
+        key = self._key(system)
+        warm = ClaudeCodeProvider._idle.get(key)
+        if warm is not None and warm.proc.returncode is None:
+            return
+        try:
+            proc = await self._spawn(system)
+        except ProviderError as exc:
+            log.warning("could not keep a claude process warm: %s", exc.message)
+            return
+        if ClaudeCodeProvider._primary != key:
+            _kill(proc)  # closed (or re-pointed) while it was starting
+            return
+        ClaudeCodeProvider._idle[key] = _Warm(proc, time.monotonic())
+
+    def _refill_later(self, system: str) -> None:
+        if ClaudeCodeProvider._primary != self._key(system):
+            return
+        task = asyncio.get_running_loop().create_task(self._fill(system))
+        ClaudeCodeProvider._spawning.add(task)
+        task.add_done_callback(ClaudeCodeProvider._spawning.discard)
+
+    async def _take(self, system: str) -> tuple[asyncio.subprocess.Process, bool]:
+        """(a process for this turn, whether it was already warm)."""
+        warm = ClaudeCodeProvider._idle.pop(self._key(system), None)
+        if warm is not None:
+            if warm.proc.returncode is None and time.monotonic() - warm.born < WARM_MAX_AGE:
+                return warm.proc, True
+            _kill(warm.proc)
+        return await self._spawn(system), False
+
+    async def _streamed(self, system: str, prompt: str, on_text: TextSink | None) -> Completion:
+        started = time.monotonic()
+        proc, was_warm = await self._take(system)
+        self._refill_later(system)
+        message = {"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": prompt}]}}
+        try:
+            assert proc.stdin is not None
+            proc.stdin.write((json.dumps(message) + "\n").encode())
+            await proc.stdin.drain()
+            proc.stdin.close()
+        except (BrokenPipeError, ConnectionResetError, AssertionError) as exc:
+            _kill(proc)
+            if was_warm:  # it died while idle; one fresh try
+                return await self._streamed(system, prompt, on_text)
+            raise ProviderError(self.name, f"could not send the prompt: {exc}") from exc
+        try:
+            return await asyncio.wait_for(self._read(proc, on_text, started), timeout=self._timeout)
+        except asyncio.TimeoutError as exc:
+            _kill(proc)
+            raise ProviderError(self.name, f"timed out after {self._timeout}s") from exc
+
+    async def _read(self, proc: asyncio.subprocess.Process, on_text: TextSink | None,
+                    started: float) -> Completion:
+        assert proc.stdout is not None
+        text = ""
+        while True:
+            line = await proc.stdout.readline()
+            if not line:
+                break
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            kind = event.get("type")
+            if kind == "stream_event":
+                inner = event.get("event") or {}
+                delta = inner.get("delta") or {}
+                if inner.get("type") == "content_block_delta" and delta.get("type") == "text_delta":
+                    text += delta.get("text") or ""
+                    if on_text is not None:
+                        try:
+                            await on_text(text)
+                        except Exception:  # noqa: BLE001 - showing progress must not cost the reply
+                            log.exception("streaming sink failed; the reply continues")
+            elif kind == "result":
+                await _reap(proc)
+                if event.get("is_error") or event.get("subtype") not in (None, "success"):
+                    raise ProviderError(self.name, str(event.get("result") or event.get("subtype") or "error"))
+                final = event.get("result")
+                if not isinstance(final, str) or not final.strip():
+                    final = text
+                if not final.strip():
+                    raise ProviderError(self.name, "no text in output")
+                usage = event.get("usage") if isinstance(event.get("usage"), dict) else {}
+                models = event.get("modelUsage") if isinstance(event.get("modelUsage"), dict) else {}
+                return Completion(text=final, usage=Usage(
+                    provider=self.name,
+                    model=next(iter(models), "claude-code"),
+                    prompt_tokens=usage.get("input_tokens"),
+                    completion_tokens=usage.get("output_tokens"),
+                    latency_ms=int((time.monotonic() - started) * 1000),
+                ))
+        # The output ended without a result: say why, from stderr.
+        await proc.wait()
+        detail = ""
+        if proc.stderr is not None:
+            detail = (await proc.stderr.read()).decode(errors="replace").strip()
+        if _unknown_option(detail):
+            raise _OldCli(detail)
+        raise ProviderError(self.name, detail or f"exit {proc.returncode} before a reply")
+
+    @classmethod
+    def close_all(cls) -> None:
+        """Stop every idle process and every start still under way.
+
+        At shutdown, or when streaming turns out to be unsupported. A refill
+        left running would start a CLI that nobody ever talks to, which then
+        waits on its input for as long as the box stays up.
+        """
+        cls._primary = None
+        for task in list(cls._spawning):
+            task.cancel()
+        cls._spawning.clear()
+        for warm in cls._idle.values():
+            _kill(warm.proc)
+        cls._idle.clear()
+
+
+def _kill(proc: asyncio.subprocess.Process) -> None:
+    if proc.returncode is None:
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
+
+
+async def _reap(proc: asyncio.subprocess.Process) -> None:
+    """Let a finished process exit; kill it if it lingers."""
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=5)
+    except asyncio.TimeoutError:
+        _kill(proc)
 
 
 class _OldCli(Exception):

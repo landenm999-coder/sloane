@@ -100,6 +100,61 @@ def _try_json(blob: str) -> Reply | None:
         return None
 
 
+_ESCAPES = {'"': '"', "\\": "\\", "/": "/", "b": "\b", "f": "\f", "n": "\n", "r": "\r", "t": "\t"}
+
+
+def _partial_string(raw: str, key: str) -> str:
+    """The value of "key" in a JSON object that may still be arriving.
+
+    Decodes as far as the text goes and stops cleanly at a half-received
+    escape, so a streamed reply can be shown while it is being written.
+    """
+    found = re.search(r'"%s"\s*:\s*"' % re.escape(key), raw)
+    if not found:
+        return ""
+    out: list[str] = []
+    i = found.end()
+    while i < len(raw):
+        ch = raw[i]
+        if ch == '"':
+            break
+        if ch != "\\":
+            out.append(ch)
+            i += 1
+            continue
+        if i + 1 >= len(raw):
+            break  # an escape cut in half
+        code = raw[i + 1]
+        if code == "u":
+            digits = raw[i + 2:i + 6]
+            if len(digits) < 4:
+                break
+            try:
+                out.append(chr(int(digits, 16)))
+            except ValueError:
+                pass
+            i += 6
+            continue
+        out.append(_ESCAPES.get(code, code))
+        i += 2
+    return "".join(out)
+
+
+def partial_reply(raw: str) -> tuple[str, str]:
+    """(speech, detail) so far, from a model reply that is still streaming in.
+
+    Only for showing progress: the finished reply still goes through parse(),
+    which is what the contract promises. Anything that isn't the JSON shape
+    yields ("", "") and simply isn't shown until it's done.
+    """
+    text = (raw or "").lstrip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1] if "\n" in text else ""
+    if not text.startswith("{"):
+        return "", ""
+    return _partial_string(text, "speech"), _partial_string(text, "detail")
+
+
 def parse(raw: str) -> Reply:
     """Coerce any model output into a Reply. Never raises.
 

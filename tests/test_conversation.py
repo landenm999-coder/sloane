@@ -152,7 +152,7 @@ async def integration() -> None:
                 return "what's due tomorrow"
 
         class Agent_:
-            async def answer(self, body, channel="telegram"):
+            async def answer(self, body, channel="telegram", **_):
                 from sloane.contract import Reply
                 return Reply(speech="The lab.", detail="The lab.")
 
@@ -165,7 +165,10 @@ async def integration() -> None:
             from sloane.memory.store import remember
             await remember("v", store.log_message(chat_id=chat_id, direction="out", kind="voice", body=said or None))
 
-        bot._download_voice, bot.send_voice = download, post_voice
+        async def no_network(client, method, **payload):
+            return {}
+
+        bot._download_voice, bot.send_voice, bot._call = download, post_voice, no_network
         await bot._handle({"update_id": 990003, "message": {"chat": {"id": 4242}, "voice": {"file_id": "f"}}})
         got = await store.recent_messages(4242, datetime.now(timezone.utc) - timedelta(hours=1))
         check("the voice note reads as what he said, and her answer as hers",

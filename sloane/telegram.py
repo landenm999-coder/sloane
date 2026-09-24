@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from collections.abc import Awaitable, Callable
@@ -67,6 +68,99 @@ def split_message(text: str, limit: int = TELEGRAM_LIMIT) -> list[str]:
 
 
 API = "https://api.telegram.org"
+
+# "typing…" lasts about five seconds on his screen; renew it a little sooner.
+TYPING_EVERY = 4.5
+# Edits to a reply that is still being written: no more often than this, which
+# keeps well inside Telegram's per-chat limits and still reads as live.
+STREAM_EDIT_EVERY = 0.9
+# Don't open the message for the first two words; wait for a phrase.
+STREAM_MIN_CHARS = 14
+CURSOR = " ▍"
+
+
+def _shown(speech: str, detail: str) -> str:
+    """What he sees of a reply: speech, then detail when it adds something.
+
+    Mirrors Bot.send. While detail is still streaming in, a detail that is
+    only repeating the speech (as it does in conversation) stays hidden.
+    """
+    speech, detail = speech.strip(), detail.strip()
+    if not detail or speech.startswith(detail) or detail == speech:
+        return speech
+    return f"{speech}\n\n{detail}" if speech else detail
+
+
+class _Live:
+    """A reply shown while it is being written: one message, edited as it grows."""
+
+    def __init__(self, bot: "Bot", chat_id: int) -> None:
+        self.bot = bot
+        self.chat_id = chat_id
+        self.message_id: int | None = None
+        self.shown = ""
+        self.last = 0.0
+        self.typing: asyncio.Task | None = None
+
+    async def start_typing(self) -> None:
+        async def loop() -> None:
+            while True:
+                try:
+                    async with httpx.AsyncClient(timeout=10.0) as client:
+                        await self.bot._call(client, "sendChatAction", chat_id=self.chat_id, action="typing")
+                except (httpx.HTTPError, RuntimeError) as exc:
+                    log.debug("typing indicator failed: %s", exc)
+                await asyncio.sleep(TYPING_EVERY)
+        self.typing = asyncio.get_running_loop().create_task(loop())
+
+    def stop_typing(self) -> None:
+        if self.typing is not None:
+            self.typing.cancel()
+            self.typing = None
+
+    async def update(self, raw: str) -> None:
+        """The provider's text so far. Shown once there's a phrase, then kept current."""
+        from sloane.contract import partial_reply
+
+        text = _shown(*partial_reply(raw))
+        if len(text) < STREAM_MIN_CHARS or text == self.shown:
+            return
+        now = time.monotonic()
+        if self.message_id is not None and now - self.last < STREAM_EDIT_EVERY:
+            return
+        body = text[: TELEGRAM_LIMIT - len(CURSOR)] + CURSOR
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            if self.message_id is None:
+                sent = await self.bot._call(client, "sendMessage", chat_id=self.chat_id, text=body)
+                self.message_id = sent.get("message_id")
+                self.stop_typing()
+            else:
+                await self.bot._call(client, "editMessageText", chat_id=self.chat_id,
+                                     message_id=self.message_id, text=body)
+        self.shown, self.last = text, now
+
+    async def finish(self, reply: Reply) -> bool:
+        """Put the finished reply in place. False if nothing was shown yet."""
+        self.stop_typing()
+        if self.message_id is None:
+            return False
+        text = reply.speech or reply.detail or "(no reply)"
+        detail = (reply.detail or "").strip()
+        if detail and detail != reply.speech.strip():
+            text = f"{text}\n\n{detail}"
+        parts = split_message(text)
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            try:
+                await self.bot._call(client, "editMessageText", chat_id=self.chat_id,
+                                     message_id=self.message_id, text=parts[0])
+            except RuntimeError as exc:
+                if "not modified" not in str(exc):
+                    log.warning("could not finish the live reply: %s", exc)
+            for part in parts[1:]:
+                await self.bot._call(client, "sendMessage", chat_id=self.chat_id, text=part)
+        await remember("outbound message", self.bot._store.log_message(
+            chat_id=self.chat_id, direction="out", kind="text", body=text[:4000]))
+        return True
 
 # Telegram holds the connection open for poll_timeout seconds; the HTTP read
 # timeout has to outlast that or every idle poll looks like a failure.
@@ -751,7 +845,16 @@ class Bot:
                 await self.reply(chat_id, _reply(answer), as_voice=bool(voice))
                 return
 
-        reply = await self._agent.answer(body, channel=kind)
+        # Typing at once, then the reply as she writes it. A voice note waits
+        # for the whole answer (it is read aloud), so it only gets the typing.
+        live = _Live(self, chat_id)
+        await live.start_typing()
+        try:
+            reply = await self._agent.answer(body, channel=kind, on_text=None if voice else live.update)
+        finally:
+            live.stop_typing()
+        if not voice and await live.finish(reply):
+            return
         await self.reply(chat_id, reply, as_voice=bool(voice))
 
     async def poll_forever(self) -> None:
