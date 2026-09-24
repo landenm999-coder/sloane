@@ -1302,7 +1302,7 @@ class Store:
     # re-sync; these were typed, promised, earned or decided by Landen.
     BACKUP_TABLES = ("state", "commitments", "people", "courses", "trust", "reminders", "jobs",
                      "list_items", "countdowns", "cards", "habits", "habit_log",
-                     "clients", "client_notes")
+                     "clients", "client_notes", "focus_sessions")
 
     async def restore_rows(self, table: str, rows: Sequence[Row]) -> int:
         """Merge backed-up rows back in. Existing rows win; returns rows inserted.
@@ -1939,6 +1939,41 @@ class Store:
         return await self._one(
             "update assignments set estimate_minutes = %s where id = %s returning id, title, estimate_minutes",
             (minutes, assignment_id),
+        )
+
+    # -- focus (sql/021) -------------------------------------------------------------------
+
+    async def start_focus(self, *, what: str, minutes: int, started_at: datetime, ends_at: datetime,
+                          reminder_id: str | None) -> Row:
+        row = await self._one(
+            """
+            insert into focus_sessions (what, minutes, started_at, ends_at, reminder_id)
+            values (%s, %s, %s, %s, %s) returning *
+            """,
+            (what, minutes, started_at, ends_at, reminder_id),
+        )
+        assert row is not None
+        return row
+
+    async def running_focus(self, now: datetime) -> Row | None:
+        return await self._one(
+            """
+            select * from focus_sessions
+             where stopped_at is null and ends_at > %s and started_at <= %s
+             order by started_at desc limit 1
+            """,
+            (now, now),
+        )
+
+    async def stop_focus(self, session_id: str, now: datetime) -> Row | None:
+        return await self._one(
+            "update focus_sessions set stopped_at = %s where id = %s and stopped_at is null returning *",
+            (now, session_id),
+        )
+
+    async def focus_since(self, since: datetime) -> list[Row]:
+        return await self._fetch(
+            "select * from focus_sessions where started_at >= %s order by started_at", (since,)
         )
 
 
