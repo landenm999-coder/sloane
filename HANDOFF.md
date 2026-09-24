@@ -45,8 +45,8 @@ Test suites: 21/21.
 
 **Skills build-out (PR #12).** The skills registry got the things it was designed for:
 - a `heartbeat` job: every quarter hour, 7 AM–10 PM, no model. It says each skill nudge once.
-- twelve skills: lists, countdowns, weather, flashcards and quizzes, habits, clients, a study plan, focus,
-  birthdays, money, memory, college applications
+- thirteen skills: lists, countdowns, weather, flashcards and quizzes, habits, clients, a study plan, focus,
+  birthdays, money, memory, college applications, DECA role-play practice
 - the `/tv` dashboard
 - `sloane/dates.py`
 - Capture running skill rules
@@ -123,7 +123,10 @@ Supabase. Everything external is tested against local stubs, and the real-model 
 | TV (PR #12) | `GET /tv`: self-contained HTML (CSP `default-src 'none'`), everything escaped, refresh 60 s, clock ticks; SQL + `skills.panels()`; a failed read is a banner. `GET /panels` JSON | `sloane/dashboard.py`, `tests/test_dashboard.py` |
 | Partner (PR #12) | persona rewritten (character, register, no help-desk phrases, `ADDRESS_AS`); `--system-prompt` replaces Claude Code's; CONVERSATION tier (`recent_messages`, 24 msgs/12 h, 1,500 tok, voice transcripts logged); warm stream-json `claude -p` (`prewarm`, one turn per process, refill, `close_all`), `partial_reply` + `_Live` edit-in-place streaming, typing indicator, memory writes after the reply (`Agent.settle`); `actions.py` allowlist + `Bot._act`; `look` → `Router.research` (CLI, WebSearch/WebFetch only) → INGESTED second turn; `learn` job (sql/024) + `memory` skill | `persona.py`, `providers/claude_code.py`, `contract.py`, `telegram.py`, `agent.py`, `actions.py`, `memory/learn.py`, `skills/memory.py`; tests `test_conversation`, `test_claude_stream` (+ `fake_cli.py`), `test_live`, `test_actions`, `test_lookup`, `test_learn` |
 | Planted entries (PR #12) | `ingest.planted()` (narrow: an override phrase *addressed to her*, or an unmistakable marker); the heartbeat tells him once per calendar entry in the next 14 days (`planted:event:<id>`, skills or none); the entry's FACTS line is marked so she neither obeys it nor repeats the warning. Before this she flagged the eval's planted invite in almost every answer | `ingest.py`, `jobs/briefs.py` `planted_nudges`, `memory/tiers.py`; tests in `test_tiers`, `test_heartbeat` |
-| Colleges (PR #12) | `/college add CU Boulder EA nov 1`: plan, deadline, the usual six-item checklist (+ his own items with their own dates); `done`/`skip`/`add` by words or number; `submitted`/`admitted`/`deferred`/`waitlisted`/`denied`/`committed`; school named by any run of words, a nickname in brackets, or initials; FACTS line per school with exact dates; nudges 14/7/3/1 days out in the evening, the morning of, and once the morning after an unsubmitted deadline; "what's left for Boulder?" answered without a model; `/college` on the actions allowlist (not drop/skip/reopen), with status words checked by `grounded()` | `sloane/skills/colleges.py`, `sql/026`, `tests/test_colleges.py` |
+| DECA (PR #12) | `/roleplay [area]`: a model-written scenario (event, role, judge, situation, five PIs), then a session where the judge stays in character (typed or voice), two follow-up questions after "I'm done", and a score on the DECA form (PIs 0–14, four 21st Century Skills 0–6, overall 0–6) **totalled in code**; `roleplays` table (sql/027), FACTS line with recent scores + "work on", TV panel, an evening nudge when a DECA countdown is ≤14 days out and no practice in 3 days; `/roleplay` on the actions allowlist. Live-checked against the real CLI: a presentation that missed the brief was pushed back on in character and scored 19/100 with specific notes | `sloane/skills/deca.py`, `sql/027`, `tests/test_deca.py` |
+| Slow skills (PR #12) | a command or skill still working after 0.6 s shows "typing…" (a role-play's judge, `/cards make`); instant ones never flash it. The actions instructions now also say recording what he reports isn't initiative, and that only the "do" list does anything (she once said "marking that off" with no command) | `telegram.py` `SLOW_SKILL_SECONDS`, `actions.instructions`; `test_live` |
+| JSON repair (PR #12) | `contract.loads_lenient`/`closed`: the CLI sometimes drops an object's final `}` (1 in 3 scenario calls, live). Unrepaired, a reply came out as raw JSON (read aloud, actions lost). Every model-JSON parser now uses it: `contract.parse`, inbox triage, learn, `/cards make`, deca | `contract.py`; regression checks in test_contract, test_cards, test_learn, test_mail, test_deca |
+| Colleges (PR #12) | `/college add CU Boulder EA nov 1`: plan, deadline, the usual six-item checklist (+ his own items with their own dates); `done`/`skip`/`add` by words or number; `submitted`/`admitted`/`deferred`/`waitlisted`/`denied`/`committed`; school named by any run of words, a nickname in brackets, or initials; FACTS line per school with exact dates; nudges 14/7/3/1 days out in the evening, the morning of, and once the morning after an unsubmitted deadline; "what's left for Boulder?" answered without a model; "just finished my Boulder essays" / "sent my Boulder app" / "got into Boulder" / "Boulder deferred me" recorded by **rules** (the model path missed the command ~1 run in 14), only when one of his schools is named by whole words (never via a small word like "of") and every other word belongs to the item; `/college` on the actions allowlist (not drop/skip/reopen) for looser wording, with status words checked by `grounded()` | `sloane/skills/colleges.py`, `sql/026`, `tests/test_colleges.py` |
 | Capture + skills (PR #12) | a capture that is exactly a skill phrase is acted on (`action` in the 201 body); `Registry.route(sessions=False)` so a capture is never a quiz answer | `capture.py`, `CAPTURE_API.md` |
 
 Telegram commands (all listed by `/help`): `/today /week /grades /done /status /brief /jobs /sync /inbox /remind /reminders /unremind /promise /promises /kept /trust /revoke /cancel /usage /state /help`, plus plain "remind me …".
@@ -147,7 +150,7 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
 
 - **PR landenm999-coder/sloane#12 (draft)**: the skills build-out plus the partner upgrade. It's complete and
   green (44/44 suites, eval 58/58), waiting on review and merge to main. After merging, the box needs
-  `git pull`, a rebuild and the migrations (`sql/014`–`026`, all idempotent). `install.sh` does all of that.
+  `git pull`, a rebuild and the migrations (`sql/014`–`027`, all idempotent). `install.sh` does all of that.
   Then add every school with `/college add <school> <EA|ED|RD> <deadline>` (DEPLOY, "College applications").
 
 ## Backlog (ideas, in priority order)
@@ -158,9 +161,8 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
 2. Infinite Campus (grades), deliberately out of v1. Needs district credentials, and repeated automated logins can
    lock the account.
 3. P5 phone calls, beyond v1.
-4. More skills, if he wants them: a stock watchlist (quotes only, since trading is a hard line) and a
-   DECA roleplay practice session (the model plays the judge). Each is one module plus a migration. (The
-   college-applications tracker is built: `skills/colleges.py`.)
+4. More skills, if he wants them: a stock watchlist (quotes only, since trading is a hard line). One module
+   plus a migration. (The college tracker and DECA role-play practice are built.)
 5. Streaming for the Groq and Anthropic providers (only `claude_code` streams today; the others answer whole).
 
 ## Only Landen can do (the whole list; see DEPLOY.md)

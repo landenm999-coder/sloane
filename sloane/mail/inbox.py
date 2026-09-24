@@ -23,7 +23,6 @@ that says that.
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 from collections.abc import Sequence
@@ -31,6 +30,7 @@ from dataclasses import dataclass, field
 
 from sloane.agency import ActionType, Agency
 from sloane.config import Settings
+from sloane.contract import loads_lenient
 from sloane.ingest import safe_field, unfence
 from sloane.mail import MailError
 from sloane.mail.gmail import GmailClient, Message, build_raw, reply_subject, valid_address
@@ -175,14 +175,7 @@ def parse_triage(raw: str, ids: Sequence[str]) -> dict[str, tuple[str, str]]:
     an empty dict; the caller decides what that means.
     """
     wanted = set(ids)
-    text = (raw or "").strip()
-    start, end = text.find("["), text.rfind("]")
-    if start < 0 or end <= start:
-        return {}
-    try:
-        items = json.loads(text[start : end + 1])
-    except ValueError:
-        return {}
+    items = loads_lenient((raw or "").strip(), "[")
     out: dict[str, tuple[str, str]] = {}
     if not isinstance(items, list):
         return {}

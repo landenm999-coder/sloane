@@ -138,6 +138,29 @@ async def integration() -> None:
         check("voice gets no live text", (voiced.saw_sink, [m for m, _ in calls if m in ("sendMessage", "editMessageText")]),
               (False, []))
         check("and is answered by voice", sent[-1][1], True)
+
+        # A skill that thinks (a role-play's judge) shows typing; one that
+        # answers at once never flashes it.
+        from sloane.skills import Answer, Registry, Skill, SkillContext
+
+        class Thinks(Skill):
+            name = "thinks"
+
+            async def match(self, text):
+                if text == "slow":
+                    await asyncio.sleep(0.3)
+                    return Answer("Considered.")
+                return Answer("Instant.") if text == "fast" else None
+
+        ctx = SkillContext(store=store, config=config)
+        bot.skills = Registry([Thinks(ctx)], ctx)
+        tg.SLOW_SKILL_SECONDS = 0.1
+        calls.clear()
+        await message("fast")
+        check("an instant skill answer: no typing", [m for m, _ in calls if m == "sendChatAction"], [])
+        await message("slow")
+        check("a slow one: typing while it thinks", [m for m, _ in calls if m == "sendChatAction"], ["sendChatAction"])
+        check("both answered", [s for s, _ in sent[-2:]], ["Instant.", "Considered."])
         await store._exec("delete from messages where chat_id = 5151")
 
 

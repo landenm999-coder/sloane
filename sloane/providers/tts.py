@@ -226,6 +226,9 @@ class PiperTTS(TTSProvider):
     _loading = threading.Lock()
     _speaking = threading.Lock()
     _fetches: dict[str, asyncio.Task] = {}
+    # A failed fetch is retried after this long, not on every voice note.
+    RETRY_FETCH_SECONDS = 600
+    _failed_at: dict[str, float] = {}
 
     def __init__(self, settings: Settings) -> None:
         self._bin = settings.piper_bin
@@ -271,6 +274,9 @@ class PiperTTS(TTSProvider):
         fetch = _downloader()
         if fetch is None:
             raise ProviderError(self.name, "fetching a voice by name needs the piper-tts package")
+        failed = self._failed_at.get(self._voice)
+        if failed is not None and time.monotonic() - failed < self.RETRY_FETCH_SECONDS:
+            raise ProviderError(self.name, f"couldn't fetch {self._voice} recently; will retry")
         task = self._fetches.get(self._voice)
         if task is None or task.done() or task.get_loop() is not asyncio.get_running_loop():
             task = asyncio.create_task(self._fetch_in_thread(fetch, path))
@@ -286,9 +292,12 @@ class PiperTTS(TTSProvider):
         try:
             await asyncio.wait_for(asyncio.to_thread(self._fetch, fetch, path), timeout=self._fetch_timeout)
         except asyncio.TimeoutError as exc:
+            self._failed_at[self._voice] = time.monotonic()
             raise ProviderError(self.name, f"fetching {self._voice} timed out") from exc
         except Exception as exc:  # noqa: BLE001 - urllib, disk, a renamed voice
+            self._failed_at[self._voice] = time.monotonic()
             raise ProviderError(self.name, f"could not fetch {self._voice}: {type(exc).__name__}: {exc}"[:200]) from exc
+        self._failed_at.pop(self._voice, None)
 
     def _fetch(self, fetch, path: Path) -> None:  # noqa: ANN001
         """Download beside the target, then move into place: a cut-off download

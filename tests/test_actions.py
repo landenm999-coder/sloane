@@ -33,7 +33,7 @@ def check(label: str, got, want) -> None:
 
 # -- the allowlist ----------------------------------------------------------------
 allowed = actions.available({"list", "client", "birthday", "spent", "budget", "habit", "focus", "countdown",
-                             "college"})
+                             "college", "roleplay"})
 TABLE = [
     ("/list add grocery: oat milk", "/list add grocery: oat milk"),
     ("list add grocery: coffee", "/list add grocery: coffee"),        # a missing slash is fine
@@ -73,6 +73,7 @@ TABLE = [
     ("/college boulder skip scores", None),  # a requirement off the checklist: likewise
     ("/college boulder reopen", None),
     ("/college boulder undo 2", None),
+    ("/roleplay finance", "/roleplay finance"),
 ]
 for proposed, want in TABLE:
     check(f"check({proposed[:40]!r})", actions.check(proposed, allowed), want)
@@ -103,6 +104,9 @@ GROUNDED = [
     ("/college boulder admitted", "when does Boulder decide?", "", False),
     ("/college boulder submitted", "yes", "Shall I mark Boulder submitted?", True),
     ("/college mines submitted", "how long do I have on the Boulder app?", "", False),
+    ("/roleplay marketing", "let's do a marketing roleplay", "", True),
+    ("/roleplay", "quiz me with a DECA roleplay", "", True),
+    ("/roleplay", "ugh DECA is stressing me out", "", False),
 ]
 for command, said, offer, want in GROUNDED:
     check(f"grounded({command!r}, {said!r})", actions.grounded(command, said, offer), want)

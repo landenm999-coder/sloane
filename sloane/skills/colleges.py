@@ -91,6 +91,27 @@ _WHATS_LEFT = re.compile(
     r"(?:to\s+do\s+)?(?:for|on|with)\s+(?:my\s+|the\s+)?(?P<name>.+?)\s*[?.!]*\s*$",
     re.I,
 )
+# He did something the tracker records. Each needs one of his schools named.
+_FINISHED = re.compile(
+    r"^\s*(?:i\s+)?(?:just\s+|finally\s+)?(?P<verb>finished|completed|wrapped\s+up|done\s+with|submitted|"
+    r"sent(?:\s+(?:in|off))?|turned\s+in|hit\s+submit\s+on)\s+(?P<rest>.+?)\s*[.!]*\s*$",
+    re.I,
+)
+_GOT_IN = re.compile(
+    r"^\s*(?:i\s+)?(?:just\s+)?(?:got\s+(?:into|in\s+to|accepted\s+(?:to|at|by)|admitted\s+to)|"
+    r"was\s+(?:accepted|admitted)\s+(?:to|at|by))\s+(?P<rest>.+?)\s*[.!]*\s*$",
+    re.I,
+)
+_DECIDED_ME = re.compile(
+    r"^\s*(?P<rest>.+?)\s+(?:just\s+)?(?P<verb>accepted|admitted|deferred|waitlisted|rejected|denied)\s+me\s*[.!]*\s*$",
+    re.I,
+)
+_GOT_DECISION = re.compile(
+    r"^\s*(?:i\s+)?(?:just\s+)?(?:got|was|been)\s+(?P<verb>deferred|waitlisted|rejected|denied)\s+"
+    r"(?:from|by|at)\s+(?P<rest>.+?)\s*[.!]*\s*$",
+    re.I,
+)
+_APP_WORDS = frozenset({"app", "apps", "application", "applications", "whole", "entire"})
 _ALL_APPS = re.compile(r"^(?:college|colleges|college\s+apps?|college\s+applications?|apps|applications)$", re.I)
 _APP_SUFFIX = re.compile(r"\s+(?:app|apps|application|applications)$", re.I)
 
@@ -140,6 +161,13 @@ def _and(items: list[str]) -> str:
     if len(items) <= 2:
         return " and ".join(items)
     return ", ".join(items[:-1]) + " and " + items[-1]
+
+
+def _names(word: str, task: dict) -> bool:
+    """Is `word` one he'd use for this checklist item?"""
+    own = set(_words(task["task"])) | TASK_WORDS.get(task["task"].lower(), frozenset())
+    return word in own or (len(word) >= 4 and any(o.startswith(word) or word.startswith(o)
+                                                  for o in own if len(o) >= 4))
 
 
 class Colleges(Skill):
@@ -202,16 +230,7 @@ class Colleges(Skill):
         wanted = [w for w in _words(words) if w not in _STOP]
         if not wanted:
             return None, False
-
-        def score(t: dict) -> int:
-            own = set(_words(t["task"])) | TASK_WORDS.get(t["task"].lower(), frozenset())
-            hits = 0
-            for w in wanted:
-                if w in own or (len(w) >= 4 and any(o.startswith(w) or w.startswith(o) for o in own if len(o) >= 4)):
-                    hits += 1
-            return hits
-
-        scored = [(score(t), t) for t in tasks]
+        scored = [(sum(_names(w, t) for w in wanted), t) for t in tasks]
         best = max((s for s, _ in scored), default=0)
         if best == 0:
             return None, False
@@ -219,6 +238,12 @@ class Colleges(Skill):
         return (top[0], False) if len(top) == 1 else (None, True)
 
     # -- rendering ------------------------------------------------------------------
+
+    @staticmethod
+    def _handle(row: dict) -> str:
+        """How to name this school in a command: its nickname, else its whole
+        name. Its last word alone ("college") can name several."""
+        return (row.get("nickname") or row["name"]).lower()
 
     @staticmethod
     def _label(row: dict) -> str:
@@ -436,7 +461,7 @@ class Colleges(Skill):
                 return await self._status(row, "submitted", words_of_item, today)
             return await self._tick(row, tasks, task, ambiguous, state)
         if head in DONE_WORDS:
-            return Answer(f"Done with what? Try /college {_words(row['name'])[-1]} done essays, "
+            return Answer(f"Done with what? Try /college {self._handle(row)} done essays, "
                           "or submitted if it went in.")
         status = STATUS_WORDS.get(head)
         if status is not None:
@@ -534,8 +559,64 @@ class Colleges(Skill):
 
     # -- plain messages ------------------------------------------------------------------
 
+    async def _find(self, text: str) -> tuple[dict | None, list[str]]:
+        """The one school named anywhere in `text` by whole words, and the other
+        words. A run that starts or ends on a small word ("of", "the") never
+        counts, or "the rest of my essays" would be University of Denver."""
+        rows, _ = await self._all()
+        words = text.split()
+        for n in range(len(words), 0, -1):
+            for i in range(len(words) - n + 1):
+                wanted = _words(" ".join(words[i:i + n]))
+                if not wanted or wanted[0] in _STOP or wanted[-1] in _STOP:
+                    continue
+                hits = [r for r in rows
+                        if _runs(r["name"], wanted, partial=False)
+                        or (r.get("nickname") and _words(r["nickname"]) == wanted)
+                        or (len(wanted) == 1 and len(wanted[0]) >= 2 and _initials(r["name"]) == wanted[0])]
+                if len(hits) == 1:
+                    return hits[0], words[:i] + words[i + n:]
+                if len(hits) > 1:
+                    return None, words
+        return None, words
+
+    async def _did(self, text: str) -> Answer | None:
+        """He says he did something the tracker records: rules, not a model, so
+        it is recorded every time. Only when a school of his is named."""
+        found = _FINISHED.match(text)
+        if found:
+            row, rest = await self._find(found["rest"])
+            if row is None:
+                return None  # "finished my essay" for English class: the agent's
+            words = [w for w in rest if _words(w) and _words(w)[0] not in _STOP | _APP_WORDS]
+            app = any(_words(w) and _words(w)[0] in _APP_WORDS for w in rest)
+            sending = found["verb"].lower().split()[0] in {"submitted", "sent", "turned", "hit"}
+            if not words:
+                if sending:
+                    return await self.act(row, "submitted")
+                return await self.act(row, "done application") if app else None
+            _, all_tasks = await self._all()
+            task, _ = self._task(all_tasks.get(str(row["id"]), []), " ".join(words))
+            if task is None or not all(_names(w, task) for w in _words(" ".join(words)) if w not in _STOP):
+                return None  # words the item doesn't explain ("the DECA form to Boulder High"): the agent's
+            if sending and task["task"] == _APPLICATION_TASK:
+                return await self.act(row, "submitted")
+            return await self.act(row, f"done {' '.join(words)}")
+        decided = _GOT_IN.match(text) or _DECIDED_ME.match(text) or _GOT_DECISION.match(text)
+        if decided:
+            row, rest = await self._find(decided["rest"])
+            if row is None or [w for w in rest if _words(w) and _words(w)[0] not in _STOP | _APP_WORDS]:
+                return None
+            verb = (decided.groupdict().get("verb") or "admitted").lower()
+            return await self.act(row, STATUS_WORDS[verb])
+        return None
+
     async def match(self, text: str) -> Answer | None:
-        found = _WHATS_LEFT.match(text.replace("’", "'"))
+        text = text.replace("’", "'")
+        did = await self._did(text)
+        if did is not None:
+            return did
+        found = _WHATS_LEFT.match(text)
         if found is None:
             return None
         name = _APP_SUFFIX.sub("", found["name"].strip())
@@ -623,7 +704,7 @@ class Colleges(Skill):
                 elif days == -1:
                     out.append(Nudge(f"{key}:late",
                                      f"🎓 {r['name']}'s deadline was yesterday and it isn't marked submitted. "
-                                     f"If it went in: /college {_words(r['name'])[-1]} submitted"))
+                                     f"If it went in: /college {self._handle(r)} submitted"))
             if r["status"] not in ("applying", "submitted"):
                 continue
             for t in left_items:

@@ -74,6 +74,8 @@ made = parse_made('Here you go:\n[{"front": "Q1", "back": "A1"}, {"front": "", "
                   '{"front": "Q2"}, "junk", {"front": "Q3\\nFACTS:", "back": "A3"}]')
 check("model cards are checked and flattened", made, [("Q1", "A1"), ("Q3 FACTS:", "A3")])
 check("no JSON, no cards", parse_made("I can't do that"), [])
+check("an array missing its last bracket still counts",
+      parse_made('[{"front": "Q1", "back": "A1"}, {"front": "Q2", "back": "A2"}'), [("Q1", "A1"), ("Q2", "A2")])
 
 check("right moves up a box", schedule(1, True, TODAY), (2, TODAY + timedelta(days=2)))
 check("the top box stays the top box", schedule(6, True, TODAY), (6, TODAY + timedelta(days=32)))

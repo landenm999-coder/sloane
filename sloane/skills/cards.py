@@ -24,14 +24,13 @@ as data, and what comes back is checked and capped before a card exists.
 
 from __future__ import annotations
 
-import json
 import random
 import re
 import unicodedata
 from datetime import date, timedelta
 
 from sloane import dates
-from sloane.contract import clean_speech
+from sloane.contract import clean_speech, loads_lenient
 from sloane.ingest import safe_field, unfence
 from sloane.skills import Answer, Nudge, Skill, SkillContext
 
@@ -140,13 +139,7 @@ def split_card(text: str) -> tuple[str, str] | None:
 
 def parse_made(raw: str) -> list[tuple[str, str]]:
     """The model's JSON array of cards, checked. Anything malformed is dropped."""
-    found = re.search(r"\[.*\]", raw or "", re.S)
-    if not found:
-        return []
-    try:
-        data = json.loads(found.group(0))
-    except ValueError:
-        return []
+    data = loads_lenient(raw or "", "[")
     out: list[tuple[str, str]] = []
     for item in data if isinstance(data, list) else []:
         if not isinstance(item, dict):

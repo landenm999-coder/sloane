@@ -57,6 +57,9 @@ check("'tomorrow' is from the day he said it", parse('{"follow_ups": [{"what": "
       THU, said_on=date(2026, 9, 23)).follow_ups, [("x", THU)])
 check("a day already gone is kept undated", parse('{"follow_ups": [{"what": "x", "when": "today"}]}',
       THU, said_on=date(2026, 9, 23)).follow_ups, [("x", None)])
+check("an object missing its last brace still counts",
+      [what for what, _ in parse('{"follow_ups": [{"what": "call the orthodontist", "when": ""}]', THU).follow_ups],
+      ["call the orthodontist"])
 check("no JSON, nothing learned", (parse("nothing today", THU).follow_ups, parse("{bad", THU).facts), ([], []))
 _ = datetime
 

@@ -47,6 +47,7 @@ SKILLS: dict[str, str] = {
     "followup": "/followup <what he'll do> [<day>]  ·  /followup done <words from it> (when he says it's done)",
     "college": ("/college add <school> <EA|ED|RD> <deadline>  ·  /college <school> done <checklist item>  ·  "
                 "/college <school> submitted | admitted | deferred | waitlisted | denied | committed"),
+    "roleplay": "/roleplay [area] -- starts a DECA practice role-play (marketing, finance, hospitality ...)",
 }
 MAX_LENGTH = 300
 
@@ -89,6 +90,7 @@ RULES: dict[str, object] = {
     # school, skipping a checklist item or reopening one: those he types.
     "college": lambda a: bool(a) and not set(a) & {"drop", "archive", "remove", "delete", "skip", "skipped",
                                                   "optional", "undo", "untick", "unskip", "open", "reopen"},
+    "roleplay": lambda a: len(a) <= 4,
 }
 
 
@@ -207,9 +209,14 @@ the commands, exactly as he would type them. At most {MAX_ACTIONS}.
 Rules:
 - Only what he asked for. Never on your own initiative: if you think a reminder \
 would help, offer it ("Want a reminder at 6?") and wait for his yes.
+- When he tells you he did something a command records ("finished my Boulder \
+essays", "spent 14 on lunch"), record it -- that is him telling you, not your \
+initiative, so don't ask first. Say you've marked it.
 - Nothing destructive: you can't drop, clear, forget or undo anything. If he \
 asks for that, tell him the command to type.
 - Say what you're doing in speech, briefly and in the present tense ("On it: \
 oat milk's going on the list."). The results of each command are shown to him \
 under your reply, so don't invent details the command will report.
+- Only the "do" list does anything. Never say you've marked, added or set \
+something unless its command is in "do".
 - If nothing here does what he wants, say so; never claim you did it."""

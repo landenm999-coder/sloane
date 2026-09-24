@@ -1316,7 +1316,7 @@ class Store:
     BACKUP_TABLES = ("state", "people", "commitments", "courses", "trust", "reminders", "jobs",
                      "list_items", "countdowns", "cards", "habits", "habit_log",
                      "clients", "client_notes", "focus_sessions", "expenses", "skill_settings",
-                     "colleges", "college_tasks")
+                     "colleges", "college_tasks", "roleplays")
 
     async def restore_rows(self, table: str, rows: Sequence[Row]) -> int:
         """Merge backed-up rows back in. Existing rows win; returns rows inserted.
@@ -2245,6 +2245,26 @@ class Store:
              where id = %s returning *
             """,
             (state, state, task_id),
+        )
+
+    # -- deca (sql/027) ------------------------------------------------------------------------
+
+    async def save_roleplay(self, *, area: str, event: str, situation: str, score: int, scores: dict,
+                            strengths: str | None, improve: str | None) -> Row:
+        row = await self._one(
+            """
+            insert into roleplays (area, event, situation, score, scores, strengths, improve)
+            values (%s, %s, %s, %s, %s, %s, %s) returning *
+            """,
+            (area, event, situation, score, Jsonb(scores), strengths, improve),
+        )
+        assert row is not None
+        return row
+
+    async def recent_roleplays(self, limit: int = 5) -> list[Row]:
+        return await self._fetch(
+            "select * from roleplays order by finished_at desc, id limit %s",
+            (limit,),
         )
 
 

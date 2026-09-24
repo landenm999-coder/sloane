@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _settings import isolated
 
 from sloane.skills import Registry, SkillContext
-from sloane.skills.colleges import Colleges, _initials, _runs, find_plan
+from sloane.skills.colleges import DEFAULT_TASKS, Colleges, _initials, _runs, find_plan
 
 FAILURES: list[str] = []
 DEN = ZoneInfo("America/Denver")
@@ -183,7 +183,16 @@ async def integration() -> None:
         late = [n.text for n in await colleges.nudges()]
         check("a deadline that passed unsubmitted: said once, the morning after", late,
               ["🎓 Colorado School of Mines's deadline was yesterday and it isn't marked submitted. "
-               "If it went in: /college mines submitted"])
+               "If it went in: /college colorado school of mines submitted"])
+        # The hint's command has to name that school, not every "... College".
+        # (a deadline already gone can't be typed in, so straight into the store)
+        await store.add_college("Colorado College", plan="RD", deadline=date(2026, 11, 1), tasks=DEFAULT_TASKS)
+        hint = [n.text for n in await colleges.nudges() if "Colorado College" in n.text][0]
+        check("a hint names the school so the command lands on it",
+              (await reg.command("college", hint.split("/college ", 1)[1])).speech,
+              "Colorado College is in, submitted today. Still open: essays, recommendations, transcript, "
+              "test scores and fee or waiver.")
+        await cmd("colorado college drop")
         check("'application sent' is the application going in", (await cmd("mines application sent")).speech,
               "Colorado School of Mines is in, submitted today. Still open: essays, recommendations, transcript, "
               "test scores and fee or waiver.")
@@ -205,6 +214,35 @@ async def integration() -> None:
             "CSU · ED II · Jan 15 (74 days) · 0 of 6 done",
             "CU Boulder · admitted",
         ]})
+
+        # -- said in words: recorded by rules, every time, and only for his schools -----------
+        await store._exec("truncate colleges, college_tasks cascade")
+        now["at"] = datetime(2026, 9, 24, 9, 0, tzinfo=DEN)
+        await cmd("add CU Boulder EA nov 1")
+        await cmd("add University of Denver RD jan 15")
+        route = reg.route
+        check("finished an item", (await route("just finished my Boulder essays")).speech,
+              "Essays done for CU Boulder; left: application form, recommendations, transcript, test scores and "
+              "fee or waiver.")
+        check("an item sent is that item", (await route("sent off my recs for Boulder")).speech.split(";")[0],
+              "Recommendations done for CU Boulder")
+        check("'done with' too", (await route("done with the Boulder transcript")).speech.split(";")[0],
+              "Transcript done for CU Boulder")
+        check("a small word never names a school ('of' in University of Denver)",
+              await route("finished the rest of my essays"), None)
+        check("not his school: the agent's", await route("I finished my essay for English"), None)
+        check("words the item doesn't explain: the agent's, not a submitted Boulder",
+              await route("sent the DECA form to Boulder High"), None)
+        check("finished with no item: the agent's", await route("finished Boulder"), None)
+        check("someone else's news: the agent's", await route("Keegan got into Denver"), None)
+        check("the application sent is the application in",
+              (await route("I just submitted my CU Boulder application!")).speech.split(".")[0],
+              "CU Boulder is in, submitted today")
+        check("got in", (await route("I got into Denver!!")).speech, "Admitted to University of Denver. Congratulations.")
+        check("X deferred me", (await route("Boulder deferred me")).speech,
+              "CU Boulder deferred you. That isn't a no; it goes to the next round.")
+        check("got rejected from", (await route("got rejected from Denver")).speech,
+              "University of Denver said no. I'm sorry.")
         await store._exec("truncate colleges, college_tasks cascade")
 
 

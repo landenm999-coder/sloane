@@ -251,6 +251,8 @@ def unit() -> None:
           parse_triage('Sure! [{"id":"m1","category":"fyi","why":"x"}] hope that helps', ["m1"]),
           {"m1": ("fyi", "x")})
     check("garbage is nothing", parse_triage("I cannot help with that", ["m1"]), {})
+    check("an array missing its last bracket still counts",
+          parse_triage('[{"id":"m1","category":"fyi","why":"x"}', ["m1"]), {"m1": ("fyi", "x")})
 
     check("the quoted thread is not his voice",
           own_words("yeah that works\n\nOn Mon, Sep 1 Keegan wrote:\n> old"), "yeah that works")

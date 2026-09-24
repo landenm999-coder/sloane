@@ -21,7 +21,6 @@ go stale and contradict FACTS.
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 from dataclasses import dataclass, field
@@ -29,6 +28,7 @@ from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from sloane import dates
+from sloane.contract import loads_lenient
 from sloane.ingest import safe_field, unfence
 
 log = logging.getLogger(__name__)
@@ -77,19 +77,14 @@ def _schoolish(text: str) -> bool:
 
 
 def parse(raw: str, today: date, said_on: date | None = None) -> Learned:
-    """The model's JSON, checked. Malformed parts are dropped, never repaired.
+    """The model's JSON, checked. An object that stops a bracket short is closed
+    (contract.loads_lenient); anything else malformed is dropped, never repaired.
 
     `said_on` is the day he said it: "tomorrow" is read from there. A day
     that has already passed by `today` is kept as undated.
     """
     said_on = said_on or today
-    found = re.search(r"\{.*\}", raw or "", re.S)
-    if not found:
-        return Learned()
-    try:
-        data = json.loads(found.group(0))
-    except ValueError:
-        return Learned()
+    data = loads_lenient(raw or "")
     if not isinstance(data, dict):
         return Learned()
     out = Learned()

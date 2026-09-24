@@ -124,6 +124,57 @@ def _try_json(blob: str) -> Reply | None:
         return None
 
 
+def closed(text: str) -> str | None:
+    """`text` with the string and brackets it left open closed; None if nothing
+    was left open, or if what's there is malformed rather than merely short.
+
+    A model sometimes stops one brace short of its JSON object -- measured on
+    the CLI, about one scenario in three -- and without this the whole object
+    would be shown (and read aloud) as raw text.
+    """
+    stack: list[str] = []
+    in_string = escaped = False
+    for ch in text:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch in "{[":
+            stack.append("}" if ch == "{" else "]")
+        elif ch in "}]":
+            if not stack or stack[-1] != ch:
+                return None
+            stack.pop()
+    if not stack:
+        return None
+    body = text[:-1] if in_string and escaped else text
+    return body + ('"' if in_string else "") + "".join(reversed(stack))
+
+
+def loads_lenient(text: str, opener: str = "{") -> object | None:
+    """json.loads of the first JSON object (or, with opener "[", array) in
+    `text`, closed if it stops short. Every parser of a model's JSON uses this."""
+    start = (text or "").find(opener)
+    if start < 0:
+        return None
+    blob = text[start:]
+    end = blob.rfind("}" if opener == "{" else "]")
+    for candidate in (blob[: end + 1] if end >= 0 else None, closed(blob)):
+        if candidate is None:
+            continue
+        try:
+            return json.loads(candidate)
+        except ValueError:
+            continue
+    return None
+
+
 _ESCAPES = {'"': '"', "\\": "\\", "/": "/", "b": "\b", "f": "\f", "n": "\n", "r": "\r", "t": "\t"}
 
 
@@ -207,6 +258,13 @@ def parse(raw: str) -> Reply:
     match = _FIRST_OBJECT.search(text)
     if match is not None:
         found = _try_json(match.group(0))
+        if found is not None:
+            return found
+
+    # 3b -- an object that stops a brace (or a string) short of its end.
+    data = loads_lenient(text)
+    if isinstance(data, dict):
+        found = _from_mapping(data)
         if found is not None:
             return found
 

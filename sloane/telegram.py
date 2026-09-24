@@ -71,6 +71,8 @@ API = "https://api.telegram.org"
 
 # "typing…" lasts about five seconds on his screen; renew it a little sooner.
 TYPING_EVERY = 4.5
+# A command or skill still working after this long shows "typing…".
+SLOW_SKILL_SECONDS = 0.6
 # Edits to a reply that is still being written: no more often than this, which
 # keeps well inside Telegram's per-chat limits and still reads as live.
 STREAM_EDIT_EVERY = 0.9
@@ -102,8 +104,12 @@ class _Live:
         self.last = 0.0
         self.typing: asyncio.Task | None = None
 
-    async def start_typing(self) -> None:
+    async def start_typing(self, after: float = 0.0) -> None:
+        """'typing…' until stopped. With `after`, only once that long has passed:
+        a rule that answers at once never flickers it."""
         async def loop() -> None:
+            if after:
+                await asyncio.sleep(after)
             while True:
                 try:
                     async with httpx.AsyncClient(timeout=10.0) as client:
@@ -896,15 +902,26 @@ class Bot:
             await self.send(chat_id, await self._remind(asked.group(1)))
             return
 
+        # Most commands and skill rules answer at once; a few think (a role-play's
+        # judge, /cards make), and those show "typing…" while they do.
+        thinking = _Live(self, chat_id)
         if body.startswith("/"):
-            reply = await self._handle_command(body)
+            await thinking.start_typing(after=SLOW_SKILL_SECONDS)
+            try:
+                reply = await self._handle_command(body)
+            finally:
+                thinking.stop_typing()
             if reply is not None:
                 await self.send(chat_id, reply)
                 return
         elif self.skills is not None:
             # An open session (a quiz) first, then each skill's own rules
             # ("add milk to my grocery list"). No model unless the skill uses one.
-            answer = await self.skills.route(body)
+            await thinking.start_typing(after=SLOW_SKILL_SECONDS)
+            try:
+                answer = await self.skills.route(body)
+            finally:
+                thinking.stop_typing()
             if answer is not None:
                 await self.reply(chat_id, _reply(answer), as_voice=bool(voice))
                 return

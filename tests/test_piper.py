@@ -109,6 +109,7 @@ def reset() -> None:
     fetch_mode["how"] = "ok"
     PiperTTS._voices.clear()
     PiperTTS._fetches.clear()
+    PiperTTS._failed_at.clear()
 
 
 async def main() -> None:
@@ -159,6 +160,14 @@ async def main() -> None:
             check(f"warm() reports a failed fetch ({how})", await piper.warm(), False)
             check(f"nothing half-written is left ({how})",
                   [p.name for p in Path(models).rglob("*") if p.is_file()], [])
+            tries = len(fetches)
+            for _ in range(3):
+                try:
+                    await piper.synthesize("x")
+                except ProviderError:
+                    pass
+            await asyncio.sleep(0)
+            check(f"a failed fetch isn't retried on every voice note ({how})", len(fetches), tries)
 
     # -- warm() at startup fetches and loads -------------------------------------------------------
     with tempfile.TemporaryDirectory() as models:
