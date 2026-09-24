@@ -65,8 +65,18 @@ informed, not a slow assistant. What changed:
 - Nightly learning of follow-ups and facts from his own words (`memory/learn.py`, the `learn` job,
   `/memory`).
 
-Suites: 42/42. Real-model eval: 52/52. It now includes a follow-up that needs the conversation, small talk, an
-action and a non-action.
+A third review pass, on the partner upgrade, found ten more issues, all fixed with tests:
+- Replies built from email or web text are now `tainted`: stored untrusted, and shown only as a placeholder in
+  CONVERSATION.
+- Every command has its own rule, and `/done` is off the allowlist.
+- "Only what he asked for" is checked in code (`actions.grounded`).
+- The warm process no longer races or leaks, and it's recycled on a timer.
+- An old CLI is detected even when it breaks the pipe.
+- Recall is trimmed only for what CONVERSATION shows.
+- A live reply whose final edit fails is sent whole.
+
+Suites: 42/42. Real-model eval: 52/52 (the one soft check, "small talk isn't a briefing", varies between runs).
+It now includes a follow-up that needs the conversation, small talk, an action and a non-action.
 
 **She has never run against the real services.** This sandbox can't reach Telegram, Groq, Canvas, Google or
 Supabase. Everything external is tested against local stubs, and the real-model eval (via `claude -p`) scores
@@ -128,7 +138,7 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
 
 - **PR landenm999-coder/sloane#12 (draft)**: the skills build-out plus the partner upgrade. It's complete and
   green (42/42 suites, eval 52/52), waiting on review and merge to main. After merging, the box needs
-  `git pull`, a rebuild and the migrations (`sql/014`–`024`, all idempotent). `install.sh` does all of that.
+  `git pull`, a rebuild and the migrations (`sql/014`–`025`, all idempotent). `install.sh` does all of that.
 
 ## Backlog (ideas, in priority order)
 

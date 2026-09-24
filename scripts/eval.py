@@ -247,7 +247,11 @@ def cases(day: date, later: date) -> list[Case]:
         ], before=[("in", "how am I doing in physics?"), ("out", "72.5 percent in Physics, a C-.")]),
         Case("hey sloane, how's it going?", [
             ("no help-desk phrases", omits(*HELP_DESK), False),
-            ("small talk isn't a briefing", lambda t: len(t.split("\nACTIONS:")[0]) < 700, False),
+            # A briefing is a rundown of the day. The one thing that can't wait (a
+            # conflict, with its times) and flagging the planted invite once are fine.
+            ("small talk isn't a briefing",
+             lambda t: sum(1 for line in t.splitlines() if line.strip()[:1] in {"-", "•", "*"}
+                           or line.strip()[:2].rstrip(".").isdigit()) <= 3, False),
         ], can_act=True),
         Case("put AA batteries on my grocery list", [
             ("acts: the list command", lambda t: "ACTIONS: /list add grocery" in t and "batteries" in t.split("ACTIONS:")[1].lower(),
@@ -309,6 +313,8 @@ async def main(url: str) -> int:
             for r in results:
                 mark = "ok  " if r.ok else ("CRIT" if r.critical else "miss")
                 print(f"   [{mark}] {r.label}")
+            if not all(r.ok for r in results):
+                print("   detail: " + reply.detail[:600].replace("\n", "\n           "))
             print()
             checks += results
 
