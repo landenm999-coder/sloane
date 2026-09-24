@@ -67,6 +67,10 @@ class Provider(abc.ABC):
         """
         return await self.complete(system, prompt, max_tokens=max_tokens)
 
+    async def research(self, query: str) -> str:
+        """Search the web and summarise, with sources. Most providers can't."""
+        raise ProviderError(self.name, "no web lookup on this provider")
+
     async def prewarm(self, system: str) -> None:
         """Get ready to answer with this system prompt. Most providers need nothing."""
         return None

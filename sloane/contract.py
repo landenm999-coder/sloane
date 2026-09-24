@@ -51,6 +51,9 @@ class Reply:
     speech: str
     detail: str
     actions: tuple[str, ...] = ()
+    # A web search she needs before she can answer ("look"). The agent runs it
+    # and asks again with the results as INGESTED; never shown to him as-is.
+    lookup: str = ""
 
     def __post_init__(self) -> None:
         if not isinstance(self.speech, str) or not isinstance(self.detail, str):
@@ -105,7 +108,10 @@ def _from_mapping(data: dict) -> Reply | None:
     actions = tuple(
         a.strip() for a in raw_actions if isinstance(a, str) and a.strip()
     )[:MAX_ACTIONS] if isinstance(raw_actions, (list, tuple)) else ()
-    return Reply(speech=clean_speech(speech_text), detail=detail_text.strip(), actions=actions)
+    look = lowered.get("look") or lowered.get("lookup") or ""
+    lookup = " ".join(look.split())[:200] if isinstance(look, str) else ""
+    return Reply(speech=clean_speech(speech_text), detail=detail_text.strip(), actions=actions,
+                 lookup=lookup)
 
 
 def _try_json(blob: str) -> Reply | None:

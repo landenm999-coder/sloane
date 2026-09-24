@@ -77,6 +77,15 @@ def check(command: str, allowed: dict[str, str]) -> str | None:
     return text
 
 
+LOOKUP = """\
+You can look things up. When answering needs current information you can't \
+have -- news, prices, scores, weather elsewhere, opening hours, anything after \
+your training -- add a key "look" with a short web search query, and make \
+speech a few words saying you're checking ("Checking."). You'll get the results \
+and answer again. Don't look up what FACTS, CONVERSATION or your own knowledge \
+already answers, and never look up anything about Landen himself."""
+
+
 def instructions(allowed: dict[str, str]) -> str:
     """The part of her system prompt that says she can act, and how."""
     usage = "\n".join(f"- {line}" for line in allowed.values())

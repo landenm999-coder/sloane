@@ -112,6 +112,18 @@ class Router:
             on_text=on_text,
         )
 
+    async def research(self, query: str) -> str:
+        """A web lookup on the main lane's first provider. Raises NoProviderAvailable."""
+        name = self._config.main_provider
+        try:
+            text = await self._provider(name, False).research(query)
+        except (ProviderError, ValueError) as exc:
+            message = exc.message if isinstance(exc, ProviderError) else str(exc)
+            await self._record(Usage(provider=name), "lookup", ok=False, error=message, degraded_from=None)
+            raise NoProviderAvailable(message) from exc
+        await self._record(Usage(provider=name), "lookup", ok=True, error=None, degraded_from=None)
+        return text
+
     async def prewarm(self, system: str) -> None:
         """Have the main lane's first provider ready for this system prompt."""
         try:

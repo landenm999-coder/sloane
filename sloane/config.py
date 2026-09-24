@@ -185,6 +185,9 @@ class Settings(BaseSettings):
     # --- behaviour -----------------------------------------------------------
     # What she calls him when she addresses him: his name, or "sir" if he likes.
     address_as: str = "Landen"
+    # Web lookups for what she can't know from here (news, prices, scores):
+    # his own messages only, through the Claude CLI's search tools alone.
+    web_lookup: bool = True
     timezone: str = "America/Denver"
     max_reply_tokens: int = 1024
 
