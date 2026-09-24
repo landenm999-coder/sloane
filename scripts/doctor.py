@@ -253,11 +253,25 @@ async def check_voice(config: Settings, *, warm: bool) -> None:
         else:
             record("voice: ffmpeg", WARN, "this ffmpeg lacks libopus; voice notes will fail over to text")
 
-    lanes = {"groq": bool(config.groq_api_key),
-             "piper": bool(config.piper_voice) and bool(shutil.which(config.piper_bin))}
+    import importlib.util
+
+    from sloane.providers.tts import PiperTTS
+
+    local = PiperTTS(config)
+    has_piper = importlib.util.find_spec("piper") is not None or bool(shutil.which(config.piper_bin))
+    usable = local.path is not None and (local.path.is_file() or local.by_name)
+    lanes = {"groq": bool(config.groq_api_key), "piper": usable and has_piper}
+    if local.path is not None:
+        if local.path.is_file():
+            record("voice: piper", PASS, f"{local.path.name} is on disk")
+        elif local.by_name:
+            record("voice: piper", WARN, f"{config.piper_voice} will be fetched at startup into {local.path.parent}")
+        else:
+            record("voice: piper", FAIL, f"PIPER_VOICE={config.piper_voice} is not a file; use a voice name "
+                   "like en_GB-cori-medium or a path to an .onnx")
     ready = [n for n, ok in lanes.items() if ok]
     if not ready:
-        record("voice: tts", WARN, "no speech provider ready (GROQ_API_KEY, or PIPER_VOICE + piper); replies stay text")
+        record("voice: tts", WARN, "no speech provider ready (GROQ_API_KEY, or PIPER_VOICE); replies stay text")
         return
     if not warm:
         record("voice: tts", PASS, f"configured: {', '.join(ready)} (live check with --warm)")

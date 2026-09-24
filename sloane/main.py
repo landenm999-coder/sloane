@@ -77,9 +77,11 @@ def create_app() -> FastAPI:
 
         # Load the ONNX weights now so the first message of the day is not the
         # one that waits for a 130 MB model to come off disk. Likewise the model
-        # lane: a claude process started now answers the first message warm.
+        # lane: a claude process started now answers the first message warm,
+        # and a local voice is fetched and loaded before the first voice note.
         asyncio.create_task(embedder.warm())
         asyncio.create_task(agent.prewarm())
+        asyncio.create_task(router.prewarm_voice())
 
         task: asyncio.Task | None = None
         bot: Bot | None = None

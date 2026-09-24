@@ -131,6 +131,19 @@ class Router:
         except Exception:  # noqa: BLE001 - warming up is an optimisation, never a failure
             log.exception("could not prewarm %s", self._config.main_provider)
 
+    async def prewarm_voice(self) -> None:
+        """Have the speech lane ready: a local voice fetched and loaded before
+        the first voice note, not during it."""
+        if not self._config.piper_voice:
+            return
+        for name in _lane(self._config.speak_provider, SPEAK_ORDER):
+            try:
+                if name not in self._tts_cache:
+                    self._tts_cache[name] = self._tts_factory(name, self._config)
+                await self._tts_cache[name].warm()
+            except Exception:  # noqa: BLE001 - warming up is an optimisation, never a failure
+                log.exception("could not prewarm speech provider %s", name)
+
     async def bulk(self, system: str, prompt: str, *, max_tokens: int = 2048) -> str:
         """The bulk lane: batched triage and summarising, where volume beats polish."""
         return await self._run(

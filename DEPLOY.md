@@ -163,22 +163,29 @@ fallback lane, Canvas, the calendar and Telegram — and gives the fix for each.
 
 ---
 
-## 7b. Optional: a local voice fallback
+## 7b. Optional: a British voice (or a local fallback)
 
-Voice replies use Groq by default (free, ~100 a day). For a fallback with no
-cap, install Piper and one voice on the box:
+Voice replies use Groq by default: free, about 100 a day, American voices. Piper
+runs on the box instead, with no daily cap, and it has British voices. It's in the
+image already, so one line in `.env` is enough:
 
 ```bash
-# on the host, into the models volume so it survives rebuilds
-docker compose run --rm sloane sh -c '
-  cd /var/lib/sloane/models &&
-  curl -fsSLO https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium/en_US-amy-medium.onnx &&
-  curl -fsSLO https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium/en_US-amy-medium.onnx.json'
+# her main voice, British (the full JARVIS)
+SPEAK_PROVIDER=piper
+PIPER_VOICE=en_GB-cori-medium
 ```
 
-then set `PIPER_VOICE=/var/lib/sloane/models/en_US-amy-medium.onnx` in `.env`
-and install the `piper` binary. Without this, when Groq's daily speech allowance
-runs out she simply answers in text.
+She fetches the voice once (about 60 MB, into the `models` volume, so it survives
+rebuilds) when she starts. It's loaded into memory once, and after that a voice
+reply takes a fraction of a second. Until the download finishes, and whenever Piper
+fails, Groq speaks instead. Other voices: `en_GB-jenny_dioco-medium`,
+`en_GB-alba-medium` (Scottish), `en_GB-alan-medium` (male), `en_US-amy-medium`.
+
+To keep Groq as her voice and use Piper only as the fallback when Groq's allowance
+runs out, set `PIPER_VOICE` and leave `SPEAK_PROVIDER=groq`. Restart after changing
+either (`sudo systemctl restart sloane`).
+`docker compose run --rm sloane python scripts/doctor.py --warm` shows whether the voice is
+on disk yet, and has her say a test line.
 
 ## 7c. Optional: Gmail (about 10 minutes, once)
 

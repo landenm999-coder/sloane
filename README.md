@@ -185,7 +185,7 @@ the contract caps at two sentences with no markdown, lists or URLs — then send
 | Piece | |
 |---|---|
 | In | Groq Whisper transcribes the note (existing since P0) |
-| Out | Groq Orpheus (`canopylabs/orpheus-v1-english`), Piper as a local fallback |
+| Out | Groq Orpheus (`canopylabs/orpheus-v1-english`), with Piper as a local fallback, or Piper as her main voice for a British accent (`SPEAK_PROVIDER=piper`, `PIPER_VOICE=en_GB-cori-medium`: fetched once, kept loaded, a fraction of a second per reply) |
 | Format | ffmpeg → OGG/Opus, the only format Telegram shows as a voice note |
 
 **Text is the floor.** Over the daily speech budget, every TTS provider down,

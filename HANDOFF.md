@@ -99,7 +99,7 @@ Supabase. Everything external is tested against local stubs, and the real-model 
 | Retrieval | hybrid vector + full-text, RRF k=60, recency decay; untrusted rows excluded | `memory/store.py` `search_episodes` |
 | P1 school | Canvas (GET only), secret `.ics` calendar (RRULE, EXDATE, RECURRENCE-ID, UNTIL fixes), generated 3–7 PM shifts, course matching, `/sync` | `sloane/school/` |
 | P2 rhythm | morning_brief 6:35, pre_shift 14:45 Mon–Fri, post_shift 19:05 Mon–Fri, wrap 22:00, silent reflection 00:15; entity_sync every 4h; conflicts computed in code; governor (quiet hours 00:00–06:30, budget counts only scheduled `job` calls) | `sloane/jobs/` |
-| P3 voice | voice note in → voice note out (Groq Orpheus TTS, Piper fallback, ffmpeg → OGG/Opus); text always survives | `providers/tts.py`, `voice.py` |
+| P3 voice | voice note in → voice note out (Groq Orpheus TTS, Piper fallback, ffmpeg → OGG/Opus); text always survives. Piper (piper-tts, in the image since PR #12) can be the main voice: `SPEAK_PROVIDER=piper PIPER_VOICE=en_GB-cori-medium` is British; a voice by name is fetched once into EMBED_CACHE_DIR at startup (atomically; a reply never waits on it), loaded once and kept in memory (~0.2 s per reply measured) | `providers/tts.py`, `voice.py`, `tests/test_piper.py` |
 | P4 agency | propose → hard lines (on name *and* `really`) → registered only → trusted pairs auto-run (10 clean approvals, 60-day decay, deny/revoke re-gates) → else Approve/Edit/Deny buttons; one edit open at a time | `sloane/agency.py` |
 | P4 Gmail | inbox job 7 AM–7 PM every 3h: one batched triage call, bodies stored untrusted + fenced, up to 3 drafts in his voice; `reply` sends only on Approve; school domain (`dcsdk12.org`) → `draft` only (he sends); auto-send only for DMARC-verified, Reply-To==From, non-list mail to a trusted exact pair | `sloane/mail/` |
 | Reminders | "remind me at 5 to call Keegan", typed or spoken, or `/remind tomorrow 7am …`. The time comes from a rule-based parser (number words included) and never touches a model. Delivered by an every-minute job; held through quiet hours and marked late; claimed once; retried if the send fails. `/reminders`, `/unremind <n>` | `sloane/reminders.py`, `jobs/briefs.py` `reminders`, `sql/006_reminders.sql` |
@@ -161,7 +161,6 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
    DECA roleplay practice session (the model plays the judge). Each is one module plus a migration. (The
    college-applications tracker is built: `skills/colleges.py`.)
 5. Streaming for the Groq and Anthropic providers (only `claude_code` streams today; the others answer whole).
-   Also possible: a British voice for full JARVIS (a Piper `en_GB` voice via `PIPER_VOICE`, or a paid TTS).
 6. The eval shows her mentioning the planted calendar injection in almost every answer. That's correct but
    noisy. Consider flagging an ingested injection once (a watchdog-style alert) rather than on every turn.
 

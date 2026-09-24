@@ -7,9 +7,10 @@ Two backends:
   speech is split at sentence boundaries (and, for one runaway sentence, at
   commas and then words) and the pieces are joined back into one clip. Sending
   the whole reply and hoping it fits would fail on exactly the longer answers.
-* **Piper** -- a local binary and an .onnx voice on the box. No quota and no
-  network, so it is the fallback when Groq's daily allowance is spent or the
-  API is down. The voice file is downloaded once at setup.
+* **Piper** -- a local voice on the box. No quota and no network, so it is the
+  fallback when Groq's daily allowance is spent or the API is down -- or the
+  main voice, for an accent Groq doesn't have (PIPER_VOICE=en_GB-cori-medium
+  is British). A voice given by name is fetched once into the models volume.
 
 Both return WAV. Turning that into the OGG/Opus Telegram wants for a voice note
 is the transport's job (sloane/voice.py), not the provider's: a provider's
@@ -21,9 +22,12 @@ from __future__ import annotations
 import abc
 import asyncio
 import io
+import logging
+import os
 import re
 import shutil
 import tempfile
+import threading
 import time
 import wave
 from dataclasses import dataclass
@@ -33,6 +37,8 @@ import httpx
 
 from sloane.config import Settings
 from sloane.providers.base import ProviderError, Usage
+
+log = logging.getLogger(__name__)
 
 # Groq Orpheus rejects longer input.
 GROQ_TTS_MAX_CHARS = 200
@@ -117,6 +123,10 @@ class TTSProvider(abc.ABC):
     async def synthesize(self, text: str) -> Audio:
         """Return WAV audio for `text`, or raise ProviderError."""
 
+    async def warm(self) -> bool:
+        """Get ready ahead of the first voice note. Nothing to do by default."""
+        return True
+
 
 class GroqTTS(TTSProvider):
     name = "groq"
@@ -172,26 +182,184 @@ class GroqTTS(TTSProvider):
         )
 
 
+# A Piper voice named rather than given as a path ("en_GB-cori-medium"):
+# fetched once into the models volume, then kept loaded.
+_VOICE_NAME = re.compile(r"^[a-z]{2,3}_[A-Z]{2}-\w+-(?:x_low|low|medium|high)$")
+
+
+def _library():  # noqa: ANN202 - piper's own class, or None
+    """PiperVoice from the piper-tts package, if it is installed (it is in the image)."""
+    try:
+        from piper import PiperVoice
+    except ImportError:
+        return None
+    return PiperVoice
+
+
+def _downloader():  # noqa: ANN202
+    try:
+        from piper.download_voices import download_voice
+    except ImportError:
+        return None
+    return download_voice
+
+
+def _fetched(task: asyncio.Task) -> None:
+    """A fetch nobody waited for still gets its failure logged, once."""
+    if not task.cancelled() and task.exception() is not None:
+        exc = task.exception()
+        log.warning("piper voice fetch failed: %s", getattr(exc, "message", exc))
+
+
 class PiperTTS(TTSProvider):
+    """Local speech: no quota, no network once the voice is on disk.
+
+    With the piper-tts package (in the image) the voice is loaded once and kept
+    in memory, so a reply costs only the synthesis -- a fraction of a second for
+    two sentences. Without it, the `piper` binary, which reloads the voice on
+    every call.
+    """
+
     name = "piper"
+    # Loaded voices by file, shared by every instance: loading is the slow part.
+    _voices: dict[str, object] = {}
+    _loading = threading.Lock()
+    _speaking = threading.Lock()
+    _fetches: dict[str, asyncio.Task] = {}
 
     def __init__(self, settings: Settings) -> None:
         self._bin = settings.piper_bin
-        self._voice = settings.piper_voice
+        self._voice = settings.piper_voice.strip()
+        self._models = Path(settings.embed_cache_dir or Path.home() / ".cache" / "sloane")
         self._timeout = 30
+        self._fetch_timeout = 300
+
+    @property
+    def by_name(self) -> bool:
+        """A voice named ("en_GB-cori-medium"), fetched when missing, not a path."""
+        return bool(_VOICE_NAME.match(self._voice))
+
+    @property
+    def path(self) -> Path | None:
+        """Where the voice's .onnx is (or will be, for a voice given by name)."""
+        if not self._voice:
+            return None
+        if self.by_name:
+            return self._models / f"{self._voice}.onnx"
+        return Path(self._voice)
+
+    async def warm(self) -> bool:
+        """Fetch and load the voice now, so the first voice reply isn't the slow one."""
+        try:
+            path = await self._ready(wait=True)
+            library = _library()
+            if library is not None:
+                await asyncio.to_thread(self._load, library, path)
+        except ProviderError as exc:
+            log.warning("piper voice not ready: %s", exc.message)
+            return False
+        return True
+
+    async def _ready(self, *, wait: bool) -> Path:
+        path = self.path
+        if path is None:
+            raise ProviderError(self.name, "PIPER_VOICE is not set")
+        if path.is_file():
+            return path
+        if not self.by_name:
+            raise ProviderError(self.name, "PIPER_VOICE does not point at an .onnx voice file")
+        fetch = _downloader()
+        if fetch is None:
+            raise ProviderError(self.name, "fetching a voice by name needs the piper-tts package")
+        task = self._fetches.get(self._voice)
+        if task is None or task.done() or task.get_loop() is not asyncio.get_running_loop():
+            task = asyncio.create_task(self._fetch_in_thread(fetch, path))
+            task.add_done_callback(_fetched)
+            self._fetches[self._voice] = task
+        if not wait:
+            # A reply never waits for a download: the other voice speaks this one.
+            raise ProviderError(self.name, f"still fetching {self._voice}")
+        await asyncio.shield(task)
+        return path
+
+    async def _fetch_in_thread(self, fetch, path: Path) -> None:  # noqa: ANN001
+        try:
+            await asyncio.wait_for(asyncio.to_thread(self._fetch, fetch, path), timeout=self._fetch_timeout)
+        except asyncio.TimeoutError as exc:
+            raise ProviderError(self.name, f"fetching {self._voice} timed out") from exc
+        except Exception as exc:  # noqa: BLE001 - urllib, disk, a renamed voice
+            raise ProviderError(self.name, f"could not fetch {self._voice}: {type(exc).__name__}: {exc}"[:200]) from exc
+
+    def _fetch(self, fetch, path: Path) -> None:  # noqa: ANN001
+        """Download beside the target, then move into place: a cut-off download
+        never looks like a voice. The model moves last, so its presence means
+        its config is there too."""
+        if path.is_file():
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=path.parent) as tmp:
+            fetch(self._voice, Path(tmp))
+            model = Path(tmp) / f"{self._voice}.onnx"
+            config = Path(tmp) / f"{self._voice}.onnx.json"
+            if not model.is_file() or not config.is_file():
+                raise RuntimeError("the download was incomplete")
+            os.replace(config, path.with_name(path.name + ".json"))
+            os.replace(model, path)
+        log.info("fetched piper voice %s", self._voice)
+
+    def _load(self, library, path: Path):  # noqa: ANN001, ANN202
+        key = str(path)
+        with self._loading:
+            voice = self._voices.get(key)
+            if voice is None:
+                voice = library.load(key)
+                self._voices[key] = voice
+        return voice
+
+    def _speak(self, library, path: Path, text: str) -> bytes:  # noqa: ANN001
+        voice = self._load(library, path)
+        out = io.BytesIO()
+        with self._speaking, wave.open(out, "wb") as wav_file:
+            voice.synthesize_wav(text, wav_file)
+        return out.getvalue()
 
     async def synthesize(self, text: str) -> Audio:
-        if not self._voice or not Path(self._voice).is_file():
-            raise ProviderError(self.name, "PIPER_VOICE does not point at an .onnx voice file")
+        path = await self._ready(wait=False)
+        started = time.monotonic()
+        library = _library()
+        if library is not None:
+            try:
+                wav = await asyncio.wait_for(asyncio.to_thread(self._speak, library, path, text),
+                                             timeout=self._timeout)
+            except asyncio.TimeoutError as exc:
+                raise ProviderError(self.name, "timed out") from exc
+            except Exception as exc:  # noqa: BLE001 - onnxruntime, a corrupt voice file
+                raise ProviderError(self.name, f"{type(exc).__name__}: {exc}"[:200]) from exc
+        else:
+            wav = await self._binary(path, text)
+        try:
+            with wave.open(io.BytesIO(wav)) as check:
+                empty = check.getnframes() == 0
+        except (wave.Error, EOFError) as exc:
+            raise ProviderError(self.name, f"unreadable audio: {exc}") from exc
+        if empty:
+            raise ProviderError(self.name, "no audio")
+        return Audio(
+            wav=wav,
+            usage=Usage(
+                provider=self.name, model=path.stem,
+                latency_ms=int((time.monotonic() - started) * 1000),
+            ),
+        )
+
+    async def _binary(self, path: Path, text: str) -> bytes:
         if shutil.which(self._bin) is None:
             raise ProviderError(self.name, f"{self._bin} is not on PATH")
-
-        started = time.monotonic()
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "speech.wav"
             try:
                 proc = await asyncio.create_subprocess_exec(
-                    self._bin, "--model", self._voice, "--output_file", str(out),
+                    self._bin, "--model", str(path), "--output_file", str(out),
                     stdin=asyncio.subprocess.PIPE,
                     stdout=asyncio.subprocess.DEVNULL,
                     stderr=asyncio.subprocess.PIPE,
@@ -210,12 +378,4 @@ class PiperTTS(TTSProvider):
                 raise ProviderError(
                     self.name, stderr.decode(errors="replace").strip()[:200] or "no audio"
                 )
-            wav = out.read_bytes()
-
-        return Audio(
-            wav=wav,
-            usage=Usage(
-                provider=self.name, model=Path(self._voice).stem,
-                latency_ms=int((time.monotonic() - started) * 1000),
-            ),
-        )
+            return out.read_bytes()

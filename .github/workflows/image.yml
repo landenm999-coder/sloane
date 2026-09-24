@@ -48,3 +48,5 @@ jobs:
           run sh -c 'touch /var/lib/sloane/models/probe && echo "model cache writable"'
           run sh -c 'test -f state.example.md && ls sql/ && echo "seed + migrations present"'
           run sh -c 'ffmpeg -hide_banner -encoders | grep -q libopus && echo "ffmpeg can make voice notes"'
+          # The local (British) voice: piper-tts and its bundled espeak load on arm64.
+          run python -c "from piper import PiperVoice; from piper.download_voices import download_voice; print('piper ok')"

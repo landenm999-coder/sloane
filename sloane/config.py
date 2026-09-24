@@ -53,7 +53,10 @@ class Settings(BaseSettings):
     groq_tts_model: str = "canopylabs/orpheus-v1-english"
     groq_tts_voice: str = "hannah"
     piper_bin: str = "piper"
-    piper_voice: str = ""  # path to a Piper .onnx voice on the box
+    # A Piper voice: a name like en_GB-cori-medium (British; fetched once into
+    # EMBED_CACHE_DIR) or a path to an .onnx on the box. SPEAK_PROVIDER=piper
+    # makes it her main voice rather than the fallback.
+    piper_voice: str = ""
     ffmpeg_bin: str = "ffmpeg"
     # Groq's free TTS allowance is about 100 requests a day, and a long reply
     # can take two. Past this she answers in text and says so in the log.
