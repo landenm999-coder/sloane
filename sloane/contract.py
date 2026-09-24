@@ -16,6 +16,8 @@ import re
 from dataclasses import dataclass
 
 MAX_SPEECH_SENTENCES = 2
+# Commands one reply may carry. More than this is not a request, it's a script.
+MAX_ACTIONS = 5
 
 _FENCE = re.compile(r"```(?:json|JSON)?\s*(.+?)```", re.DOTALL)
 _FIRST_OBJECT = re.compile(r"\{.*\}", re.DOTALL)
@@ -38,10 +40,17 @@ _WS = re.compile(r"\s+")
 
 @dataclass(frozen=True)
 class Reply:
-    """The only shape a reply may take."""
+    """The only shape a reply may take.
+
+    `actions` are commands she proposes to run because he asked for them
+    ("/remind 7pm take the trash out"). The contract only carries them; the bot
+    decides whether they may run (sloane/actions.py), and only for his own
+    messages.
+    """
 
     speech: str
     detail: str
+    actions: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.speech, str) or not isinstance(self.detail, str):
@@ -90,7 +99,13 @@ def _from_mapping(data: dict) -> Reply | None:
         speech_text = detail_text
     if not detail_text:
         detail_text = speech_text
-    return Reply(speech=clean_speech(speech_text), detail=detail_text.strip())
+    raw_actions = lowered.get("do") or lowered.get("actions") or ()
+    if isinstance(raw_actions, str):
+        raw_actions = [raw_actions]
+    actions = tuple(
+        a.strip() for a in raw_actions if isinstance(a, str) and a.strip()
+    )[:MAX_ACTIONS] if isinstance(raw_actions, (list, tuple)) else ()
+    return Reply(speech=clean_speech(speech_text), detail=detail_text.strip(), actions=actions)
 
 
 def _try_json(blob: str) -> Reply | None:

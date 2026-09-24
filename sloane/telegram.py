@@ -743,6 +743,40 @@ class Bot:
                 return _reply(answer)
         return None
 
+    # -- acting for him ----------------------------------------------------------
+
+    async def _act(self, reply: Reply) -> Reply:
+        """Run the commands her reply carries, and show what each one did.
+
+        Each goes through _handle_command, exactly as if he had typed it. Only
+        the allowlist in sloane/actions.py may run; anything else is shown as
+        refused, never run.
+        """
+        from sloane import actions
+
+        commands = self.skills.command_names if self.skills is not None else frozenset()
+        allowed = actions.available(commands)
+        lines = []
+        for proposed in reply.actions[: actions.MAX_ACTIONS]:
+            command = actions.check(proposed, allowed)
+            if command is None:
+                log.warning("refused an action from the model: %r", proposed[:120])
+                lines.append(f"✗ Not something I run for you: {safe_field(proposed, limit=120)}")
+                continue
+            try:
+                result = await self._handle_command(command)
+            except Exception as exc:  # noqa: BLE001 - one failed action must not cost the reply
+                log.exception("action %r failed", command)
+                lines.append(f"✗ {safe_field(command, limit=120)} failed: {type(exc).__name__}")
+                continue
+            log.info("ran an action for him: %s", command.split()[0])
+            said = (result.speech or result.detail) if result is not None else "(no answer)"
+            lines.append(f"→ {said}")
+        done = "\n".join(lines)
+        same = reply.detail.strip() == reply.speech.strip()
+        detail = done if same or not reply.detail.strip() else f"{reply.detail.rstrip()}\n\n{done}"
+        return Reply(speech=reply.speech, detail=detail)
+
     # -- the loop --------------------------------------------------------------
 
     async def _handle(self, update: dict) -> None:
@@ -850,9 +884,12 @@ class Bot:
         live = _Live(self, chat_id)
         await live.start_typing()
         try:
-            reply = await self._agent.answer(body, channel=kind, on_text=None if voice else live.update)
+            reply = await self._agent.answer(body, channel=kind, on_text=None if voice else live.update,
+                                             can_act=True)
         finally:
             live.stop_typing()
+        if reply.actions:
+            reply = await self._act(reply)
         if not voice and await live.finish(reply):
             return
         await self.reply(chat_id, reply, as_voice=bool(voice))

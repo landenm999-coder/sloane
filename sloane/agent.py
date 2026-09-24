@@ -210,8 +210,15 @@ class Agent:
         channel: str = "telegram",
         today: date | None = None,
         on_text=None,  # noqa: ANN001 - async (raw text so far) -> None, to show it as it's written
+        can_act: bool = False,
     ) -> Reply:
-        """One turn. Returns a Reply even when the model is unreachable."""
+        """One turn. Returns a Reply even when the model is unreachable.
+
+        `can_act` is for his own messages only: the reply may then carry
+        commands to run for him (sloane/actions.py). With ingested text in
+        the prompt it is off whatever the caller says.
+        """
+        can_act = can_act and not ingested.strip()
         # Landen's clock, never the container's. Docker runs in UTC, and from
         # 6 PM to midnight in Parker it is already tomorrow there -- so "what's
         # due tonight?" at 8 PM would search tomorrow and miss tonight.
@@ -273,8 +280,7 @@ class Agent:
         )
 
         try:
-            raw = await self._router.reply(system_prompt(address=self._config.address_as), prompt,
-                                           on_text=on_text)
+            raw = await self._router.reply(self.system(can_act=can_act), prompt, on_text=on_text)
         except NoProviderAvailable as exc:
             log.error("every provider failed: %s", exc)
             reply = Reply(
@@ -285,12 +291,26 @@ class Agent:
             return reply
 
         reply = parse(raw)
+        if reply.actions and not can_act:
+            log.warning("dropped %d action(s) from a turn that may not act", len(reply.actions))
+            reply = Reply(speech=reply.speech, detail=reply.detail)
         self._later(self._persist(question, reply, channel=channel, answered=True))
         return reply
 
+    def system(self, *, can_act: bool = False) -> str:
+        """Her system prompt: the persona, and what she can do when she may act."""
+        extra = ""
+        if can_act:
+            from sloane import actions
+
+            commands = self.skills.command_names if self.skills is not None else frozenset()
+            extra = actions.instructions(actions.available(commands))
+        return system_prompt(extra, address=self._config.address_as)
+
     async def prewarm(self) -> None:
-        """Have the model lane ready for her system prompt before the first message."""
-        await self._router.prewarm(system_prompt(address=self._config.address_as))
+        """Have the model lane ready before the first message: his messages are
+        the ones that can act, so that is the prompt kept warm."""
+        await self._router.prewarm(self.system(can_act=True))
 
     # -- writing ---------------------------------------------------------------
 

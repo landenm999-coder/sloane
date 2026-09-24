@@ -30,6 +30,7 @@ UNIT = [
     "test_conversation.py",  # likewise
     "test_claude_stream.py",
     "test_live.py",  # integration only
+    "test_actions.py",
 ]
 INTEGRATION = [
     "test_store.py", "test_school.py", "test_jobs.py", "test_agency.py", "test_mail.py",
