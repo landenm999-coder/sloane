@@ -41,6 +41,7 @@ The whole body must be 64 KB or less.
 | `201` | `{"stored": true, "id": "<uuid>", "kind": "note"}` | mark it sent |
 | `201` + reminder | `…, "reminder": "tomorrow at 7:00 AM: bring the lab"` | show "Reminder set: …" |
 | `201` + no time | `…, "reminder": null, "note": "…no time could be read…"` | show "Saved as a note (no time found)" |
+| `201` + action | `…, "action": "Added milk to your grocery list; 3 things on it now."` | show the `action` line |
 | `400` | `{"error": "…"}` | the request is wrong; don't retry, surface it |
 | `401` | `{"error": "unauthorized"}` | the token is wrong; ask him to re-enter it |
 | `413` | `{"error": "…"}` | too long; split it or trim it |
@@ -53,6 +54,9 @@ The whole body must be 64 KB or less.
   so later questions recall it ("what was that idea about the bakery site?").
 - A capture that starts with "remind me …" becomes a real reminder, read by the same rules as the chat. It is
   delivered on Telegram with snooze buttons.
+- A capture that is exactly one of the chat's own skill phrases -- "add milk to my grocery list", "spent 12 on
+  lunch", "did reading", "Keegan's birthday is March 3" -- is acted on by the same rules, and `action` says what
+  was done. It is never taken as the answer to a quiz running in the chat.
 - Nothing else. It is not an instruction channel: text that says "email Keegan" is stored as a note, not acted on.
 
 ## Client checklist
@@ -60,4 +64,4 @@ The whole body must be 64 KB or less.
 1. Settings: Sloane URL + token (secure storage), and a "Test connection" button that posts
    `{"text": "capture test", "kind": "note"}` and expects `201`.
 2. After each capture is transcribed, POST it. On failure, queue it offline and retry; don't drop it.
-3. Show the `reminder` line when present.
+3. Show the `reminder` line, or the `action` line, when present.

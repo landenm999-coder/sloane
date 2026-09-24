@@ -227,7 +227,7 @@ def create_app() -> FastAPI:
         except ValueError:
             payload = None
         result = await ingest(store, config, payload, request.headers.get("authorization"),
-                              embedder=state.get("embedder"))
+                              embedder=state.get("embedder"), skills=state.get("skills"))
         return JSONResponse(result.body, status_code=result.status)
 
     @app.get("/jobs")

@@ -84,6 +84,32 @@ async def main() -> None:
         vague = await post({"text": "remind me about the lab thing"})
         check("no time: stored as a note, and says so", (vague.status, vague.body.get("reminder")), (201, None))
 
+        # -- a skill's rule acts on it too, but never as a quiz answer ----------------
+        from sloane.skills import Registry, SkillContext
+        from sloane.skills.lists import Lists
+
+        await store._exec("delete from list_items where list = 'capturetest'")
+        skill_ctx = SkillContext(store=store, config=on)
+        skills = Registry([Lists(skill_ctx)], skill_ctx)
+        listed = await ingest(store, on, {"text": "add milk to my capturetest list"}, auth, now=NOW, skills=skills)
+        check("a list add from Capture", (listed.status, listed.body.get("action")),
+              (201, "Added milk to your capturetest list; 1 thing on it now."))
+        plain = await ingest(store, on, {"text": "bakery idea: pickup lockers"}, auth, now=NOW, skills=skills)
+        check("an ordinary note has no action", "action" in plain.body, False)
+        await store.start_session("lists", {})
+        routed: list[bool] = []
+        original = skills.route
+
+        async def spy(text, *, sessions=True):
+            routed.append(sessions)
+            return await original(text, sessions=sessions)
+
+        skills.route = spy
+        await ingest(store, on, {"text": "mitochondria"}, auth, now=NOW, skills=skills)
+        check("capture never feeds an open session", routed, [False])
+        await store.end_session()
+        await store._exec("delete from list_items where list = 'capturetest'")
+
     # -- the route caps the body before reading it all -------------------------------
     import httpx
 

@@ -5,7 +5,8 @@ or a voice note, transcribes it, and posts the text here. It becomes an
 episode *in his own voice*, trusted, because he is the one who said it, so it
 is recallable later ("what was that idea I had about the bakery site?"). And if
 it's a reminder ("remind me tomorrow at 7 to bring the lab"), it is set,
-by the same rules the chat uses.
+by the same rules the chat uses; if a skill's rule claims it ("add milk to my
+grocery list", "spent 12 on lunch"), that is done too, and said back.
 
 This is the only endpoint meant to be reached from off the box, so it is the
 only one that checks a credential:
@@ -67,6 +68,7 @@ async def ingest(
     authorization: str | None,
     *,
     embedder=None,  # noqa: ANN001 - optional: stored unembedded without it
+    skills=None,  # noqa: ANN001 - sloane.skills.Registry; optional
     now: datetime | None = None,
 ) -> Result:
     if not enabled(config):
@@ -124,5 +126,11 @@ async def ingest(
         else:
             body["reminder"] = None
             body["note"] = "sounded like a reminder, but no time could be read; stored as a note"
+    elif skills is not None:
+        # "Add milk to my grocery list", "spent 12 on lunch": the same rules as
+        # the chat, and only those. Never an open quiz's answer.
+        answer = await skills.route(text, sessions=False)
+        if answer is not None:
+            body["action"] = answer.speech
     log.info("capture stored: %s, %s chars", kind, len(text))
     return Result(201, body)

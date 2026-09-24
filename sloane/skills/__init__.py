@@ -11,7 +11,8 @@ A skill may offer any of these:
     session    an ongoing mode (a quiz) that claims his next plain messages until
                it ends, he sends /end, or it sits idle for SESSION_IDLE_MINUTES
     facts      lines for FACTS, the exact tier 4 block every answer and brief reads
-    panel      a JSON-able dict for the TV dashboard
+    panel      a JSON-able dict for the TV dashboard: {"title": ..., "lines": [...]}
+               is what /tv renders; anything else rides along in /panels
     nudges     things worth saying unprompted right now (the heartbeat job asks)
 
 Rules every skill keeps, because the core invariants apply here too:
@@ -190,13 +191,17 @@ class Registry:
             log.exception("skill %s failed on /%s", skill.name, name)
             return Answer(f"/{name} hit an error, so I didn't do it.", detail=f"{type(exc).__name__}: {exc}"[:300])
 
-    async def route(self, text: str) -> Answer | None:
+    async def route(self, text: str, *, sessions: bool = True) -> Answer | None:
         """A plain message: an open session first, then each skill's rules.
 
-        None means no skill wants it, and the agent answers as usual.
+        None means no skill wants it, and the agent answers as usual. With
+        `sessions=False` (a Capture note, not a chat reply) an open quiz never
+        takes it as an answer; only the rules are tried.
         """
+        row = None
         try:
-            row = await self.ctx.store.active_session(SESSION_IDLE_MINUTES)
+            if sessions:
+                row = await self.ctx.store.active_session(SESSION_IDLE_MINUTES)
         except Exception:  # noqa: BLE001 - no session state is not no reply
             log.exception("could not read the open skill session")
             row = None
