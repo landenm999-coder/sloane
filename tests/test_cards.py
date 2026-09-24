@@ -36,7 +36,9 @@ check("decimals survive normalizing", normalize("pi is 3.14."), "pi is 3.14")
 RIGHT = [
     ("mitochondria", "Mitochondria"),
     ("the mitochondria", "mitochondria"),
-    ("mitochondira", "mitochondria"),                   # a typo
+    ("mitochondira", "mitochondria"),                   # a typo (two letters swapped)
+    ("mitochondra", "mitochondria"),                    # a letter dropped
+    ("photosynthesiss", "photosynthesis"),              # a letter doubled
     ("it's the mitochondria obviously", "mitochondria"),
     ("1848", "1848"),
     ("george washington", "George Washington"),
@@ -56,6 +58,9 @@ ASK = [
     ("not mitochondria", "mitochondria"),
     ("it isn't the mitochondria", "mitochondria"),
     ("world war 1", "World War II"),
+    ("independent variable", "dependent variable"),
+    ("adsorption", "absorption"),
+    ("unsaturated", "saturated"),
 ]
 for said, back in ASK:
     check(f"he judges: {said!r} for {back!r}", grade(said, back), None)

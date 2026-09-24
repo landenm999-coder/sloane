@@ -100,15 +100,31 @@ async def main() -> None:
         routed: list[bool] = []
         original = skills.route
 
-        async def spy(text, *, sessions=True):
+        async def spy(text, *, sessions=True, at=None):
             routed.append(sessions)
-            return await original(text, sessions=sessions)
+            return await original(text, sessions=sessions, at=at)
 
         skills.route = spy
         await ingest(store, on, {"text": "mitochondria"}, auth, now=NOW, skills=skills)
         check("capture never feeds an open session", routed, [False])
         await store.end_session()
         await store._exec("delete from list_items where list = 'capturetest'")
+
+        # A capture queued offline acts as of when he said it, not when it arrived.
+        from sloane.skills.habits import Habits
+
+        await store._exec("delete from habits where name = 'capture reading'")
+        habit_ctx = SkillContext(store=store, config=on, clock=lambda: NOW)
+        habits = Registry([Habits(habit_ctx)], habit_ctx)
+        await store.add_habit("capture reading")
+        late = await ingest(store, on, {"text": "did capture reading",
+                                        "captured_at": "2026-09-21T23:50:00-06:00"}, auth, now=NOW, skills=habits)
+        check("a late capture is marked for the day he said it", late.body.get("action"),
+              "Marked capture reading. Streak: 1 day.")
+        days = await store._fetch("select l.on_date from habit_log l join habits h on h.id = l.habit_id "
+                                  "where h.name = 'capture reading'")
+        check("in the log too", [str(d["on_date"]) for d in days], ["2026-09-21"])
+        await store._exec("delete from habits where name = 'capture reading'")
 
     # -- the route caps the body before reading it all -------------------------------
     import httpx

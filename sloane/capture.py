@@ -129,7 +129,8 @@ async def ingest(
     elif skills is not None:
         # "Add milk to my grocery list", "spent 12 on lunch": the same rules as
         # the chat, and only those. Never an open quiz's answer.
-        answer = await skills.route(text, sessions=False)
+        # As of when he said it: "did reading" queued at 11:50 PM is that day's.
+        answer = await skills.route(text, sessions=False, at=captured_at)
         if answer is not None:
             body["action"] = answer.speech
     log.info("capture stored: %s, %s chars", kind, len(text))

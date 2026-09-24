@@ -39,6 +39,7 @@ import importlib
 import logging
 import pkgutil
 from collections.abc import Awaitable, Callable, Iterable
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
@@ -54,6 +55,16 @@ SESSION_IDLE_MINUTES = 30
 
 # Handled by the registry itself, for whichever skill holds the session.
 END_COMMAND = "end"
+
+# "Now", for one routed message that was said earlier than it arrived (a Capture
+# note queued offline). A context variable, so concurrent messages never see
+# each other's time.
+_AS_OF: ContextVar[datetime | None] = ContextVar("sloane_skill_as_of", default=None)
+
+
+def cap(text: str) -> str:
+    """First letter up, the rest as he typed it: "DECA prep", not "Deca prep"."""
+    return text[:1].upper() + text[1:]
 
 
 @dataclass(frozen=True)
@@ -93,6 +104,9 @@ class SkillContext:
     def now(self) -> datetime:
         """Now, in Landen's timezone. Skills read the time only through here."""
         zone = ZoneInfo(self.config.timezone)
+        pinned = _AS_OF.get()
+        if pinned is not None:
+            return pinned.astimezone(zone)
         return self.clock().astimezone(zone) if self.clock is not None else datetime.now(zone)
 
     def today(self) -> date:
@@ -191,7 +205,16 @@ class Registry:
             log.exception("skill %s failed on /%s", skill.name, name)
             return Answer(f"/{name} hit an error, so I didn't do it.", detail=f"{type(exc).__name__}: {exc}"[:300])
 
-    async def route(self, text: str, *, sessions: bool = True) -> Answer | None:
+    async def route(self, text: str, *, sessions: bool = True, at: datetime | None = None) -> Answer | None:
+        """See `_route`. `at` is when he said it, if that was earlier than now."""
+        token = _AS_OF.set(at) if at is not None else None
+        try:
+            return await self._route(text, sessions=sessions)
+        finally:
+            if token is not None:
+                _AS_OF.reset(token)
+
+    async def _route(self, text: str, *, sessions: bool = True) -> Answer | None:
         """A plain message: an open session first, then each skill's rules.
 
         None means no skill wants it, and the agent answers as usual. With

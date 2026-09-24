@@ -136,6 +136,8 @@ class Clients(Skill):
             if r.get("next_step"):
                 follow += f" ({r['next_step']})"
             bits.append(follow)
+        elif r.get("next_step"):
+            bits.append(f"next: {r['next_step']} (no date)")
         return ", ".join(bits)
 
     # -- commands ----------------------------------------------------------------------
@@ -155,6 +157,8 @@ class Clients(Skill):
             if found:
                 follow_on = found.day
                 step = safe_field(dates.remove(tail, found).strip(" :,-"), limit=200) or None
+            else:  # "follow up after launch": kept as the next step, with no date
+                step = safe_field(("follow up " + tail.strip(" :,-")).strip(), limit=200)
         name = safe_field(text.strip(" ,:-"), limit=MAX_NAME)
         if not _words(name):
             return Answer("Who's the client? Try /client add Bella's Bakery $1200.")

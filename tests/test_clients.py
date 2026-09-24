@@ -55,6 +55,10 @@ async def integration() -> None:
         check("add with value and follow-up", (added.speech, added.detail),
               ("Added Bella's Bakery as a lead.", "Bella's Bakery: lead, $1,200, follow up tomorrow (send mockups)"))
         check("add plain", (await cmd("add Peak Plumbing")).speech, "Added Peak Plumbing as a lead.")
+        undated = await cmd("add Summit Gym follow up after launch")
+        check("a follow-up with no date is kept, and said", (undated.speech, undated.detail),
+              ("Added Summit Gym as a lead.", "Summit Gym: lead, next: follow up after launch (no date)"))
+        await cmd("summit drop")
         check("add a duplicate", (await cmd("add bella's bakery")).speech, "bella's bakery is already in your pipeline.")
         await cmd("add Parker Dental $2.5k follow up today: call back about hosting")
 

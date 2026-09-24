@@ -539,7 +539,7 @@ sql/
   013_skills.sql   skill sessions (a quiz holds his next messages)
   014_heartbeat.sql  nudges said once + the heartbeat job
   015-023          one per skill: lists, countdowns, cards, habits, clients,
-                   estimates, focus, birthdays, money (+ skill_settings)
+                   plan, focus, birthdays, money (+ skill_settings)
 scripts/
   doctor.py      validates every credential
   seed_state.py  tier 1 from a markdown file

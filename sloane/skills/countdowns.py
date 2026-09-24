@@ -17,7 +17,7 @@ from datetime import date
 
 from sloane import dates
 from sloane.ingest import safe_field
-from sloane.skills import Answer, Nudge, Skill, SkillContext
+from sloane.skills import Answer, cap, Nudge, Skill, SkillContext
 
 MAX_NAME = 80
 FACTS_COUNTDOWNS = 8  # the soonest; the rest are on /countdown
@@ -65,7 +65,7 @@ class Countdowns(Skill):
         first = rows[0]
         left = (first["on_date"] - today).days
         soonest = "today" if left == 0 else ("tomorrow" if left == 1 else f"in {_days(left)}")
-        return Answer(f"{first['name'].capitalize()} is {soonest}"
+        return Answer(f"{cap(first['name'])} is {soonest}"
                       + (f", and {len(rows) - 1} more after it." if len(rows) > 1 else "."),
                       "\n".join(lines) + "\n\n`/countdown drop <n>` removes one.")
 
@@ -110,7 +110,7 @@ class Countdowns(Skill):
         row, today = rows[0], self.ctx.today()
         left = (row["on_date"] - today).days
         if left == 0:
-            return Answer(f"{row['name'].capitalize()} is today.")
+            return Answer(f"{cap(row['name'])} is today.")
         return Answer(f"{_days(left).capitalize()} until {row['name']}, on {dates.spoken(row['on_date'], today)}.")
 
     async def facts(self) -> list[str]:

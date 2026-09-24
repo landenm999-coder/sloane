@@ -66,6 +66,13 @@ async def integration() -> None:
         detail = (await reg.command("focus", "")).detail
         check("by what", detail.splitlines()[:3], ["• reading: 45 min", "• physics lab: 10 min", "• essay: 5 min"])
         check("too long", await cmd("500 everything"), "Pick between 1 and 240 minutes.")
+        check("a task starting with m keeps its m", await cmd("25 math homework"),
+              "Focusing on math homework for 25 min; I'll tell you at 6:40 PM.")
+        check("minutes spelled out", await cmd("30 minutes essay"),
+              "Focusing on essay for 30 min; I'll tell you at 6:45 PM. (ended math homework first)")
+        check("min", await cmd("20 min essay"),
+              "Focusing on essay for 20 min; I'll tell you at 6:35 PM. (ended essay first)")
+        await cmd("stop")
         check("panel", (await focus.panel())["lines"], ["1h today"])
         live = await store._fetch("select count(*) as n from reminders where cancelled_at is null")
         check("only the finished one's reminder is left", live[0]["n"], 1)

@@ -23,6 +23,7 @@ cost one slow reply, not all of them.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import time as clock
@@ -190,6 +191,7 @@ class Weather(Skill):
         self.celsius = ctx.config.weather_units.strip().lower().startswith("c")
         self._cache: tuple[float, Forecast] | None = None
         self._retry_at = 0.0
+        self._lock = asyncio.Lock()
 
     # -- units ---------------------------------------------------------------------
 
@@ -207,9 +209,16 @@ class Weather(Skill):
     # -- fetching ------------------------------------------------------------------
 
     async def forecast(self) -> Forecast:
+        if self._cache and clock.monotonic() - self._cache[0] < FRESH_SECONDS:
+            return self._cache[1]
+        # FACTS, the TV and the heartbeat can all ask at once: one fetch serves them.
+        async with self._lock:
+            return await self._fetch()
+
+    async def _fetch(self) -> Forecast:
         now = clock.monotonic()
         if self._cache and now - self._cache[0] < FRESH_SECONDS:
-            return self._cache[1]
+            return self._cache[1]  # fetched while this caller waited for the lock
         if now < self._retry_at:
             if self._cache and now - self._cache[0] < STALE_OK_SECONDS:
                 return self._cache[1]

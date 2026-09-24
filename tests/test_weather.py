@@ -136,6 +136,12 @@ async def main() -> None:
     now["at"] = datetime(2026, 9, 24, 20, 0, tzinfo=DEN)
     check("evening: snow tomorrow morning", [n.key for n in await skill.nudges()], ["weather:snow:2026-09-25"])
 
+    # Callers that arrive together share one fetch.
+    skill._cache = (skill._cache[0] - 25 * 60, skill._cache[1])
+    before = len(Stub.calls)
+    await asyncio.gather(skill.facts(), skill.panel(), skill.nudges(), skill.facts())
+    check("concurrent readers share one fetch", len(Stub.calls) - before, 1)
+
     # Outages: a stale forecast is fine for a while, then it says so.
     Stub.status = 500
     skill._cache = (skill._cache[0] - 25 * 60, skill._cache[1])

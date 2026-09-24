@@ -18,7 +18,7 @@ from __future__ import annotations
 import re
 
 from sloane.ingest import safe_field
-from sloane.skills import Answer, Skill, SkillContext
+from sloane.skills import Answer, cap, Skill, SkillContext
 
 # How much of each list rides in FACTS and on the TV.
 FACTS_ITEMS = 12
@@ -41,7 +41,7 @@ _REMOVE = re.compile(
     re.I | re.S,
 )
 _SHOW = re.compile(
-    r"^\s*(?:(?:what'?s|whats|what\s+is|what\s+do\s+i\s+have)\s+on|(?:show|read|send|give|tell)\s+(?:me\s+)?)\s*"
+    r"^\s*(?:(?:(?:check|see)\s+)?(?:what'?s|whats|what\s+is|what\s+do\s+i\s+have)\s+on|(?:show|read|send|give|tell)\s+(?:me\s+)?)\s*"
     + _LIST + _END,
     re.I,
 )
@@ -51,6 +51,7 @@ _ALL = re.compile(
     + _END,
     re.I,
 )
+_QUESTION = re.compile(r"^(?:what'?s?|whats|if|whether|how|which|who|where|when|is|are|do|does)\b", re.I)
 _SPLIT = re.compile(r"\s*(?:,|;|\s+&\s+|\s+\+\s+)\s*", re.I)
 _AND = re.compile(r"\s+and\s+", re.I)
 # Things that are one item with "and" in the name.
@@ -130,7 +131,7 @@ class Lists(Skill):
         total = len(await self.ctx.store.open_list_items(name))
         already = [i for i in items if i.lower() not in {r["item"].lower() for r in added}]
         if not added:
-            return Answer(f"{_join(already).capitalize()} {'is' if len(already) == 1 else 'are'} "
+            return Answer(f"{cap(_join(already))} {'is' if len(already) == 1 else 'are'} "
                           f"already on your {name} list.")
         speech = f"Added {_join([r['item'] for r in added])} to your {name} list; {_count(total)} on it now."
         detail = f"Already there: {_join(already)}" if already else ""
@@ -225,11 +226,14 @@ class Lists(Skill):
             return None
         if _ALL.match(text):
             return await self.all_lists()
-        for pattern, action in ((_ADD, "add"), (_REMOVE, "off"), (_CLEAR, "clear"), (_SHOW, "show")):
+        for pattern, action in ((_SHOW, "show"), (_ADD, "add"), (_REMOVE, "off"), (_CLEAR, "clear")):
             found = pattern.match(text)
             # "put it on the list" names no list: that one is the agent's.
             if found is None or not list_name(found["list"]):
                 continue
+            # "check if we have eggs on the list" is a question, not a check-off.
+            if action == "off" and _QUESTION.match(found["items"]):
+                return None
             if action == "add":
                 return await self.add(found["list"], found["items"])
             if action == "off":

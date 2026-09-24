@@ -22,7 +22,10 @@ from sloane.skills import Answer, Skill, SkillContext
 DEFAULT_MINUTES = 25
 MAX_MINUTES = 240
 
-_START = re.compile(r"^\s*(?:(?P<n>\d{1,3})\s*(?:m|min|mins|minutes)?\s*)?(?:on\s+|for\s+)?(?P<what>.*)$", re.I)
+# Longest unit first, and a word boundary: "25 math" keeps its m.
+_START = re.compile(
+    r"^\s*(?:(?P<n>\d{1,3})\s*(?:(?:minutes|minute|mins|min|m)\b)?\s*)?(?:on\s+|for\s+)?(?P<what>.*)$", re.I
+)
 
 
 def _clock(moment: datetime) -> str:

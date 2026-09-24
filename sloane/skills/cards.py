@@ -29,7 +29,6 @@ import random
 import re
 import unicodedata
 from datetime import date, timedelta
-from difflib import SequenceMatcher
 
 from sloane import dates
 from sloane.contract import clean_speech
@@ -83,6 +82,22 @@ def _numerals(words: list[str]) -> list[str]:
     return sorted(w for w in words if w.replace(".", "").isdigit() or w in _ROMAN)
 
 
+def _one_slip(said: str, want: str) -> bool:
+    """A typing slip in a long word: two neighbours swapped, one letter dropped
+    or doubled. Not a changed letter or a prefix: "adsorption" is not
+    "absorption", and "independent" is not "dependent"."""
+    if len(want) < 5 or said[:1] != want[:1]:
+        return False
+    if len(said) == len(want):
+        diff = [i for i, (a, b) in enumerate(zip(said, want)) if a != b]
+        return len(diff) == 2 and diff[1] == diff[0] + 1 and said[diff[0]] == want[diff[1]] \
+            and said[diff[1]] == want[diff[0]]
+    longer, shorter = (said, want) if len(said) > len(want) else (want, said)
+    if len(longer) - len(shorter) != 1:
+        return False
+    return any(longer[:i] + longer[i + 1:] == shorter for i in range(len(longer)))
+
+
 def grade(answer: str, back: str) -> bool | None:
     """True when the answer is plainly right; None when he should judge it.
 
@@ -102,7 +117,8 @@ def grade(answer: str, back: str) -> bool | None:
             continue
         if (set(said_words) - set(want_words)) & _NEGATIONS:
             continue
-        if len(want) >= 5 and SequenceMatcher(None, said, want).ratio() >= 0.88:
+        if len(said_words) == len(want_words) and all(
+                a == b or _one_slip(a, b) for a, b in zip(said_words, want_words)):
             return True
         if set(want_words) <= set(said_words) and len(said_words) <= 2 * len(want_words) + 3:
             return True

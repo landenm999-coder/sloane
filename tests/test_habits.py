@@ -64,6 +64,10 @@ async def integration() -> None:
         check("add", await cmd("habit", "add reading"), 'Tracking reading. Say "did reading" when it\'s done.')
         check("add again", await cmd("habit", "add Reading"), "You already track Reading.")
         await cmd("habit", "add gym")
+        await cmd("habit", "add DECA prep")
+        await cmd("did", "deca prep")
+        check("his capitals are kept", await cmd("did", "deca prep"), "DECA prep was already done today. Streak: 1 day.")
+        await cmd("habit", "drop deca prep")
         await cmd("habit", "add morning stretches")
 
         # Build a three-day reading streak going into today.

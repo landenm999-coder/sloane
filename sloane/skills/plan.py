@@ -115,6 +115,8 @@ class Plan:
     slots: list[Slot]
     unplaced: list[tuple[str, str, int]]  # (title, due, minutes left)
     work_minutes: int
+    # Due today before his free time starts: nothing to place, but worth saying.
+    early: list[tuple[str, str]] = ()  # (title, "11:59 AM")
 
     @property
     def free_minutes(self) -> int:
@@ -219,7 +221,10 @@ class Planner(Skill):
         rows = await self.ctx.store.plannable_assignments(today + timedelta(days=HORIZON_DAYS))
         # Work due before this plan's free time begins can't wait for it (tomorrow
         # 8 AM is tonight's job, not tomorrow's), except what is already overdue.
-        threshold = now if day == today else datetime.combine(day, start, tzinfo=zone)
+        threshold = max(now, datetime.combine(day, start, tzinfo=zone))
+        early = [(safe_field(r["title"], limit=80) + (f" [{safe_field(r['course'], limit=40)}]" if r.get("course") else ""),
+                  clock(r["due_at"].astimezone(zone)))
+                 for r in rows if day == today and now <= r["due_at"] < threshold]
         rows = [r for r in rows if r["due_at"] >= threshold or r["due_at"] < now]
         rows.sort(key=lambda r: (r["due_at"].astimezone(zone) >= now, r["due_at"]))
         tasks = []
@@ -228,7 +233,7 @@ class Planner(Skill):
             minutes = int(r.get("estimate_minutes") or guess_minutes(r["title"]))
             tasks.append((label, self._due_words(r, today), minutes))
         slots, unplaced = fill(blocks, tasks)
-        return Plan(day, blocks, slots, unplaced, sum(t[2] for t in tasks))
+        return Plan(day, blocks, slots, unplaced, sum(t[2] for t in tasks), early)
 
     def render(self, plan: Plan, label: str) -> Answer:
         if not plan.work_minutes:
@@ -237,6 +242,9 @@ class Planner(Skill):
             return Answer(f"You don't have free time left {label}.",
                           f"{span(plan.work_minutes)} of work is due in the next {HORIZON_DAYS} days.")
         lines = [f"{clock(s.start)}–{clock(s.end)}  {s.title} {s.part}".rstrip() + f" — {s.due}" for s in plan.slots]
+        if plan.early:
+            lines.append("")
+            lines += [f"Due before you're free: {t} at {when}" for t, when in plan.early]
         if plan.unplaced:
             lines.append("")
             lines.append("Won't fit:")

@@ -65,11 +65,26 @@ class Birthdays(Skill):
         found = dates.find(when_text, self.ctx.today())
         if not name or found is None:
             return Answer("Whose birthday, and when? Try /birthday Keegan mar 3.")
-        matches = await self.ctx.store.find_people(name)
-        person_id = str(matches[0]["id"]) if matches else await self.ctx.store.person_id(name)
+        person, which = await self._one_person(name)
+        if which:
+            return which
+        person_id = str(person["id"]) if person else await self.ctx.store.person_id(name)
         row = await self.ctx.store.set_birthday(person_id, found.day.month, found.day.day)
         days = (next_birthday(found.day.month, found.day.day, self.ctx.today()) - self.ctx.today()).days
         return Answer(f"Got it: {row['name']}'s birthday is {found.day:%B} {found.day.day}, {_in(days)}.")
+
+    async def _one_person(self, name: str) -> tuple[dict | None, Answer | None]:
+        """(the person, None), (None, None) if nobody, or (None, "which one?")."""
+        matches = await self.ctx.store.find_people(name.strip())
+        exact = [m for m in matches if m["name"].lower() == name.strip().lower()]
+        if exact:
+            return exact[0], None
+        if len(matches) == 1:
+            return matches[0], None
+        if matches:
+            names = [m["name"] for m in matches[:4]]
+            return None, Answer("Which one: " + ", ".join(names[:-1]) + f" or {names[-1]}?")
+        return None, None
 
     async def ask(self, name: str) -> Answer | None:
         matches = [m for m in await self.ctx.store.find_people(name.strip()) if m.get("birth_month")]
@@ -93,11 +108,13 @@ class Birthdays(Skill):
                           "\n".join(lines))
         words = rest.split()
         if len(words) >= 2 and words[-1].lower() in {"forget", "remove", "clear"}:
-            matches = await self.ctx.store.find_people(" ".join(words[:-1]))
-            if not matches:
+            person, which = await self._one_person(" ".join(words[:-1]))
+            if which:
+                return which
+            if person is None:
                 return Answer("I don't know who that is.")
-            await self.ctx.store.set_birthday(str(matches[0]["id"]), None, None)
-            return Answer(f"Forgot {matches[0]['name']}'s birthday.")
+            await self.ctx.store.set_birthday(str(person["id"]), None, None)
+            return Answer(f"Forgot {person['name']}'s birthday.")
         found = dates.find(rest, self.ctx.today())
         if found is None:
             asked = await self.ask(rest)

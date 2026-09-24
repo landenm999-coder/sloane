@@ -66,6 +66,10 @@ async def integration() -> None:
         check("a question after the date is the agent's",
               await reg.route("Keegan's birthday is tomorrow, what should I get him?"), None)
         check("and nothing was saved", (await store._one("select birth_month from people where id = %s", (keegan,)))["birth_month"], 10)
+        await store.person_id("Sam Lee")
+        await store.person_id("Sam Ortiz")
+        check("two Sams: ask which", await cmd("Sam may 3"), "Which one: Sam Lee or Sam Ortiz?")
+        check("and nothing was saved", (await store._one("select count(*) as n from people where birth_month = 5"))["n"], 0)
         check("list", await cmd(), "Next up: Keegan Hart, in 7 days on Thu Oct 1.")
         check("FACTS: only the next two weeks", await skill.facts(), ["- BIRTHDAY Keegan Hart: Thu Oct 1 (in 7 days)"])
         check("a week out", [n.text for n in await skill.nudges()],

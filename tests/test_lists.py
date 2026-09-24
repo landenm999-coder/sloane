@@ -86,6 +86,8 @@ async def integration() -> None:
               "Added email Mr. B and print lab to your todo list; 2 things on it now.")
         check("/list done", (await reg.command("list", "done todo 1")).speech,
               "Checked off email Mr. B; 1 thing left on your todo list.")
+        check("check what's on it is a look, not a check-off", await say("check what's on my grocery list"),
+              "2 things on your grocery list: bread and butter.")
         check("clear", await say("clear the packing list"), "Cleared your packing list: 2 things checked off.")
         check("clear again", await say("clear the packing list"), "Your packing list was already empty.")
         rows = await store._fetch("select count(*) as n from list_items")
@@ -94,7 +96,8 @@ async def integration() -> None:
         # Must not over-reach: these belong to the agent.
         for text in ["add a conclusion to my essay", "put it on the list", "what's on my calendar?",
                      "I need to add bread to the grocery list later, remind me",
-                     "is the reading list due friday?"]:
+                     "is the reading list due friday?",
+                     "check if we have eggs on the grocery list"]:
             check(f"not ours: {text!r}", await say(text), None)
 
 

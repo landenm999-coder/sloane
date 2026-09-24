@@ -19,7 +19,7 @@ from datetime import date, timedelta
 
 from sloane import dates
 from sloane.ingest import safe_field
-from sloane.skills import Answer, Nudge, Skill, SkillContext
+from sloane.skills import Answer, cap, Nudge, Skill, SkillContext
 
 MAX_NAME = 60
 HISTORY_DAYS = 400  # long enough for a year-long streak
@@ -106,14 +106,14 @@ class Habits(Skill):
         when = "" if on == today else f" for {dates.spoken(on, today)}"
         if undo:
             if not await self.ctx.store.unlog_habit(hid, on):
-                return Answer(f"{habit['name'].capitalize()} wasn't marked{when or ' today'}.")
+                return Answer(f"{cap(habit['name'])} wasn't marked{when or ' today'}.")
             logged[hid].discard(on)
             return Answer(f"Unmarked {habit['name']}{when}. Streak: {_days(streak(logged[hid], today))}.")
         fresh = await self.ctx.store.log_habit(hid, on)
         logged[hid].add(on)
         run = streak(logged[hid], today)
         if not fresh:
-            return Answer(f"{habit['name'].capitalize()} was already done{when or ' today'}. Streak: {_days(run)}.")
+            return Answer(f"{cap(habit['name'])} was already done{when or ' today'}. Streak: {_days(run)}.")
         cheer = " New best." if run > 1 and run > best(logged[hid] - {on}) else ""
         return Answer(f"Marked {habit['name']}{when}. Streak: {_days(run)}.{cheer}")
 
@@ -209,7 +209,7 @@ class Habits(Skill):
             return []
         if len(at_risk) == 1:
             label, run = at_risk[0]
-            text = f"🔥 {label.capitalize()} isn't done today; your {run}-day streak ends at midnight."
+            text = f"🔥 {cap(label)} isn't done today; your {run}-day streak ends at midnight."
         else:
             text = "🔥 Streaks ending at midnight: " + ", ".join(f"{n} ({r} days)" for n, r in at_risk) + "."
         return [Nudge(f"habits:{today}", text)]

@@ -121,6 +121,14 @@ async def integration() -> None:
         check("plain words", (await reg.route("plan my night")).speech.startswith("2h 30m free tonight"), True)
         check("not ours", await reg.route("what's the plan for the essay?"), None)
 
+        now["at"] = at(7)
+        await assignment("a7", "Warm-up questions", at(11, 59))
+        morning = await reg.command("plan", "")
+        check("work due before his free time isn't placed after its deadline",
+              any("Warm-up" in line and "PM" in line.split("  ")[0] for line in morning.detail.splitlines()), False)
+        check("it is said instead", "Due before you're free: Warm-up questions [Physics] at 11:59 AM" in morning.detail, True)
+        await store._exec("delete from assignments where external_id = 'a7'")
+
         now["at"] = at(22, 40)
         check("past bedtime", (await reg.command("plan", "")).speech, "You don't have free time left tonight.")
         await store._exec("update assignments set done_locally = true")
