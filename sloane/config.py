@@ -192,6 +192,10 @@ class Settings(BaseSettings):
     budget_episodes: int = 2000
     # FACTS: school rows first, then the skills' lines with what is left.
     budget_entities: int = 2000
+    # The running conversation: what "it", "that" and "why" refer to.
+    budget_conversation: int = 1500
+    conversation_hours: int = 12
+    conversation_messages: int = 24
 
     # Retrieval decay: cosine similarity times 0.5 ** (age_days / half_life).
     recency_half_life_days: float = 14.0
@@ -229,6 +233,7 @@ class Settings(BaseSettings):
             + self.budget_working_set
             + self.budget_episodes
             + self.budget_entities
+            + self.budget_conversation
         )
 
 

@@ -220,7 +220,7 @@ def bot_with(voice, voice_send_fails=False):
     bot = Bot(None, None, isolated(telegram_bot_token="x"), voice=voice)
     sent = {"voice": [], "text": []}
 
-    async def send_voice(chat_id, ogg):
+    async def send_voice(chat_id, ogg, said=""):
         if voice_send_fails:
             raise RuntimeError("telegram sendVoice -> 400")
         sent["voice"].append(ogg)

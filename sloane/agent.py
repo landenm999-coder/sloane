@@ -66,6 +66,14 @@ def _stamp(moment: datetime) -> str:
     )
 
 
+def _without_current(rows: list, question: str) -> list:
+    """The conversation minus the message being answered (it's logged first)."""
+    rows = list(rows)
+    if rows and rows[-1].get("direction") == "in" and (rows[-1].get("body") or "").strip() == question.strip():
+        rows.pop()
+    return rows
+
+
 class HardLineViolation(PermissionError):
     """An action crossed a hard line. Raised before anything executes."""
 
@@ -128,6 +136,13 @@ class Agent:
                                  tzinfo=ZoneInfo(self._config.timezone)),
             ),
         }
+        if self._config.telegram_chat_id:
+            reads["conversation"] = self._store.recent_messages(
+                self._config.telegram_chat_id,
+                datetime.now(ZoneInfo(self._config.timezone))
+                - timedelta(hours=self._config.conversation_hours),
+                self._config.conversation_messages,
+            )
         if self.skills is not None:
             reads["skills"] = self.skills.facts()
         settled = await asyncio.gather(*reads.values(), return_exceptions=True)
@@ -145,6 +160,7 @@ class Agent:
             else:
                 out[name] = result
         out.setdefault("skills", [])
+        out.setdefault("conversation", [])
 
         if notes:
             notes.append(
@@ -190,6 +206,11 @@ class Agent:
 
         tiers, notes = await self._facts(when)
         episodes = await self._recall(question)
+        conversation = _without_current(tiers["conversation"], question)
+        if conversation:
+            # What is already in CONVERSATION verbatim needn't come back as RECALL.
+            start = conversation[0]["at"]
+            episodes = [e for e in episodes if not (e.get("occurred_at") and e["occurred_at"] >= start)]
 
         # Computed, not inferred. A collision the model happens not to mention
         # is a missed conflict, and "zero missed" is the P2 gate -- so they are
@@ -215,6 +236,7 @@ class Agent:
             skill_facts=tiers["skills"],
             conflicts=render_conflicts(collisions, self._config.timezone),
             episodes=episodes,
+            conversation=conversation,
             ingested=ingested,
             config=self._config,
         )

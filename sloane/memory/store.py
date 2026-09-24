@@ -1514,6 +1514,28 @@ class Store:
         )
         return row is not None
 
+    async def set_message_body(self, update_id: int, body: str) -> None:
+        """A voice note's transcript, once there is one, so the log reads as said."""
+        await self._exec("update messages set body = %s where update_id = %s", (body, update_id))
+
+    async def recent_messages(self, chat_id: int, since: datetime, limit: int = 20) -> list[Row]:
+        """The recent exchange with him, oldest first: his words and hers.
+
+        Text and voice only (a button press is not something said), and only
+        what has a body.
+        """
+        rows = await self._fetch(
+            """
+            select direction, kind, body, at from messages
+             where chat_id = %s and at >= %s and kind in ('text', 'voice')
+               and body is not null and body <> ''
+             order by at desc, id desc
+             limit %s
+            """,
+            (chat_id, since, limit),
+        )
+        return list(reversed(rows))
+
     async def jobs(self) -> list[Row]:
         return await self._fetch(
             """

@@ -27,6 +27,7 @@ UNIT = [
     "test_dates.py",
     "test_weather.py",
     "test_dashboard.py",  # its integration half runs when DATABASE_URL is set
+    "test_conversation.py",  # likewise
 ]
 INTEGRATION = [
     "test_store.py", "test_school.py", "test_jobs.py", "test_agency.py", "test_mail.py",

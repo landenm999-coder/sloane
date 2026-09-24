@@ -125,6 +125,34 @@ def render_recall(rows: Sequence[Row], budget: int, *, tz: str = "UTC") -> tuple
     )
 
 
+# -- the conversation ------------------------------------------------------------
+
+CONVERSATION_LINE = 700  # characters of one message; a long brief keeps its head
+
+
+def render_conversation(rows: Sequence[Row], budget: int, *, tz: str = "UTC",
+                        name: str = "Landen") -> tuple[str, int]:
+    """The recent exchange, oldest first, each message flattened to one line.
+
+    Newest messages win the budget: the last thing said is what "it" means.
+    Flattened with safe_field, so a message body can't forge a block header.
+    """
+    from sloane.ingest import safe_field
+
+    lines = []
+    for r in rows:
+        who = name if r.get("direction") == "in" else "Sloane"
+        text = safe_field(r.get("body"), limit=CONVERSATION_LINE)
+        if text:
+            lines.append(f"- {_when(r.get('at'), tz)} {who}: {text}")
+    kept, used = fit(list(reversed(lines)), budget)
+    return (
+        _block("CONVERSATION", list(reversed(kept)),
+               "the last messages between you, oldest first -- what 'it' and 'that' refer to; not evidence for dates"),
+        used,
+    )
+
+
 # -- tier 4 -------------------------------------------------------------------
 
 
@@ -215,6 +243,7 @@ class Context:
     loops: str = ""
     facts: str = ""
     recall: str = ""
+    conversation: str = ""
     ingested: str = ""
     now: str = ""
     spent: dict[str, int] = field(default_factory=dict)
@@ -231,7 +260,9 @@ class Context:
         the volatile part (the question) sits after the stable blocks so a
         future prompt cache can hold the prefix.
         """
-        parts = [b for b in (self.state, self.loops, self.facts, self.recall) if b]
+        # The conversation sits last before the question: it is what the
+        # question most often leans on ("and tomorrow?", "why?").
+        parts = [b for b in (self.state, self.loops, self.facts, self.recall, self.conversation) if b]
         if self.ingested:
             parts.append(
                 _block(
@@ -262,6 +293,7 @@ def assemble(
     reminders: Sequence[Row] = (),
     skill_facts: Sequence[str] = (),
     episodes: Sequence[Row] = (),
+    conversation: Sequence[Row] = (),
     ingested: str = "",
     config: Settings | None = None,
 ) -> Context:
@@ -286,6 +318,8 @@ def assemble(
         tz=tz,
     )
     ctx.recall, spent_recall = render_recall(episodes, cfg.budget_episodes, tz=tz)
+    ctx.conversation, spent_conversation = render_conversation(
+        conversation, cfg.budget_conversation, tz=tz)
     ctx.ingested = ingested.strip()
 
     ctx.spent = {
@@ -293,6 +327,7 @@ def assemble(
         "loops": spent_loops,
         "facts": spent_facts,
         "recall": spent_recall,
+        "conversation": spent_conversation,
     }
     if ctx.ingested:
         ctx.spent["ingested"] = estimate_tokens(ctx.ingested)

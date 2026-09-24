@@ -244,7 +244,7 @@ class Bot:
                     pass
         await self.send(chat_id, Reply(speech=outcome.message, detail=""))
 
-    async def send_voice(self, chat_id: int, ogg: bytes) -> None:
+    async def send_voice(self, chat_id: int, ogg: bytes, said: str = "") -> None:
         """Send an OGG/Opus clip as a Telegram voice note."""
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
@@ -256,7 +256,8 @@ class Bot:
             raise RuntimeError(f"telegram sendVoice -> {response.status_code}")
         await remember(
             "outbound voice",
-            self._store.log_message(chat_id=chat_id, direction="out", kind="voice"),
+            self._store.log_message(chat_id=chat_id, direction="out", kind="voice",
+                                    body=said[:4000] or None),
         )
 
     async def reply(self, chat_id: int, reply: Reply, *, as_voice: bool) -> None:
@@ -271,7 +272,7 @@ class Bot:
             ogg = await self._voice.render(reply.speech)
             if ogg is not None:
                 try:
-                    await self.send_voice(chat_id, ogg)
+                    await self.send_voice(chat_id, ogg, reply.speech)
                 except (httpx.HTTPError, RuntimeError, ValueError) as exc:
                     log.warning("voice note not delivered, falling back to text: %s", exc)
                 else:
@@ -716,6 +717,8 @@ class Bot:
                     Reply(speech="That voice note came back empty.", detail=""),
                 )
                 return
+            # The log is the conversation she reads back: it should say what he said.
+            await remember("voice transcript", self._store.set_message_body(update_id, body[:4000]))
 
         if not body:
             return
