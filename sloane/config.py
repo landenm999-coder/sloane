@@ -164,6 +164,13 @@ class Settings(BaseSettings):
     def disabled_skills(self) -> frozenset[str]:
         return frozenset(n.strip() for n in self.skills_disabled.split(",") if n.strip())
 
+    # Weather (skills/weather.py): "latitude,longitude", e.g. "39.52,-104.76"
+    # for Parker. Blank means no weather skill. Open-Meteo needs no key.
+    weather_location: str = ""
+    weather_units: str = "fahrenheit"  # or celsius
+    # Overridable so tests can point it at a local stub.
+    weather_api_base: str = "https://api.open-meteo.com/v1"
+
     # --- behaviour -----------------------------------------------------------
     timezone: str = "America/Denver"
     max_reply_tokens: int = 1024
