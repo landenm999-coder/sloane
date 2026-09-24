@@ -54,6 +54,9 @@ class Reply:
     # A web search she needs before she can answer ("look"). The agent runs it
     # and asks again with the results as INGESTED; never shown to him as-is.
     lookup: str = ""
+    # Built from outside text (email, web results): remembered as untrusted,
+    # and never shown back to her as plain CONVERSATION.
+    tainted: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.speech, str) or not isinstance(self.detail, str):

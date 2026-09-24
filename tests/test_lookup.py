@@ -39,6 +39,7 @@ check("a non-string lookup is none", parse('{"speech": "x", "look": 5}').lookup,
 class Store:
     def __init__(self):
         self.episodes = []
+        self.trust = []
 
     async def recent_messages(self, *a, **k): return []
     async def get_state(self): return []
@@ -54,6 +55,7 @@ class Store:
 
     async def add_episode(self, text, **k):
         self.episodes.append((k.get("role"), text))
+        self.trust.append((k.get("trusted", True), k.get("source")))
         return "x"
 
     async def log_usage(self, **k): return None
@@ -124,6 +126,8 @@ async def main() -> None:
     check("and it doesn't look again", reply.lookup, "")
     await agent.settle()
     check("one exchange is remembered, not two", [role for role, _ in store.episodes], ["user", "sloane"])
+    check("the reply built from the web is marked", reply.tainted, True)
+    check("and remembered as untrusted, from the web", store.trust[-1], (False, "web"))
     check("the stream saw the second reply too", any("October 3" in s for s in seen), True)
 
     model = Scripted()

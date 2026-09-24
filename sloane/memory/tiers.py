@@ -147,6 +147,10 @@ def render_conversation(rows: Sequence[Row], budget: int, *, tz: str = "UTC",
     for r in rows:
         who = name if r.get("direction") == "in" else "Sloane"
         text = safe_field(r.get("body"), limit=CONVERSATION_LINE)
+        if r.get("trusted") is False:
+            # Built from an email or web page: strangers' words don't ride here,
+            # unfenced, in a turn that can act for him.
+            text = "(a reply built from outside text -- email or the web -- left out here)"
         if text:
             lines.append(f"- {_when(r.get('at'), tz)} {who}: {text}")
     kept, used = fit(list(reversed(lines)), budget)

@@ -159,7 +159,7 @@ class _Live:
             for part in parts[1:]:
                 await self.bot._call(client, "sendMessage", chat_id=self.chat_id, text=part)
         await remember("outbound message", self.bot._store.log_message(
-            chat_id=self.chat_id, direction="out", kind="text", body=text[:4000]))
+            chat_id=self.chat_id, direction="out", kind="text", body=text[:4000], trusted=not reply.tainted))
         return True
 
 # Telegram holds the connection open for poll_timeout seconds; the HTTP read
@@ -217,7 +217,8 @@ class Bot:
         await remember(
             "outbound message",
             self._store.log_message(
-                chat_id=chat_id, direction="out", kind="text", body=text[:4000]
+                chat_id=chat_id, direction="out", kind="text", body=text[:4000],
+                trusted=not reply.tainted,
             ),
         )
 
@@ -338,7 +339,7 @@ class Bot:
                     pass
         await self.send(chat_id, Reply(speech=outcome.message, detail=""))
 
-    async def send_voice(self, chat_id: int, ogg: bytes, said: str = "") -> None:
+    async def send_voice(self, chat_id: int, ogg: bytes, said: str = "", trusted: bool = True) -> None:
         """Send an OGG/Opus clip as a Telegram voice note."""
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
@@ -351,7 +352,7 @@ class Bot:
         await remember(
             "outbound voice",
             self._store.log_message(chat_id=chat_id, direction="out", kind="voice",
-                                    body=said[:4000] or None),
+                                    body=said[:4000] or None, trusted=trusted),
         )
 
     async def reply(self, chat_id: int, reply: Reply, *, as_voice: bool) -> None:
@@ -366,13 +367,13 @@ class Bot:
             ogg = await self._voice.render(reply.speech)
             if ogg is not None:
                 try:
-                    await self.send_voice(chat_id, ogg, reply.speech)
+                    await self.send_voice(chat_id, ogg, reply.speech, trusted=not reply.tainted)
                 except (httpx.HTTPError, RuntimeError, ValueError) as exc:
                     log.warning("voice note not delivered, falling back to text: %s", exc)
                 else:
                     detail = (reply.detail or "").strip()
                     if detail and detail != reply.speech.strip():
-                        await self.send(chat_id, Reply(speech="", detail=detail))
+                        await self.send(chat_id, Reply(speech="", detail=detail, tainted=reply.tainted))
                     return
         await self.send(chat_id, reply)
 
@@ -745,23 +746,41 @@ class Bot:
 
     # -- acting for him ----------------------------------------------------------
 
-    async def _act(self, reply: Reply) -> Reply:
+    async def _offer(self, chat_id: int) -> str:
+        """Her last message before his current one: what a bare "yes" answers."""
+        from datetime import timedelta
+
+        try:
+            rows = await self._store.recent_messages(chat_id, self._now() - timedelta(hours=2), 6)
+        except Exception:  # noqa: BLE001 - no offer on record means "yes" grounds nothing
+            return ""
+        earlier = rows[:-1] if rows and rows[-1].get("direction") == "in" else rows
+        outs = [r for r in earlier if r.get("direction") == "out" and r.get("trusted", True) is not False]
+        return (outs[-1].get("body") or "") if outs else ""
+
+    async def _act(self, reply: Reply, chat_id: int, said: str) -> Reply:
         """Run the commands her reply carries, and show what each one did.
 
         Each goes through _handle_command, exactly as if he had typed it. Only
-        the allowlist in sloane/actions.py may run; anything else is shown as
-        refused, never run.
+        the allowlist in sloane/actions.py may run, and only what he asked for:
+        a command's words must come from his message, or from the offer of
+        hers he just said yes to. Anything else is shown, never run.
         """
         from sloane import actions
 
         commands = self.skills.command_names if self.skills is not None else frozenset()
         allowed = actions.available(commands)
+        offer = await self._offer(chat_id)
         lines = []
         for proposed in reply.actions[: actions.MAX_ACTIONS]:
             command = actions.check(proposed, allowed)
             if command is None:
                 log.warning("refused an action from the model: %r", proposed[:120])
                 lines.append(f"✗ Not something I run for you: {safe_field(proposed, limit=120)}")
+                continue
+            if not actions.grounded(command, said, offer):
+                log.warning("did not run an action he didn't ask for: %r", command[:120])
+                lines.append(f"✗ Didn't run it (you didn't ask): {safe_field(command, limit=120)}")
                 continue
             try:
                 result = await self._handle_command(command)
@@ -889,7 +908,7 @@ class Bot:
         finally:
             live.stop_typing()
         if reply.actions:
-            reply = await self._act(reply)
+            reply = await self._act(reply, chat_id, body)
         if not voice and await live.finish(reply):
             return
         await self.reply(chat_id, reply, as_voice=bool(voice))

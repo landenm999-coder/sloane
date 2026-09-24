@@ -9,10 +9,11 @@ What keeps this safe:
 
 * Only for his own messages. A brief, a job, the inbox, anything with INGESTED
   text in the prompt: no actions, whatever the model wrote.
-* Only these commands, and none of their destructive forms: nothing that drops,
-  clears, forgets or undoes. Those he types himself.
-* Only what he asked for, in that message or by saying yes to her offer. The
-  persona says so; the allowlist is what holds if the model forgets.
+* Only these commands, and none of their destructive forms (RULES, per
+  command): nothing that drops, clears, cancels, forgets or undoes. Those he
+  types himself.
+* Only what he asked for, in that message or by saying yes to her offer:
+  `grounded()` checks the command's words against his, in code.
 * At most MAX_ACTIONS per reply, one line each, and every result is shown.
 """
 
@@ -23,10 +24,11 @@ import re
 from sloane.contract import MAX_ACTIONS
 
 # Built-in commands she may run for him (sloane/telegram.py answers them).
+# Not /done: marking an assignment handed in hides a real deadline from FACTS,
+# and that is his call to type.
 BUILTIN: dict[str, str] = {
     "remind": "/remind <when> <what> -- e.g. /remind tomorrow 7am bring the lab",
     "promise": "/promise <what> [to <name>] [by <when>]",
-    "done": "/done <words from the assignment title> -- he handed it in on paper",
 }
 # Skill commands, when that skill is loaded.
 SKILLS: dict[str, str] = {
@@ -44,12 +46,44 @@ SKILLS: dict[str, str] = {
     "budget": "/budget <amount>",
     "followup": "/followup <what he'll do> [<day>]  ·  /followup done <words from it> (when he says it's done)",
 }
-# Words that make a command destructive. He types those himself.
-DENY = frozenset({"drop", "remove", "clear", "forget", "undo", "delete", "archive", "reset",
-                  "empty", "wipe", "off", "oops", "unremind"})
 MAX_LENGTH = 300
 
 _NAME = re.compile(r"^/([a-z]+)(?:@\w+)?(?:\s|$)", re.I)
+_AMOUNT = re.compile(r"^\$?\d{1,6}(?:\.\d{1,2})?$")
+
+
+def _first_not(*verbs: str):  # noqa: ANN202
+    return lambda a: bool(a) and a[0] not in verbs
+
+
+def _last_not(*verbs: str):  # noqa: ANN202
+    return lambda a: bool(a) and a[-1] not in verbs
+
+
+def _budget(a: list[str]) -> bool:
+    return len(a) == 1 and bool(_AMOUNT.match(a[0])) and float(a[0].lstrip("$")) > 0
+
+
+# Which forms of each command she may run: the adding, setting and marking
+# ones. Every skill names its destructive verbs differently ("/countdown cancel",
+# "/habit stop", "/budget none"), so each gets its own rule rather than a
+# shared list of scary words. `a` is the words after the command, lowercased.
+RULES: dict[str, object] = {
+    "remind": bool,
+    "promise": bool,
+    "list": lambda a: not a or a[0] != "clear",
+    "countdown": _first_not("drop", "remove", "done", "cancel", "delete"),
+    "card": bool,
+    "habit": lambda a: bool(a) and a[0] in {"add", "new", "track", "did", "done"},
+    "did": bool,
+    "client": lambda a: bool(a) and (a[0] in {"add", "new"} or a[-1] not in {"drop", "archive", "remove"}),
+    "estimate": bool,
+    "focus": lambda a: True,
+    "birthday": _last_not("forget", "remove", "clear", "delete"),
+    "spent": lambda a: bool(a) and bool(_AMOUNT.match(a[0])),
+    "budget": _budget,
+    "followup": bool,
+}
 
 
 def available(skill_commands: frozenset[str] | set[str]) -> dict[str, str]:
@@ -67,15 +101,52 @@ def check(command: str, allowed: dict[str, str]) -> str | None:
     if not text.startswith("/"):
         text = "/" + text
     found = _NAME.match(text)
-    if found is None or found.group(1).lower() not in allowed:
+    name = found.group(1).lower() if found else ""
+    if name not in allowed or name not in RULES:
         return None
-    # Where a skill takes its verb: first ("/list clear grocery", "/spent undo")
-    # or last ("/client bella drop", "/birthday keegan forget"). Not the middle,
-    # or "/remind 5pm drop off the package" would be refused.
-    args = re.findall(r"[a-z]+", text[found.end():].lower())
-    if args and (args[0] in DENY or args[-1] in DENY):
-        return None
-    return text
+    args = text[found.end():].lower().replace(":", " ").split()
+    return text if RULES[name](args) else None
+
+
+# -- only what he asked for ---------------------------------------------------------------
+
+_YES = re.compile(r"^\s*(?:y|yes|yeah|yep|yup|ya|sure|ok|okay|k|please|pls|do it|go ahead|sounds good|"
+                  r"yes please|yeah do it|do that|perfect|bet)\b[\s!.,]*(?:do it|please|thanks|thank you)?[\s!.]*$", re.I)
+_STOP = {"the", "a", "an", "to", "for", "on", "at", "in", "of", "my", "and", "me", "it", "is", "add", "done",
+         "new", "track", "pm", "am", "tonight", "today", "tomorrow", "list", "up", "follow", "with", "by"}
+
+
+_CONTROL = {"stop", "end", "star", "paus"}  # stems of control words, not content
+
+
+def _stems(text: str) -> set[str]:
+    """Words, cut to their first four letters, so 'focusing' meets 'focus'."""
+    return {w[:4] for w in re.findall(r"[a-z0-9]+", (text or "").lower()) if w not in _STOP}
+
+
+def grounded(command: str, message: str, offer: str = "") -> bool:
+    """Did he ask for this? Its words must come from his message -- or, when
+    his message is a plain yes, from the offer of hers he is answering.
+
+    Heuristic, and deliberately one-sided: a real request can fail it (then
+    she says what she would have run), but a command drawn from nowhere can't
+    pass it. It is what makes "only what he asked for" code, not a prompt.
+    """
+    command = (command or "").strip()
+    found = _NAME.match(command)
+    if not found:
+        return False
+    rest = command[found.end():]
+    # What was asked for is the payload: for "/list add grocery: milk" that is
+    # the milk, not the grocery list he may merely have mentioned.
+    if found.group(1).lower() in {"list", "card"} and ":" in rest:
+        rest = rest.split(":", 1)[1]
+    args = _stems(rest) - _CONTROL
+    if not args:  # "/focus stop": the command itself carries the meaning
+        args = _stems(found.group(1))
+    if args & _stems(message):
+        return True
+    return bool(_YES.match(message or "")) and bool(args & _stems(offer))
 
 
 LOOKUP = """\

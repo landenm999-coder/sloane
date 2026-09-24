@@ -296,12 +296,16 @@ class Agent:
         if (reply.actions or reply.lookup) and not can_act:
             log.warning("dropped actions/lookup from a turn that may not act")
             reply = Reply(speech=reply.speech, detail=reply.detail)
+        origin = "ingested" if ingested.strip() else None
         if reply.lookup:
             if self._config.web_lookup:
                 reply = await self._looked_up(question, reply, context, on_text)
+                origin = "web" if reply.tainted else origin
             else:
                 reply = Reply(speech=reply.speech, detail=reply.detail, actions=reply.actions)
-        self._later(self._persist(question, reply, channel=channel, answered=True))
+        if origin and not reply.tainted:
+            reply = Reply(speech=reply.speech, detail=reply.detail, tainted=True)
+        self._later(self._persist(question, reply, channel=channel, answered=True, origin=origin))
         return reply
 
     async def _looked_up(self, question: str, first: Reply, context, on_text) -> Reply:  # noqa: ANN001
@@ -332,7 +336,7 @@ class Agent:
             return Reply(speech="I found something but couldn't put the answer together.",
                          detail=f"Every provider failed after the lookup: {exc}", actions=first.actions)
         second = parse(raw)
-        return Reply(speech=second.speech, detail=second.detail, actions=first.actions)
+        return Reply(speech=second.speech, detail=second.detail, actions=first.actions, tainted=True)
 
     def system(self, *, can_act: bool = False) -> str:
         """Her system prompt: the persona, and what she can do when she may act."""
@@ -360,6 +364,7 @@ class Agent:
         *,
         channel: str,
         answered: bool,
+        origin: str | None = None,
     ) -> None:
         """Log both sides of the turn. Never allowed to raise into the caller."""
         vectors: list[list[float]] = []
@@ -379,6 +384,8 @@ class Agent:
             ),
         )
         if answered and reply.detail:
+            # A reply built from email or the web is strangers' words at one
+            # remove: remembered untrusted, so recall never serves it as hers.
             await remember(
                 "episode(sloane)",
                 self._store.add_episode(
@@ -387,5 +394,7 @@ class Agent:
                     channel=channel,
                     summary=reply.speech or None,
                     embedding=vectors[1] if len(vectors) > 1 else None,
+                    trusted=not reply.tainted,
+                    source=origin,
                 ),
             )

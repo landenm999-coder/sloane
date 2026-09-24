@@ -1511,17 +1511,21 @@ class Store:
         body: str | None = None,
         file_id: str | None = None,
         episode_id: str | None = None,
+        trusted: bool = True,
     ) -> bool:
-        """Record one transport event. False if this update_id was already seen."""
+        """Record one transport event. False if this update_id was already seen.
+
+        `trusted` is False for a reply built from outside text (sql/025).
+        """
         row = await self._one(
             """
             insert into messages
-              (update_id, chat_id, direction, kind, body, file_id, episode_id)
-            values (%s, %s, %s, %s, %s, %s, %s)
+              (update_id, chat_id, direction, kind, body, file_id, episode_id, trusted)
+            values (%s, %s, %s, %s, %s, %s, %s, %s)
             on conflict (update_id) do nothing
             returning id
             """,
-            (update_id, chat_id, direction, kind, body, file_id, episode_id),
+            (update_id, chat_id, direction, kind, body, file_id, episode_id, trusted),
         )
         return row is not None
 
@@ -1537,7 +1541,7 @@ class Store:
         """
         rows = await self._fetch(
             """
-            select direction, kind, body, at from messages
+            select direction, kind, body, at, trusted from messages
              where chat_id = %s and at >= %s and kind in ('text', 'voice')
                and body is not null and body <> ''
              order by at desc, id desc
