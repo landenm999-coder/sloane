@@ -37,8 +37,47 @@ def _cli_env() -> dict[str, str]:
     }
 
 
+# Flags that make a call fast and make it hers. `--system-prompt` *replaces*
+# Claude Code's own prompt: appended, she was a coding assistant with Sloane's
+# persona bolted on ("ready to help with whatever coding task you've got").
+# The rest skip session files, slash commands and user-level settings, which is
+# about a second of start-up per call. An older CLI that doesn't know one of
+# them gets the minimal set instead (LEGACY), once, and keeps it.
+FAST_FLAGS = ("--no-session-persistence", "--disable-slash-commands", "--setting-sources", "project")
+
+
+def build_argv(cli: str, system: str, *, model: str = "", legacy: bool = False,
+               streaming: bool = False) -> list[str]:
+    argv = [cli, "-p"]
+    if streaming:
+        argv += ["--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
+                 "--include-partial-messages"]
+    else:
+        argv += ["--output-format", "json"]
+    argv += [
+        "--system-prompt", system,
+        # No tools and no MCP servers. The prompt carries ingested text --
+        # email, calendar, Canvas -- and a model that can Read or Grep can
+        # be talked into reading .env. It only ever needs to write text.
+        "--tools", "",
+        "--strict-mcp-config",
+    ]
+    if not legacy:
+        argv += list(FAST_FLAGS)
+    if model:
+        argv += ["--model", model]
+    return argv
+
+
+def _unknown_option(stderr: str) -> bool:
+    low = stderr.lower()
+    return "unknown option" in low or "unrecognized option" in low or "unknown argument" in low
+
+
 class ClaudeCodeProvider(Provider):
     name = "claude_code"
+    # Set once a CLI has refused the fast flags; shared by every instance.
+    legacy = False
 
     def __init__(self, settings: Settings) -> None:
         self._cli = settings.claude_cli
@@ -54,23 +93,14 @@ class ClaudeCodeProvider(Provider):
     ) -> Completion:
         if shutil.which(self._cli) is None:
             raise ProviderError(self.name, f"{self._cli} is not on PATH")
+        try:
+            return await self._once(system, prompt, legacy=ClaudeCodeProvider.legacy)
+        except _OldCli:
+            ClaudeCodeProvider.legacy = True
+            return await self._once(system, prompt, legacy=True)
 
-        argv = [
-            self._cli,
-            "-p",
-            "--output-format",
-            "json",
-            "--append-system-prompt",
-            system,
-            # No tools and no MCP servers. The prompt carries ingested text --
-            # email, calendar, Canvas -- and a model that can Read or Grep can
-            # be talked into reading .env. It only ever needs to write text.
-            "--tools",
-            "",
-            "--strict-mcp-config",
-        ]
-        if self._model:
-            argv += ["--model", self._model]
+    async def _once(self, system: str, prompt: str, *, legacy: bool) -> Completion:
+        argv = build_argv(self._cli, system, model=self._model, legacy=legacy)
         started = time.monotonic()
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -97,6 +127,8 @@ class ClaudeCodeProvider(Provider):
         latency_ms = int((time.monotonic() - started) * 1000)
         if proc.returncode != 0:
             detail = stderr.decode(errors="replace").strip() or f"exit {proc.returncode}"
+            if not legacy and _unknown_option(detail):
+                raise _OldCli(detail)
             raise ProviderError(self.name, detail)
 
         raw = stdout.decode(errors="replace").strip()
@@ -117,6 +149,10 @@ class ClaudeCodeProvider(Provider):
                 latency_ms=latency_ms,
             ),
         )
+
+
+class _OldCli(Exception):
+    """The installed CLI predates one of FAST_FLAGS."""
 
 
 def _unwrap(raw: str) -> tuple[str, str, int | None, int | None]:

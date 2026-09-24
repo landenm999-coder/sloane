@@ -181,6 +181,42 @@ argv = list(_seen.get("argv", ()))
 check("tools are switched off", argv[argv.index("--tools") + 1] if "--tools" in argv else None, "")
 check("MCP servers are not loaded", "--strict-mcp-config" in argv, True)
 check("the environment is the scrubbed one", _seen.get("kw", {}).get("env") == _env, True)
+check("her persona replaces Claude Code's prompt, never appends to it",
+      (argv[argv.index("--system-prompt") + 1] if "--system-prompt" in argv else None,
+       "--append-system-prompt" in argv), ("s", False))
+check("fast start: no session files, no slash commands, no user settings",
+      all(flag in argv for flag in _cc.FAST_FLAGS), True)
+
+
+# An older CLI that rejects a fast flag gets the minimal set, once, and keeps it.
+class _Proc:
+    def __init__(self, code, out, err):
+        self.returncode, self._out, self._err = code, out, err
+
+    async def communicate(self, data):
+        return self._out, self._err
+
+
+_calls = []
+
+
+async def _old_cli(*argv, **kw):
+    _calls.append(list(argv))
+    if "--disable-slash-commands" in argv:
+        return _Proc(1, b"", b"error: unknown option '--disable-slash-commands'")
+    return _Proc(0, b'{"result": "hello", "model": "m"}', b"")
+
+_cc.asyncio.create_subprocess_exec = _old_cli
+try:
+    got = run(_cc.ClaudeCodeProvider(Settings(database_url="")).complete("s", "p"))
+    check("an old CLI still answers", got.text, "hello")
+    run(_cc.ClaudeCodeProvider(Settings(database_url="")).complete("s", "p"))
+    check("and is asked with the minimal flags from then on",
+          ["--disable-slash-commands" in c for c in _calls], [True, False, False])
+    check("still tool-less", all(c[c.index("--tools") + 1] == "" for c in _calls), True)
+finally:
+    _cc.asyncio.create_subprocess_exec = _real
+    _cc.ClaudeCodeProvider.legacy = False
 
 # -- request URLs carry credentials; httpx must not log them -------------------
 import logging as _logging
