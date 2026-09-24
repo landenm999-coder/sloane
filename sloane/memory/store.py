@@ -1302,7 +1302,7 @@ class Store:
     # re-sync; these were typed, promised, earned or decided by Landen.
     BACKUP_TABLES = ("state", "commitments", "people", "courses", "trust", "reminders", "jobs",
                      "list_items", "countdowns", "cards", "habits", "habit_log",
-                     "clients", "client_notes", "focus_sessions")
+                     "clients", "client_notes", "focus_sessions", "expenses", "skill_settings")
 
     async def restore_rows(self, table: str, rows: Sequence[Row]) -> int:
         """Merge backed-up rows back in. Existing rows win; returns rows inserted.
@@ -2002,6 +2002,52 @@ class Store:
              order by (lower(name) = lower(%(n)s)) desc, created_at
             """,
             {"n": name},
+        )
+
+    # -- money, and skill settings (sql/023) ------------------------------------------------
+
+    async def get_skill_setting(self, skill: str, key: str) -> str | None:
+        row = await self._one("select value from skill_settings where skill = %s and key = %s", (skill, key))
+        return None if row is None else str(row["value"])
+
+    async def set_skill_setting(self, skill: str, key: str, value: str | None) -> None:
+        """Set a setting, or clear it with None."""
+        if value is None:
+            await self._exec("delete from skill_settings where skill = %s and key = %s", (skill, key))
+            return
+        await self._exec(
+            """
+            insert into skill_settings (skill, key, value) values (%s, %s, %s)
+            on conflict (skill, key) do update set value = excluded.value, updated_at = now()
+            """,
+            (skill, key, value),
+        )
+
+    async def add_expense(self, *, cents: int, what: str, category: str, spent_on: date) -> Row:
+        row = await self._one(
+            "insert into expenses (cents, what, category, spent_on) values (%s, %s, %s, %s) returning *",
+            (cents, what, category, spent_on),
+        )
+        assert row is not None
+        return row
+
+    async def expenses_between(self, start: date, end: date) -> list[Row]:
+        return await self._fetch(
+            """
+            select * from expenses
+             where archived_at is null and spent_on between %s and %s
+             order by spent_on, created_at
+            """,
+            (start, end),
+        )
+
+    async def archive_last_expense(self) -> Row | None:
+        return await self._one(
+            """
+            update expenses set archived_at = now()
+             where id = (select id from expenses where archived_at is null order by created_at desc limit 1)
+            returning *
+            """
         )
 
 

@@ -178,6 +178,10 @@ class Settings(BaseSettings):
     plan_bedtime: str = "22:30"
     plan_commute_minutes: int = 30
 
+    # Money (skills/money.py): his hourly pay, for "about $240 earned this
+    # week" from the shifts. 0 leaves earnings out.
+    pay_rate: float = 0.0
+
     # --- behaviour -----------------------------------------------------------
     timezone: str = "America/Denver"
     max_reply_tokens: int = 1024
