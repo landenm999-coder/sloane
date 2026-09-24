@@ -1301,7 +1301,7 @@ class Store:
     # Only what cannot be rebuilt from upstream. Canvas, the calendar and shifts
     # re-sync; these were typed, promised, earned or decided by Landen.
     BACKUP_TABLES = ("state", "commitments", "people", "courses", "trust", "reminders", "jobs",
-                     "list_items")
+                     "list_items", "countdowns")
 
     async def restore_rows(self, table: str, rows: Sequence[Row]) -> int:
         """Merge backed-up rows back in. Existing rows win; returns rows inserted.
@@ -1665,6 +1665,32 @@ class Store:
             (name,),
         )
         return len(rows)
+
+    # -- countdowns (sql/016) ------------------------------------------------------
+
+    async def add_countdown(self, name: str, on_date: date) -> Row:
+        row = await self._one(
+            "insert into countdowns (name, on_date) values (%s, %s) returning *", (name, on_date)
+        )
+        assert row is not None
+        return row
+
+    async def upcoming_countdowns(self, today: date) -> list[Row]:
+        """Every countdown that has not passed, soonest first."""
+        return await self._fetch(
+            """
+            select id, name, on_date from countdowns
+             where archived_at is null and on_date >= %s
+             order by on_date, created_at
+            """,
+            (today,),
+        )
+
+    async def archive_countdown(self, countdown_id: str) -> Row | None:
+        return await self._one(
+            "update countdowns set archived_at = now() where id = %s and archived_at is null returning *",
+            (countdown_id,),
+        )
 
 
 async def remember(what: str, coro: Awaitable[T]) -> T | None:

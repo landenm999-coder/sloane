@@ -215,7 +215,7 @@ def spoken(day: date, today: date) -> str:
         return "yesterday"
     if 1 < days < 7:
         return f"{day:%A}"
-    if day.year != today.year and abs(days) > 300:
+    if day.year != today.year and abs(days) > 60:
         return f"{day:%a %b} {day.day}, {day.year}"
     return f"{day:%a %b} {day.day}"
 
