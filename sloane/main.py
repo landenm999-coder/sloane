@@ -15,7 +15,8 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.encoders import jsonable_encoder as jsonable
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from sloane.agency import Agency, reminder_action
 from sloane.agent import HARD_LINES, Agent
@@ -249,6 +250,22 @@ def create_app() -> FastAPI:
             "ok": result.ran, "sent": result.sent, "reason": result.reason,
             "speech": result.reply.speech if result.reply else None,
         }
+
+    @app.get("/panels")
+    async def panels() -> dict:
+        """What each skill would put on the TV, as JSON."""
+        if "skills" not in state:
+            return {}
+        return jsonable(await state["skills"].panels())
+
+    @app.get("/tv")
+    async def tv() -> HTMLResponse:
+        """The wall dashboard. From SQL and skill panels only; no model."""
+        from sloane import dashboard
+
+        data = await dashboard.collect(store, config, state.get("skills"),
+                                       datetime.now(ZoneInfo(config.timezone)))
+        return HTMLResponse(dashboard.render(data), headers=dashboard.HEADERS)
 
     @app.get("/facts")
     async def facts(days: int = 7) -> dict:
