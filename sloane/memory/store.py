@@ -1301,7 +1301,7 @@ class Store:
     # Only what cannot be rebuilt from upstream. Canvas, the calendar and shifts
     # re-sync; these were typed, promised, earned or decided by Landen.
     BACKUP_TABLES = ("state", "commitments", "people", "courses", "trust", "reminders", "jobs",
-                     "list_items", "countdowns", "cards")
+                     "list_items", "countdowns", "cards", "habits", "habit_log")
 
     async def restore_rows(self, table: str, rows: Sequence[Row]) -> int:
         """Merge backed-up rows back in. Existing rows win; returns rows inserted.
@@ -1787,6 +1787,61 @@ class Store:
              group by due_on order by due_on limit 1
             """,
             {"after": after, "deck": deck},
+        )
+
+    # -- habits (sql/018) ------------------------------------------------------------
+
+    async def add_habit(self, name: str) -> Row | None:
+        """A new habit, or None if one by that name (any case) is active."""
+        return await self._one(
+            """
+            insert into habits (name) values (%s)
+            on conflict (lower(name)) where archived_at is null do nothing
+            returning *
+            """,
+            (name,),
+        )
+
+    async def active_habits(self) -> list[Row]:
+        return await self._fetch(
+            "select id, name, created_at from habits where archived_at is null order by created_at, id"
+        )
+
+    async def archive_habit(self, habit_id: str) -> Row | None:
+        return await self._one(
+            "update habits set archived_at = now() where id = %s and archived_at is null returning *",
+            (habit_id,),
+        )
+
+    async def log_habit(self, habit_id: str, on_date: date) -> bool:
+        """Mark a habit done on a day. False if it already was."""
+        row = await self._one(
+            """
+            insert into habit_log (habit_id, on_date) values (%s, %s)
+            on conflict do nothing returning habit_id
+            """,
+            (habit_id, on_date),
+        )
+        return row is not None
+
+    async def unlog_habit(self, habit_id: str, on_date: date) -> bool:
+        """Take back a mark made by mistake. Only his own log row, only that day."""
+        rows = await self._fetch(
+            "delete from habit_log where habit_id = %s and on_date = %s returning habit_id",
+            (habit_id, on_date),
+        )
+        return bool(rows)
+
+    async def habit_days(self, since: date) -> list[Row]:
+        """(habit_id, on_date) for every active habit's days since `since`."""
+        return await self._fetch(
+            """
+            select l.habit_id, l.on_date from habit_log l
+              join habits h on h.id = l.habit_id and h.archived_at is null
+             where l.on_date >= %s
+             order by l.on_date
+            """,
+            (since,),
         )
 
 
