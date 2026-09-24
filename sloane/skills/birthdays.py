@@ -13,7 +13,7 @@ Saturday" without being asked.
 from __future__ import annotations
 
 import re
-from datetime import date, timedelta
+from datetime import date
 
 from sloane import dates
 from sloane.ingest import safe_field

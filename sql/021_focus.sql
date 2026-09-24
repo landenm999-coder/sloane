@@ -8,7 +8,9 @@ create table if not exists focus_sessions (
   started_at   timestamptz not null default now(),
   ends_at      timestamptz not null,
   stopped_at   timestamptz,
-  reminder_id  uuid references reminders (id) on delete set null,
+  -- The reminder that says time's up. Not a foreign key: a skill never
+  -- constrains a core table, and cancelling a reminder that is gone is a no-op.
+  reminder_id  uuid,
   constraint focus_minutes_ok check (minutes between 1 and 240)
 );
 
