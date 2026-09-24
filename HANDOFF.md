@@ -45,19 +45,28 @@ Test suites: 21/21.
 
 **Skills build-out (PR #12).** The skills registry got the things it was designed for:
 - a `heartbeat` job: every quarter hour, 7 AM–10 PM, no model. It says each skill nudge once.
-- ten skills: lists, countdowns, weather, flashcards and quizzes, habits, clients, a study plan, focus,
-  birthdays, money
+- eleven skills: lists, countdowns, weather, flashcards and quizzes, habits, clients, a study plan, focus,
+  birthdays, money, memory
 - the `/tv` dashboard
 - `sloane/dates.py`
 - Capture running skill rules
 
-Two real bugs were found and fixed along the way, each with a regression test:
-- Skill FACTS lines rendered before DUE lines, so enough of them pushed every due date out of the budget.
-  They now come last, and the budget is 2,000.
-- A skill table held a foreign key into `reminders`, which broke the core's truncates. Skill tables may no
-  longer reference core tables, and `test_invariants` enforces it.
+Two adversarial review rounds found and fixed 20 real bugs, each with a regression test.
 
-Suites: 36/36. Real-model eval: 43/43 (five new questions answered from skill FACTS).
+**The partner upgrade (same PR).** Landen asked for her to feel like JARVIS: a conversational partner, fast and
+informed, not a slow assistant. What changed:
+- `claude -p` now gets her persona as *the* system prompt. It used to be appended to Claude Code's
+  coding-assistant prompt, so she introduced herself as a coding helper.
+- A new persona with a character.
+- A `CONVERSATION` tier: the recent messages ride in every prompt.
+- A warm, streamed CLI process with "typing" and edit-in-place replies. First words arrive in about 2 s.
+- Actions on request (`sloane/actions.py`).
+- Web lookups (CLI with WebSearch/WebFetch only, results as INGESTED).
+- Nightly learning of follow-ups and facts from his own words (`memory/learn.py`, the `learn` job,
+  `/memory`).
+
+Suites: 42/42. Real-model eval: 52/52. It now includes a follow-up that needs the conversation, small talk, an
+action and a non-action.
 
 **She has never run against the real services.** This sandbox can't reach Telegram, Groq, Canvas, Google or
 Supabase. Everything external is tested against local stubs, and the real-model eval (via `claude -p`) scores
@@ -95,10 +104,11 @@ Supabase. Everything external is tested against local stubs, and the real-model 
 | Dates (PR #12) | `dates.find(text, today, future=)` → `Found(day, span)`: ISO, 5/22, may 22, 22 may, the 30th, in N days/weeks/months, today/tomorrow/yesterday, (next) weekday; "sat/sun/wed" need a qualifier; impossible dates refused; `remove()` strips the date and its connecting words | `sloane/dates.py`, `tests/test_dates.py` |
 | Skills (PR #12) | lists (015), countdowns (016), weather (Open-Meteo, `WEATHER_LOCATION`), cards + `/quiz` sessions (017, Leitner, rule marking, `/cards make` is the one model call), habits (018), clients (019), plan (020 `estimate_minutes`, `PLAN_*`), focus (021, end = a reminder row), birthdays (022, on `people`), money (023 + `skill_settings`, `PAY_RATE`) | `sloane/skills/*.py`, one `tests/test_<skill>.py` each |
 | TV (PR #12) | `GET /tv`: self-contained HTML (CSP `default-src 'none'`), everything escaped, refresh 60 s, clock ticks; SQL + `skills.panels()`; a failed read is a banner. `GET /panels` JSON | `sloane/dashboard.py`, `tests/test_dashboard.py` |
+| Partner (PR #12) | persona rewritten (character, register, no help-desk phrases, `ADDRESS_AS`); `--system-prompt` replaces Claude Code's; CONVERSATION tier (`recent_messages`, 24 msgs/12 h, 1,500 tok, voice transcripts logged); warm stream-json `claude -p` (`prewarm`, one turn per process, refill, `close_all`), `partial_reply` + `_Live` edit-in-place streaming, typing indicator, memory writes after the reply (`Agent.settle`); `actions.py` allowlist + `Bot._act`; `look` → `Router.research` (CLI, WebSearch/WebFetch only) → INGESTED second turn; `learn` job (sql/024) + `memory` skill | `persona.py`, `providers/claude_code.py`, `contract.py`, `telegram.py`, `agent.py`, `actions.py`, `memory/learn.py`, `skills/memory.py`; tests `test_conversation`, `test_claude_stream` (+ `fake_cli.py`), `test_live`, `test_actions`, `test_lookup`, `test_learn` |
 | Capture + skills (PR #12) | a capture that is exactly a skill phrase is acted on (`action` in the 201 body); `Registry.route(sessions=False)` so a capture is never a quiz answer | `capture.py`, `CAPTURE_API.md` |
 
 Telegram commands (all listed by `/help`): `/today /week /grades /done /status /brief /jobs /sync /inbox /remind /reminders /unremind /promise /promises /kept /trust /revoke /cancel /usage /state /help`, plus plain "remind me …".
-Skill commands (PR #12): `/list /countdown /weather /card /cards /quiz /habit /habits /did /client /clients /plan /estimate /focus /birthday /birthdays /spent /budget /end`, plus plain phrases (each skill's docstring lists them).
+Skill commands (PR #12): `/list /countdown /weather /card /cards /quiz /habit /habits /did /client /clients /plan /estimate /focus /birthday /birthdays /spent /budget /memory /forget /followup /followups /end`, plus plain phrases (each skill's docstring lists them).
 HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /state /facts /jobs /tv /panels POST /sync POST /jobs/{name}/run`, plus `POST /capture` (token).
 
 ## Invariants (a violation is a bug even if tests pass)
@@ -116,9 +126,9 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
 
 ## In flight
 
-- **PR landenm999-coder/sloane#12 (draft)**: the skills build-out. It's complete and green (36/36 suites,
-  eval 43/43), waiting on review and merge to main. After merging, the box needs `git pull`, a rebuild and
-  the migrations (`sql/014`–`023`, all idempotent). `install.sh` does all of that.
+- **PR landenm999-coder/sloane#12 (draft)**: the skills build-out plus the partner upgrade. It's complete and
+  green (42/42 suites, eval 52/52), waiting on review and merge to main. After merging, the box needs
+  `git pull`, a rebuild and the migrations (`sql/014`–`024`, all idempotent). `install.sh` does all of that.
 
 ## Backlog (ideas, in priority order)
 
@@ -131,7 +141,9 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
 4. More skills, if he wants them: a college-applications tracker (deadlines with checklists, heads-up
    nudges; it's application season), a stock watchlist (quotes only, since trading is a hard line), and a
    DECA roleplay practice session (the model plays the judge). Each is one module plus a migration.
-5. The eval shows her mentioning the planted calendar injection in almost every answer. That's correct but
+5. Streaming for the Groq and Anthropic providers (only `claude_code` streams today; the others answer whole).
+   Also possible: a British voice for full JARVIS (a Piper `en_GB` voice via `PIPER_VOICE`, or a paid TTS).
+6. The eval shows her mentioning the planted calendar injection in almost every answer. That's correct but
    noisy. Consider flagging an ingested injection once (a watchdog-style alert) rather than on every turn.
 
 ## Only Landen can do (the whole list; see DEPLOY.md)

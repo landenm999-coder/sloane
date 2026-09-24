@@ -7,7 +7,10 @@ notes. She runs the day: what's due, what shift, what slipped, what's next.
 and P4 (agency, including Gmail).** On top of it sit ten **skills** (lists,
 countdowns, weather, flashcards, habits, clients, a study plan, focus,
 birthdays, money), a **heartbeat** that lets them speak up once when it
-matters, and a **TV dashboard**. What's left is deployment, which only
+matters, and a **TV dashboard**. And she is built to feel like a **partner**
+rather than a help desk: she follows the conversation, has a character, answers
+fast (streamed), does what he asks, looks things up, and remembers what he tells
+her. What's left is deployment, which only
 Landen can do; see [DEPLOY.md](DEPLOY.md) and [ROADMAP.md](ROADMAP.md).
 
 Total running cost: **$0/mo**, every layer on a free tier.
@@ -59,6 +62,19 @@ Total running cost: **$0/mo**, every layer on a free tier.
 
 Not built: Infinite Campus (deferred — see below).
 
+### A partner, not a help desk
+
+Landen asked for a JARVIS. What that takes, and where it lives:
+
+| | |
+|---|---|
+| **Character** | `sloane/persona.py`: composed, dry, candid, anticipatory, conversational in his register ("how's it going?" gets a line, not a briefing), never help-desk phrasing. `ADDRESS_AS` sets what she calls him (his name, or "sir"). Her persona *replaces* Claude Code's system prompt; before, she was a coding assistant wearing a name tag |
+| **Conversation** | the last 24 messages of the last 12 hours ride in every prompt as `CONVERSATION`, so "and in stat?", "why?" and "which is worse?" mean something. Voice notes are logged with their transcripts |
+| **Speed** | a `claude -p` process is kept warm (started at boot and after each turn, one turn each); "typing…" shows at once; the reply appears after its first phrase and is edited in place as she writes it. First words in about 2 s, instead of the whole reply in 4–10 s |
+| **Doing** | "put batteries on the grocery list and remind me at 7" gets done: her reply carries the commands and the bot runs them exactly as if he'd typed them, showing each result. His own messages only; an allowlist; nothing that drops, clears, forgets or undoes (`sloane/actions.py`) |
+| **Knowing** | when a question needs the outside world (news, prices, scores), she says "Checking.", runs one lookup through the Claude CLI with web search and nothing else, and answers from the results (fenced as untrusted), with sources. `WEB_LOOKUP=false` turns it off |
+| **Remembering** | each night (`learn`, 12:20 AM) she reads what *he* said that day and keeps follow-ups ("call the orthodontist") and plain facts ("my manager is Dana"). Follow-ups ride in every prompt, get a nudge on their day, and she asks how they went; `/memory` shows it all and `/forget` corrects it |
+
 ### Skills
 
 A skill is one module in `sloane/skills/`, discovered at startup; the contract
@@ -77,6 +93,7 @@ with `SKILLS_DISABLED`.
 | Study plan | `/plan`, `/plan tomorrow`, "plan my night", `/estimate lab 2h` | tonight's free time (after school, minus the shift and commute and calendar) filled with what's due soonest; says what won't fit |
 | Focus | `/focus 25 essay`, `/focus`, `/focus stop` | a timer whose end is a real reminder; the day's focus time |
 | Birthdays | `/birthday Keegan mar 3`, "Keegan's birthday is March 3" | on the same people your promises point at; a week out, the evening before, the morning of |
+| Memory | `/memory`, `/forget 2`, `/followup call the dentist friday`, `/followup done dentist` | what she's learned about you and the loose ends, where you can see and correct them |
 | Money | "spent 12 on lunch", `/spent`, `/budget 100` | spending by category against a weekly budget; with `PAY_RATE`, an estimate of what this week's shifts earned. Tracking only |
 
 Everything a skill puts in FACTS is a row from SQL or a number from an API,
@@ -195,6 +212,7 @@ on the Groq or API lane, not on the CLI lane.
 | 00:15 daily | `reflection` — rebuilds tier 2, prunes stale events | **never** |
 | every 4h | `entity_sync` — Canvas, calendar, shifts | never |
 | every 15 min, 7 AM–10 PM | `heartbeat` — each skill's nudges, each said once, no model | only when a skill has something new |
+| 00:20 daily | `learn` — follow-ups and facts from what he said that day (one bulk call) | never |
 
 The crons live in the `jobs` table as Parker wall-clock and the scheduler runs
 in `TIMEZONE`, so 6:35 stays 6:35 across daylight saving. A brief is the same
@@ -444,12 +462,16 @@ DATABASE_URL=... python tests/test_reminders.py  # parser table, claim-once, qui
 DATABASE_URL=... python tests/test_heartbeat.py  # nudges said once, retried, quiet hours
 # and one suite per skill: test_lists, test_countdowns, test_cards, test_habits,
 # test_clients, test_plan, test_focus, test_birthdays, test_money
+# the partner: test_conversation, test_claude_stream (a fake CLI), test_live,
+# test_actions, test_lookup, test_learn
 
 # or all of it
 python tests/run.py
 
 # the answers, not the plumbing: golden questions through the REAL model on a
-# seeded day, scored in code. Spends ~7 model calls; truncates its database.
+# seeded day, scored in code -- including a follow-up that needs the
+# conversation, small talk, an action and a non-action. ~22 model calls, 52
+# checks; truncates its database.
 python scripts/eval.py 'postgresql://postgres@/sloane_eval?host=/tmp&port=5433'
 ```
 
@@ -492,6 +514,7 @@ sloane/
   telegram.py    long-poll bot: text, voice notes, buttons, commands
   main.py        FastAPI: /health /usage /state /facts /jobs /sync /tv /panels /capture
   dates.py       "may 22", "the 30th", "next friday" -> a date, by rules
+  actions.py     the commands she may run for him in conversation, and the rules
   dashboard.py   the /tv page: SQL + skill panels, escaped, self-contained
   providers/     claude_code · groq · anthropic_api · tts (groq, piper)
   jobs/
@@ -518,11 +541,12 @@ sloane/
   skills/
     __init__.py  the contract and the registry
     lists.py countdowns.py weather.py cards.py habits.py clients.py
-    plan.py focus.py birthdays.py money.py
+    plan.py focus.py birthdays.py money.py memory.py
   memory/
     store.py     THE ONLY FILE THAT TALKS SQL
     embed.py     fastembed, 384-dim, local
-    tiers.py     the four tiers, budgets, the usage sink
+    tiers.py     the four tiers + the conversation, budgets, the usage sink
+    learn.py     nightly: follow-ups and facts from his own words
 sql/
   001_init.sql   schema, idempotent
   002_hybrid_search.sql  full-text arm + provenance, idempotent
@@ -540,6 +564,7 @@ sql/
   014_heartbeat.sql  nudges said once + the heartbeat job
   015-023          one per skill: lists, countdowns, cards, habits, clients,
                    plan, focus, birthdays, money (+ skill_settings)
+  024_memory.sql   follow-ups' days on working_set + the learn job
 scripts/
   doctor.py      validates every credential
   seed_state.py  tier 1 from a markdown file

@@ -332,6 +332,13 @@ ran and whether it worked. `/sync` pulls Canvas, the calendar and shifts now.
 `/usage` shows model calls in the last day. `/state` shows her durable facts.
 `/inbox` triages new email now.
 
+Mostly, just talk to her. She follows the conversation ("and in stat?"), does what
+you ask in plain words ("put batteries on the list and remind me at 7"), looks things
+up when a question needs the outside world ("who won the Broncos game?"), and
+remembers what you tell her (`/memory` shows what she's kept; `/forget <n>` fixes it).
+`ADDRESS_AS=sir` in `.env` if you'd rather she called you that; `WEB_LOOKUP=false`
+turns lookups off.
+
 The skills (`/help` lists them all): "add milk to my grocery list", `/countdown
 graduation may 22`, "is it going to rain?", `/card bio: q :: a` then `/quiz`,
 `/habit add reading` then "did reading", `/client add Bella's Bakery $1200`,
@@ -369,6 +376,8 @@ it's working.
 | `gmail` FAIL: access revoked or expired | The OAuth app is still in **Testing** (7-day tokens), or you removed its access. Publish it (7c step 4) and rerun `scripts/gmail_auth.py`. |
 | No email drafts, triage works | Drafts only go to people who can answer (not `noreply@`), at most three a run, and not once today's scheduled budget is spent. `/jobs` shows the inbox line. |
 | Container restarting | `journalctl -u sloane -n 100`. Usually a malformed `.env` line. |
+| Replies take 5+ seconds before anything shows | The warm `claude` process isn't there: check `journalctl -u sloane` for "could not keep a claude process warm", usually an expired Claude login (redo step 6). She still answers, just from a cold start |
+| She says she "tried to look that up and couldn't" | The lookup goes through `claude -p` with web search. Same login as above; or `WEB_LOOKUP=false` to stop her trying |
 | No weather anywhere | `WEATHER_LOCATION` blank or not `lat,lon`, or Open-Meteo unreachable. `doctor.py` says which. |
 | A skill command answers "hit an error" | That skill failed on its own; the rest of her is fine. The log has the traceback; `SKILLS_DISABLED=<name>` turns it off until it's fixed. |
 
@@ -381,7 +390,10 @@ fix something, stop — the answer is somewhere else.
 
 The five daily briefs start the moment she's running — the first you'll hear
 is the 6:35 AM brief. The heartbeat starts too, but it only speaks when a
-skill has something new (a countdown a week out, rain before your shift). `TELEGRAM_CHAT_ID` must be set or the briefs run and
+skill has something new (a countdown a week out, rain before your shift). One
+`claude` process sits idle, ready for your next message (about 150 MB); it is
+replaced after every reply. At 12:20 AM she quietly reads back the day's
+messages for loose ends to follow up on. `TELEGRAM_CHAT_ID` must be set or the briefs run and
 record but have nobody to send to; `/jobs` will show that plainly. The inbox
 job runs only once Gmail is set up (7c); until then `/jobs` lists it as
 deferred with the reason `gmail is not configured`.

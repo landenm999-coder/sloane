@@ -53,6 +53,17 @@ class Check:
 class Case:
     question: str
     checks: list = field(default_factory=list)  # (label, fn(text) -> bool, critical)
+    # Messages said just before the question (direction, body): the conversation
+    # it follows on from. Cleared again after the case.
+    before: list = field(default_factory=list)
+    # Ask as his own message, which may act (the reply's actions are checked
+    # through the "ACTIONS:" line added to the text).
+    can_act: bool = False
+
+
+EVAL_CHAT = 424242
+HELP_DESK = ("how can i assist", "how can i help", "as an ai", "i hope this helps", "let me know if you need",
+             "coding", "great question")
 
 
 def mentions(*needles: str):
@@ -230,6 +241,21 @@ def cases(day: date, later: date) -> list[Case]:
             ("the real total", mentions("12.50"), True),
             ("against the $40 budget", mentions("40"), False),
         ]),
+        # The partner: follows the thread, talks like a person, acts when asked.
+        Case("and in stat?", [
+            ("follows the thread to the Stat grade", mentions_any("88.4", "88"), True),
+        ], before=[("in", "how am I doing in physics?"), ("out", "72.5 percent in Physics, a C-.")]),
+        Case("hey sloane, how's it going?", [
+            ("no help-desk phrases", omits(*HELP_DESK), False),
+            ("small talk isn't a briefing", lambda t: len(t.split("\nACTIONS:")[0]) < 700, False),
+        ], can_act=True),
+        Case("put AA batteries on my grocery list", [
+            ("acts: the list command", lambda t: "ACTIONS: /list add grocery" in t and "batteries" in t.split("ACTIONS:")[1].lower(),
+             True),
+        ], can_act=True),
+        Case("ugh, I'm so tired today", [
+            ("venting is not a request: no actions", omits("ACTIONS: /"), True),
+        ], can_act=True),
     ]
 
 
@@ -243,7 +269,7 @@ async def main(url: str) -> int:
     config = Settings(
         database_url=url, timezone=TZ,
         canvas_base_url="", canvas_token="", calendar_ics_url="",
-        telegram_bot_token="", telegram_chat_id=0, embed_cache_dir="",
+        telegram_bot_token="", telegram_chat_id=EVAL_CHAT, embed_cache_dir="", web_lookup=False,
     )
     day = the_day()
     checks: list[Check] = []
@@ -261,10 +287,16 @@ async def main(url: str) -> int:
 
         print(f"seeded {day:%A %b %d}; asking {len(cases(day, later))} questions "
               f"via {config.main_provider}\n")
+        await store._exec("delete from messages where chat_id = %s", (EVAL_CHAT,))
         for case in cases(day, later):
-            reply = await agent.answer(case.question, channel="eval", today=day)
+            for direction, body in case.before:
+                await store.log_message(chat_id=EVAL_CHAT, direction=direction, kind="text", body=body)
+            reply = await agent.answer(case.question, channel="eval", today=day, can_act=case.can_act)
             await agent.settle()  # this turn's memory is written before the next question
+            await store._exec("delete from messages where chat_id = %s", (EVAL_CHAT,))
             text = f"{reply.speech}\n{reply.detail}"
+            if reply.actions:
+                text += "\nACTIONS: " + " | ".join(reply.actions)
             print(f"Q: {case.question}\n   {reply.speech}")
             if reply.speech.startswith("I cannot reach a model"):
                 # No answer is not a wrong answer. Scoring it would report a
