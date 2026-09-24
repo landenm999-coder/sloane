@@ -8,7 +8,9 @@
 
 Plus two that feed them: `entity_sync` (Canvas, calendar, shifts; silent) and
 `inbox` (Gmail triage every three hours, 7 AM-7 PM; speaks only when something
-needs him).
+needs him). And `heartbeat`, every quarter hour from 7 AM to 10 PM, which asks
+each skill (sloane/skills/) whether anything is worth saying now -- rain before
+his shift, a streak about to break -- and says each thing once, with no model.
 
 Each brief is the same agent turn Landen gets when he asks something, with a
 purpose-built question. That is deliberate: a brief is not a separate code path
@@ -356,6 +358,41 @@ async def backup(ctx: JobContext, now: datetime | None = None) -> JobResult:
     return JobResult("backup", ran=True, sent=False, reason=f"{rows} rows -> {path.name}")
 
 
+async def heartbeat(ctx: JobContext, now: datetime | None = None) -> JobResult:
+    """Every quarter hour, waking hours: what the skills think is worth saying.
+
+    No model call. Each nudge key is said once, however many ticks offer it; a
+    nudge that could not be delivered is offered again on the next tick. Several
+    new nudges in one tick go out as one message, never a burst.
+    """
+    if ctx.skills is None or not ctx.skills.skills:
+        return JobResult("heartbeat", ran=False, reason="no skills loaded")
+    if ctx.say is None:
+        return JobResult("heartbeat", ran=False, reason="no chat to deliver to")
+    speaking = ctx.governor.may_send(now)
+    if not speaking:
+        return JobResult("heartbeat", ran=False, reason=speaking.reason)
+
+    offered: dict[str, str] = {}
+    for nudge in await ctx.skills.nudges():
+        offered.setdefault(nudge.key, nudge.text)
+    await remember("prune nudges", ctx.store.prune_nudges())
+    if not offered:
+        return JobResult("heartbeat", ran=True, reason="nothing to say")
+    fresh = set(await ctx.store.claim_nudges(list(offered)))
+    new = [(key, text) for key, text in offered.items() if key in fresh]
+    if not new:
+        return JobResult("heartbeat", ran=True, reason=f"{len(offered)} offered, all said before")
+    try:
+        await ctx.say("\n\n".join(text for _, text in new))
+    except Exception as exc:  # noqa: BLE001 - unclaim and retry next tick
+        log.warning("heartbeat not delivered, will retry: %s", exc)
+        await remember("unclaim nudges", ctx.store.unclaim_nudges([key for key, _ in new]))
+        return JobResult("heartbeat", ran=True, sent=False, reason=f"not delivered, will retry: {exc}")
+    return JobResult("heartbeat", ran=True, sent=True,
+                     reason=f"said {len(new)}: " + ", ".join(key for key, _ in new))
+
+
 HANDLERS: dict[str, Callable[..., Awaitable[JobResult]]] = {
     "morning_brief": morning_brief,
     "pre_shift": pre_shift,
@@ -368,4 +405,5 @@ HANDLERS: dict[str, Callable[..., Awaitable[JobResult]]] = {
     "watchdog": watchdog,
     "weekly_review": weekly_review,
     "backup": backup,
+    "heartbeat": heartbeat,
 }

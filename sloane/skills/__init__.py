@@ -86,9 +86,13 @@ class SkillContext:
     embedder: Any = None
     # Plain text to Landen's chat. None until the bot exists (or with no owner).
     say: Callable[[str], Awaitable[None]] | None = None
+    # What time it is. None means the real clock; tests pin it.
+    clock: Callable[[], datetime] | None = None
 
     def now(self) -> datetime:
-        return datetime.now(ZoneInfo(self.config.timezone))
+        """Now, in Landen's timezone. Skills read the time only through here."""
+        zone = ZoneInfo(self.config.timezone)
+        return self.clock().astimezone(zone) if self.clock is not None else datetime.now(zone)
 
     def today(self) -> date:
         return self.now().date()

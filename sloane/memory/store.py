@@ -1566,6 +1566,40 @@ class Store:
             (session_id,),
         )
 
+    # -- heartbeat (sql/014) -----------------------------------------------------
+
+    async def claim_nudges(self, keys: Sequence[str]) -> list[str]:
+        """Record these nudge keys as offered now; return the ones never said.
+
+        The returned keys are marked said in the same statement, so a nudge is
+        said once however many ticks keep offering it. Every offered key has
+        its `offered_at` refreshed, which is what keeps it from being pruned.
+        """
+        unique = list(dict.fromkeys(keys))  # one statement may not touch a row twice
+        if not unique:
+            return []
+        rows = await self._fetch(
+            """
+            insert into nudges_said (key) select unnest(%s::text[])
+            on conflict (key) do update set offered_at = now()
+            returning key, (xmax = 0) as fresh
+            """,
+            (unique,),
+        )
+        return [r["key"] for r in rows if r["fresh"]]
+
+    async def unclaim_nudges(self, keys: Sequence[str]) -> None:
+        """A nudge that could not be delivered is offered again next tick."""
+        await self._exec("delete from nudges_said where key = any(%s)", (list(keys),))
+
+    async def prune_nudges(self, days: int = 30) -> int:
+        """Forget keys no skill has offered for `days`. Returns how many."""
+        rows = await self._fetch(
+            "delete from nudges_said where offered_at < now() - make_interval(days => %s) returning key",
+            (days,),
+        )
+        return len(rows)
+
 
 async def remember(what: str, coro: Awaitable[T]) -> T | None:
     """Run a memory write that must never cost us the reply.
