@@ -259,7 +259,7 @@ class Agent:
         )
 
         try:
-            raw = await self._router.reply(system_prompt(), prompt)
+            raw = await self._router.reply(system_prompt(address=self._config.address_as), prompt)
         except NoProviderAvailable as exc:
             log.error("every provider failed: %s", exc)
             reply = Reply(

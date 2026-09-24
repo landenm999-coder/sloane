@@ -183,6 +183,8 @@ class Settings(BaseSettings):
     pay_rate: float = 0.0
 
     # --- behaviour -----------------------------------------------------------
+    # What she calls him when she addresses him: his name, or "sir" if he likes.
+    address_as: str = "Landen"
     timezone: str = "America/Denver"
     max_reply_tokens: int = 1024
 
