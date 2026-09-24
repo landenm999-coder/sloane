@@ -1315,7 +1315,8 @@ class Store:
     # restore order: a table comes after every table its rows point at.
     BACKUP_TABLES = ("state", "people", "commitments", "courses", "trust", "reminders", "jobs",
                      "list_items", "countdowns", "cards", "habits", "habit_log",
-                     "clients", "client_notes", "focus_sessions", "expenses", "skill_settings")
+                     "clients", "client_notes", "focus_sessions", "expenses", "skill_settings",
+                     "colleges", "college_tasks")
 
     async def restore_rows(self, table: str, rows: Sequence[Row]) -> int:
         """Merge backed-up rows back in. Existing rows win; returns rows inserted.
@@ -2158,6 +2159,92 @@ class Store:
         return await self._one(
             "update state set pinned = false, updated_at = now() where key = %s and pinned returning key, value",
             (key,),
+        )
+
+    # -- colleges (sql/026) -----------------------------------------------------------------
+
+    async def add_college(self, name: str, *, nickname: str | None = None, plan: str | None = None,
+                          deadline: date | None = None, tasks: Sequence[str] = ()) -> Row | None:
+        """A new application with its checklist, in one statement; None if one
+        by that name (any case) is already active."""
+        return await self._one(
+            """
+            with c as (
+              insert into colleges (name, nickname, plan, deadline) values (%s, %s, %s, %s)
+              on conflict (lower(name)) where archived_at is null do nothing
+              returning *
+            ), t as (
+              insert into college_tasks (college_id, task, position)
+              select c.id, x.task, x.ord from c, unnest(%s::text[]) with ordinality as x(task, ord)
+            )
+            select * from c
+            """,
+            (name, nickname, plan, deadline, list(tasks)),
+        )
+
+    async def active_colleges(self) -> list[Row]:
+        """Every application not dropped, in the order /colleges numbers them:
+        the ones still being worked on by deadline, then the rest."""
+        return await self._fetch(
+            """
+            select * from colleges
+             where archived_at is null
+             order by (status <> 'applying'), deadline nulls last, created_at, id
+            """
+        )
+
+    async def active_college_tasks(self) -> list[Row]:
+        """The checklists of every active application, in checklist order."""
+        return await self._fetch(
+            """
+            select t.* from college_tasks t join colleges c on c.id = t.college_id
+             where c.archived_at is null
+             order by t.position, t.id
+            """
+        )
+
+    async def update_college(self, college_id: str, **fields: Any) -> Row | None:
+        """Set plan, deadline, status, submitted_on and/or nickname on one application."""
+        allowed = {"plan", "deadline", "status", "submitted_on", "nickname"}
+        if not fields or set(fields) - allowed:
+            raise ValueError(f"cannot set {sorted(set(fields) - allowed) or 'nothing'}")
+        # Column names come from the fixed set above, never from input.
+        sets = ", ".join(f"{name} = %s" for name in fields)
+        return await self._one(
+            f"update colleges set {sets}, updated_at = now() "  # noqa: S608
+            "where id = %s and archived_at is null returning *",
+            [*fields.values(), college_id],
+        )
+
+    async def archive_college(self, college_id: str) -> Row | None:
+        return await self._one(
+            "update colleges set archived_at = now() where id = %s and archived_at is null returning *",
+            (college_id,),
+        )
+
+    async def add_college_task(self, college_id: str, task: str, due_on: date | None = None) -> Row | None:
+        """One more checklist item, at the end of that application's list."""
+        return await self._one(
+            """
+            insert into college_tasks (college_id, task, position, due_on)
+            select c.id, %s, coalesce((select max(position) from college_tasks where college_id = c.id), 0) + 1, %s
+              from colleges c where c.id = %s and c.archived_at is null
+            returning *
+            """,
+            (task, due_on, college_id),
+        )
+
+    async def set_college_task(self, task_id: int, state: str) -> Row | None:
+        """Mark a checklist item open, done or skipped (not needed)."""
+        if state not in {"open", "done", "skipped"}:
+            raise ValueError(f"not a checklist state: {state}")
+        return await self._one(
+            """
+            update college_tasks set state = %s,
+                   closed_at = case when %s = 'open' then null else now() end
+             where id = %s returning *
+            """,
+            (state, state, task_id),
         )
 
 

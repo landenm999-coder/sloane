@@ -39,6 +39,7 @@ INTEGRATION = [
     "test_reminders.py", "test_watchdog.py", "test_capture.py",
     "test_promises.py", "test_weekly.py", "test_heartbeat.py", "test_lists.py",
     "test_countdowns.py", "test_cards.py", "test_habits.py", "test_clients.py", "test_plan.py", "test_focus.py", "test_birthdays.py", "test_money.py",
+    "test_colleges.py",
 ]
 
 

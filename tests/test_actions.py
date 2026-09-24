@@ -32,7 +32,8 @@ def check(label: str, got, want) -> None:
 
 
 # -- the allowlist ----------------------------------------------------------------
-allowed = actions.available({"list", "client", "birthday", "spent", "budget", "habit", "focus", "countdown"})
+allowed = actions.available({"list", "client", "birthday", "spent", "budget", "habit", "focus", "countdown",
+                             "college"})
 TABLE = [
     ("/list add grocery: oat milk", "/list add grocery: oat milk"),
     ("list add grocery: coffee", "/list add grocery: coffee"),        # a missing slash is fine
@@ -65,6 +66,13 @@ TABLE = [
     ("/countdown prom april 18", "/countdown prom april 18"),
     ("/spent 14 chipotle", "/spent 14 chipotle"),
     ("/done lab writeup", None),           # hides a real deadline: he types it
+    ("/college boulder done essays", "/college boulder done essays"),
+    ("/college boulder submitted", "/college boulder submitted"),
+    ("/college add CU Boulder EA nov 1", "/college add CU Boulder EA nov 1"),
+    ("/college boulder drop", None),       # a school off the list: he types it
+    ("/college boulder skip scores", None),  # a requirement off the checklist: likewise
+    ("/college boulder reopen", None),
+    ("/college boulder undo 2", None),
 ]
 for proposed, want in TABLE:
     check(f"check({proposed[:40]!r})", actions.check(proposed, allowed), want)
@@ -84,6 +92,17 @@ GROUNDED = [
     ("/remind 6pm start the lab", "yeah do it", "Want a reminder at 6 to start the lab?", True),
     ("/remind 6pm start the lab", "yes", "Two things are due tomorrow.", False),
     ("/remind 6pm start the lab", "no thanks", "Want a reminder at 6 to start the lab?", False),
+    ("/college boulder done essays", "just finished my Boulder essays", "", True),
+    ("/college boulder submitted", "I just sent my Boulder app", "", True),
+    ("/college boulder submitted", "hit submit on Boulder", "", True),
+    ("/college boulder admitted", "I GOT INTO BOULDER", "", True),
+    ("/college boulder deferred", "boulder deferred me", "", True),
+    # Naming the school isn't saying where the application stands: that
+    # would silence a deadline that is still ahead of him.
+    ("/college boulder submitted", "how long do I have on the Boulder app?", "", False),
+    ("/college boulder admitted", "when does Boulder decide?", "", False),
+    ("/college boulder submitted", "yes", "Shall I mark Boulder submitted?", True),
+    ("/college mines submitted", "how long do I have on the Boulder app?", "", False),
 ]
 for command, said, offer, want in GROUNDED:
     check(f"grounded({command!r}, {said!r})", actions.grounded(command, said, offer), want)

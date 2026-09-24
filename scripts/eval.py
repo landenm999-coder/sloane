@@ -37,6 +37,7 @@ from sloane.memory.embed import EmbedUnavailable
 from sloane.memory.store import Store
 from sloane.school.shifts import planned_shifts
 from sloane.skills import SkillContext, load as load_skills
+from sloane.skills.colleges import DEFAULT_TASKS
 
 TZ = "America/Denver"
 ZONE = ZoneInfo(TZ)
@@ -158,7 +159,7 @@ async def seed(store: Store, day: date) -> date:
     # Skill rows: what he has put on lists, counted down to, kept up, sold.
     await store._exec(
         "truncate list_items, countdowns, habits, habit_log, clients, client_notes, "
-        "expenses, skill_settings, focus_sessions, cards, card_reviews cascade"
+        "expenses, skill_settings, focus_sessions, cards, card_reviews, colleges, college_tasks cascade"
     )
     await store.add_list_items("grocery", ["oat milk", "eggs", "tortillas"])
     await store.add_countdown("DECA districts", day + timedelta(days=12))
@@ -169,12 +170,21 @@ async def seed(store: Store, day: date) -> date:
     await store.add_client("Peak Plumbing", value_cents=80000, follow_up_on=later, next_step="quote")
     await store.add_expense(cents=1250, what="lunch", category="food", spent_on=day)
     await store.set_skill_setting("money", "weekly_budget_cents", "4000")
+    boulder = await store.add_college("CU Boulder", plan="EA", deadline=college_deadline(day), tasks=DEFAULT_TASKS)
+    for task in await store.active_college_tasks():
+        if task["college_id"] == boulder["id"] and task["task"] in {"Recommendations", "Transcript", "Test scores"}:
+            await store.set_college_task(task["id"], "done")
     await store.rebuild_working_set()
     return later
 
 
+def college_deadline(day: date) -> date:
+    return day + timedelta(days=20)
+
+
 def cases(day: date, later: date) -> list[Case]:
     later_name = f"{later:%A}"
+    deadline = college_deadline(day)
     return [
         Case("what's due today?", [
             ("names the quiz", mentions("quiz"), False),
@@ -241,6 +251,11 @@ def cases(day: date, later: date) -> list[Case]:
             ("the real total", mentions("12.50"), True),
             ("against the $40 budget", mentions("40"), False),
         ]),
+        Case("what do I still need to do for my Boulder application?", [
+            ("the deadline from the COLLEGE row", mentions_any(f"{deadline:%b} {deadline.day}", f"{deadline:%B} {deadline.day}",
+                                                                   "20 days", "twenty days"), True),
+            ("names what's left", mentions_any("essay", "supplement"), False),
+        ]),
         # The partner: follows the thread, talks like a person, acts when asked.
         Case("and in stat?", [
             ("follows the thread to the Stat grade", mentions_any("88.4", "88"), True),
@@ -256,6 +271,10 @@ def cases(day: date, later: date) -> list[Case]:
         Case("put AA batteries on my grocery list", [
             ("acts: the list command", lambda t: "ACTIONS: /list add grocery" in t and "batteries" in t.split("ACTIONS:")[1].lower(),
              True),
+        ], can_act=True),
+        Case("just finished my Boulder essays", [
+            ("records it: the college command", lambda t: "ACTIONS: /college" in t
+             and "essay" in t.split("ACTIONS:")[1].lower(), True),
         ], can_act=True),
         Case("ugh, I'm so tired today", [
             ("venting is not a request: no actions", omits("ACTIONS: /"), True),

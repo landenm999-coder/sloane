@@ -343,13 +343,22 @@ The skills (`/help` lists them all): "add milk to my grocery list", `/countdown
 graduation may 22`, "is it going to rain?", `/card bio: q :: a` then `/quiz`,
 `/habit add reading` then "did reading", `/client add Bella's Bakery $1200`,
 `/plan` for tonight, `/focus 25 essay`, `/birthday Keegan mar 3`, "spent 12 on
-lunch". `/end` stops a quiz.
+lunch", `/college add CU Boulder EA nov 1` then "what's left for Boulder?". `/end`
+stops a quiz.
+
+**College applications, first.** It's application season, so add every school you're
+applying to now: `/college add <school> <EA|ED|RD> <deadline>`, a nickname in brackets
+if you use one (`/college add Colorado State University (CSU) RD feb 1`). Each gets
+the usual checklist; `/college csu skip scores` for a test-optional school,
+`/college csu add portfolio by oct 20` for anything extra. She reminds you two
+weeks, a week, three days and a day out, and the morning of.
 
 ---
 
 **Backups.** Every night at 12:30 she writes what only you could recreate
 (state, promises, people, courses, trust, reminders, and every skill's data:
-lists, countdowns, flashcards, habits, clients, focus, spending) to
+lists, countdowns, flashcards, habits, clients, focus, spending, college
+applications) to
 `/var/lib/sloane/models/backups/sloane-YYYY-MM-DD.json` inside the `models`
 volume, keeping 14. Copy one off the box with
 `docker cp sloane:/var/lib/sloane/models/backups ./sloane-backups`.

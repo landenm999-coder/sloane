@@ -4,9 +4,9 @@ Always-on personal assistant for Landen. Reached by Telegram text and voice
 notes. She runs the day: what's due, what shift, what slipped, what's next.
 
 **v1 is built: P0 (the spine), P1 (memory + school), P2 (rhythm), P3 (voice)
-and P4 (agency, including Gmail).** On top of it sit ten **skills** (lists,
+and P4 (agency, including Gmail).** On top of it sit twelve **skills** (lists,
 countdowns, weather, flashcards, habits, clients, a study plan, focus,
-birthdays, money), a **heartbeat** that lets them speak up once when it
+birthdays, money, memory, college applications), a **heartbeat** that lets them speak up once when it
 matters, and a **TV dashboard**. And she is built to feel like a **partner**
 rather than a help desk: she follows the conversation, has a character, answers
 fast (streamed), does what he asks, looks things up, and remembers what he tells
@@ -34,7 +34,7 @@ Total running cost: **$0/mo**, every layer on a free tier.
 | Providers | `claude_code`, `groq`, `anthropic` behind one `Provider` base |
 | Contract | `Reply(speech, detail)` parsed from 5 model-output shapes |
 | Hard lines | 6 pairs, enforced in code before execution |
-| Interface | Telegram long polling: text, voice, buttons; `/today` `/week` `/grades` `/done` `/status` `/brief` `/jobs` `/sync` `/inbox` `/remind` `/reminders` `/promise` `/promises` `/kept` `/trust` `/revoke` `/usage` `/state`, plus the skills' `/list` `/countdown` `/weather` `/card(s)` `/quiz` `/habit(s)` `/did` `/client(s)` `/plan` `/estimate` `/focus` `/birthday(s)` `/spent` `/budget` `/end` |
+| Interface | Telegram long polling: text, voice, buttons; `/today` `/week` `/grades` `/done` `/status` `/brief` `/jobs` `/sync` `/inbox` `/remind` `/reminders` `/promise` `/promises` `/kept` `/trust` `/revoke` `/usage` `/state`, plus the skills' `/list` `/countdown` `/weather` `/card(s)` `/quiz` `/habit(s)` `/did` `/client(s)` `/plan` `/estimate` `/focus` `/birthday(s)` `/spent` `/budget` `/memory` `/followup` `/college(s)` `/end` |
 | School | Canvas assignments + secret `.ics` calendar, both read-only |
 | Shifts | generated from the fixed 3–7 PM Mon–Fri rule, DST-correct |
 | Sync | `/sync` on Telegram, `POST /sync` over HTTP, `entity_sync` job every 4h |
@@ -55,7 +55,7 @@ Total running cost: **$0/mo**, every layer on a free tier.
 | Voice briefs | `VOICE_BRIEFS=morning_brief` sends that brief as a voice note (text if voice fails) |
 | Status | `/status`: open problems, last sync, provider health, last brief, Gmail — from her own bookkeeping, no model |
 | Gmail | triage every 3h in one batched call; replies drafted in his voice, sent only on Approve |
-| Skills | ten plug-in skills (below): lists, countdowns, weather, flashcards + quizzes, habits, clients, a study plan, focus, birthdays, money. Each adds its own commands, plain-English rules, FACTS lines, a TV card and nudges, without touching the core |
+| Skills | twelve plug-in skills (below): lists, countdowns, weather, flashcards + quizzes, habits, clients, a study plan, focus, birthdays, money, memory, college applications. Each adds its own commands, plain-English rules, FACTS lines, a TV card and nudges, without touching the core |
 | Heartbeat | every quarter hour, 7 AM–10 PM, no model: what the skills think is worth saying now (rain before your shift, a streak about to break, a follow-up due), each said once |
 | TV dashboard | `GET /tv`: the day at a glance for a screen on the wall — clock, weather, today, overdue, due soon, reminders, grades, and a card per skill. No model, no outside requests, refreshes itself |
 | HTTP | `/health`, `/usage`, `/state`, `/facts`, `/jobs`, `/tv`, `/panels`, `POST /sync`, `POST /jobs/{name}/run`, `POST /capture` (token) |
@@ -95,6 +95,7 @@ with `SKILLS_DISABLED`.
 | Birthdays | `/birthday Keegan mar 3`, "Keegan's birthday is March 3" | on the same people your promises point at; a week out, the evening before, the morning of |
 | Memory | `/memory`, `/forget 2`, `/followup call the dentist friday`, `/followup done dentist` | what she's learned about you and the loose ends, where you can see and correct them |
 | Money | "spent 12 on lunch", `/spent`, `/budget 100` | spending by category against a weekly budget; with `PAY_RATE`, an estimate of what this week's shifts earned. Tracking only |
+| Colleges | `/college add CU Boulder EA nov 1`, `/colleges`, `/college boulder done essays`, `/college boulder submitted`, "what's left for Boulder?" | each application's plan, deadline and checklist (application, essays, recs, transcript, scores, fee, plus your own items); heads-up 14, 7, 3 and 1 days out (evenings) and the morning of; one nudge if a deadline passes unsubmitted. Tell her "I sent my Boulder app" and she records it. Tracking only: she never submits anything |
 
 Everything a skill puts in FACTS is a row from SQL or a number from an API,
 never third-party text, and skill lines come **after** the school rows, so a
@@ -461,7 +462,7 @@ DATABASE_URL=... python tests/test_mail.py     # stub Gmail: triage, fencing, ap
 DATABASE_URL=... python tests/test_reminders.py  # parser table, claim-once, quiet hours, bot paths
 DATABASE_URL=... python tests/test_heartbeat.py  # nudges said once, retried, quiet hours
 # and one suite per skill: test_lists, test_countdowns, test_cards, test_habits,
-# test_clients, test_plan, test_focus, test_birthdays, test_money
+# test_clients, test_plan, test_focus, test_birthdays, test_money, test_colleges
 # the partner: test_conversation, test_claude_stream (a fake CLI), test_live,
 # test_actions, test_lookup, test_learn
 
@@ -541,7 +542,7 @@ sloane/
   skills/
     __init__.py  the contract and the registry
     lists.py countdowns.py weather.py cards.py habits.py clients.py
-    plan.py focus.py birthdays.py money.py memory.py
+    plan.py focus.py birthdays.py money.py memory.py colleges.py
   memory/
     store.py     THE ONLY FILE THAT TALKS SQL
     embed.py     fastembed, 384-dim, local
@@ -565,6 +566,8 @@ sql/
   015-023          one per skill: lists, countdowns, cards, habits, clients,
                    plan, focus, birthdays, money (+ skill_settings)
   024_memory.sql   follow-ups' days on working_set + the learn job
+  025_provenance.sql  messages.trusted: a reply built from outside text
+  026_colleges.sql  applications and their checklists
 scripts/
   doctor.py      validates every credential
   seed_state.py  tier 1 from a markdown file

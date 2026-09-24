@@ -45,6 +45,8 @@ SKILLS: dict[str, str] = {
     "spent": "/spent <amount> <what>",
     "budget": "/budget <amount>",
     "followup": "/followup <what he'll do> [<day>]  ·  /followup done <words from it> (when he says it's done)",
+    "college": ("/college add <school> <EA|ED|RD> <deadline>  ·  /college <school> done <checklist item>  ·  "
+                "/college <school> submitted | admitted | deferred | waitlisted | denied | committed"),
 }
 MAX_LENGTH = 300
 
@@ -83,6 +85,10 @@ RULES: dict[str, object] = {
     "spent": lambda a: bool(a) and bool(_AMOUNT.match(a[0])),
     "budget": _budget,
     "followup": bool,
+    # Ticking, adding and recording where an application stands. Not dropping a
+    # school, skipping a checklist item or reopening one: those he types.
+    "college": lambda a: bool(a) and not set(a) & {"drop", "archive", "remove", "delete", "skip", "skipped",
+                                                  "optional", "undo", "untick", "unskip", "open", "reopen"},
 }
 
 
@@ -124,6 +130,24 @@ def _stems(text: str) -> set[str]:
     return {w[:4] for w in re.findall(r"[a-z0-9]+", (text or "").lower()) if w not in _STOP}
 
 
+# Words that change what a command records, and the stems he'd have used to say
+# so. Naming Boulder isn't saying the Boulder application went in, and marking it
+# submitted silences its deadline: "/college boulder submitted" needs "sent",
+# "submitted" or the like in what he said.
+_SENT = {"subm", "sent", "send", "appl", "turn"}
+_MEANS: dict[str, dict[str, set[str]]] = {
+    "college": {
+        "submitted": _SENT, "sent": _SENT, "applied": _SENT,
+        "admitted": {"admi", "acce", "got", "into"}, "accepted": {"admi", "acce", "got", "into"},
+        "got": {"got"},
+        "deferred": {"defe"},
+        "waitlisted": {"wait"}, "waitlist": {"wait"},
+        "denied": {"deni", "deny", "reje", "didn"}, "rejected": {"deni", "deny", "reje", "didn"},
+        "committed": {"comm", "enro", "depo", "goin", "chos", "chose", "pick"},
+    },
+}
+
+
 def grounded(command: str, message: str, offer: str = "") -> bool:
     """Did he ask for this? Its words must come from his message -- or, when
     his message is a plain yes, from the offer of hers he is answering.
@@ -136,17 +160,27 @@ def grounded(command: str, message: str, offer: str = "") -> bool:
     found = _NAME.match(command)
     if not found:
         return False
+    name = found.group(1).lower()
     rest = command[found.end():]
     # What was asked for is the payload: for "/list add grocery: milk" that is
     # the milk, not the grocery list he may merely have mentioned.
-    if found.group(1).lower() in {"list", "card"} and ":" in rest:
+    if name in {"list", "card"} and ":" in rest:
         rest = rest.split(":", 1)[1]
     args = _stems(rest) - _CONTROL
     if not args:  # "/focus stop": the command itself carries the meaning
-        args = _stems(found.group(1))
-    if args & _stems(message):
-        return True
-    return bool(_YES.match(message or "")) and bool(args & _stems(offer))
+        args = _stems(name)
+    said = _stems(message)
+    if args & said:
+        heard = said
+    elif _YES.match(message or "") and args & _stems(offer):
+        heard = said | _stems(offer)
+    else:
+        return False
+    for word in re.findall(r"[a-z]+", rest.lower()):
+        need = _MEANS.get(name, {}).get(word)
+        if need is not None and not need & heard:
+            return False
+    return True
 
 
 LOOKUP = """\
@@ -164,8 +198,9 @@ def instructions(allowed: dict[str, str]) -> str:
     return f"""\
 You can act, not only answer. When Landen asks you to do something one of these \
 commands does -- in his message, or by saying yes to something you offered in \
-CONVERSATION -- add a third key to your JSON, "do": a list of the commands, \
-exactly as he would type them. At most {MAX_ACTIONS}.
+CONVERSATION -- or tells you something one of them records ("I spent 14 on \
+lunch", "I sent my Boulder app"), add a third key to your JSON, "do": a list of \
+the commands, exactly as he would type them. At most {MAX_ACTIONS}.
 
 {usage}
 
