@@ -1299,8 +1299,9 @@ class Store:
         )
 
     # Only what cannot be rebuilt from upstream. Canvas, the calendar and shifts
-    # re-sync; these were typed, promised, earned or decided by Landen.
-    BACKUP_TABLES = ("state", "commitments", "people", "courses", "trust", "reminders", "jobs",
+    # re-sync; these were typed, promised, earned or decided by Landen. In
+    # restore order: a table comes after every table its rows point at.
+    BACKUP_TABLES = ("state", "people", "commitments", "courses", "trust", "reminders", "jobs",
                      "list_items", "countdowns", "cards", "habits", "habit_log",
                      "clients", "client_notes", "focus_sessions", "expenses", "skill_settings")
 

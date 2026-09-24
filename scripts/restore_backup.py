@@ -34,8 +34,9 @@ async def main(path: str, tables: list[str] | None, apply: bool) -> int:
         print(f"not backed-up tables: {', '.join(unknown)}")
         return 2
     async with Store(settings()) as store:
-        # Dependencies first: commitments point at people.
-        order = sorted(chosen, key=lambda t: 0 if t == "people" else 1)
+        # Dependencies first (commitments point at people, habit_log at habits):
+        # BACKUP_TABLES is kept in that order.
+        order = sorted(chosen, key=Store.BACKUP_TABLES.index)
         for table in order:
             rows = data.get(table, [])
             if not apply:

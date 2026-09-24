@@ -105,6 +105,23 @@ async def main() -> None:
         except ValueError:
             pass
 
+        # restore_backup.py restores in BACKUP_TABLES order, so every table has
+        # to come after the tables its foreign keys point at.
+        fks = await store._fetch(
+            """
+            select tc.table_name as child, ccu.table_name as parent
+              from information_schema.table_constraints tc
+              join information_schema.constraint_column_usage ccu
+                on ccu.constraint_name = tc.constraint_name and ccu.table_schema = tc.table_schema
+             where tc.constraint_type = 'FOREIGN KEY' and tc.table_schema = 'public'
+            """
+        )
+        order = Store.BACKUP_TABLES
+        wrong = sorted({(f["child"], f["parent"]) for f in fks
+                        if f["child"] in order and f["parent"] in order and f["child"] != f["parent"]
+                        and order.index(f["parent"]) > order.index(f["child"])})
+        check("backed-up tables are listed parents first", wrong, [])
+
         nowhere = JobContext(store=store, agent=agent, governor=Governor(store, config),
                              config=isolated(database_url=os.environ["DATABASE_URL"]))
         check("no folder configured: says so", (await backup(nowhere, SUNDAY)).ran, False)

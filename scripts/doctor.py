@@ -85,7 +85,7 @@ async def check_database(config: Settings) -> None:
         # Name-based, not a count: migrations add jobs over time and a total
         # would go stale every phase.
         required = {"morning_brief", "pre_shift", "post_shift", "wrap",
-                    "reflection", "entity_sync"}
+                    "reflection", "entity_sync", "heartbeat"}
         names = {j["name"] for j in await store.jobs()}
         missing = required - names
         record(
@@ -418,6 +418,46 @@ def check_extras(config: Settings) -> None:
         record("voice briefs", PASS, ", ".join(sorted(config.voice_brief_names)))
 
 
+async def check_skills(config: Settings) -> None:
+    """Which skills load, and whether their settings are usable."""
+    import pkgutil
+    import re
+
+    import sloane.skills as package
+    from sloane.skills import SkillContext, load
+    from sloane.skills.weather import WeatherUnavailable, parse_location
+
+    registry = load(SkillContext(store=None, config=config))
+    record("skills", PASS, ", ".join(registry.names) or "none loaded")
+    known = {m.name for m in pkgutil.iter_modules(package.__path__) if not m.name.startswith("_")}
+    unknown = sorted(config.disabled_skills - known - set(registry.names))
+    if unknown:
+        record("skills disabled", WARN, f"SKILLS_DISABLED names no such skill: {', '.join(unknown)}")
+
+    if not config.weather_location.strip():
+        record("weather", SKIP, "WEATHER_LOCATION unset, so there is no weather (e.g. 39.52,-104.76 for Parker)")
+    elif parse_location(config.weather_location) is None:
+        record("weather", FAIL, f"WEATHER_LOCATION {config.weather_location!r} is not 'latitude,longitude'")
+    else:
+        weather = registry.get("weather")
+        try:
+            forecast = await weather.forecast() if weather is not None else None
+        except WeatherUnavailable as exc:
+            record("weather", WARN, f"Open-Meteo did not answer: {exc}")
+        else:
+            now = "" if forecast is None or forecast.temp is None else f", {round(forecast.temp)}° now"
+            record("weather", PASS, f"Open-Meteo answered{now}")
+
+    bad = [name for name in ("plan_school_day_start", "plan_weekend_start", "plan_bedtime")
+           if not re.fullmatch(r"([01]?\d|2[0-3]):[0-5]\d", getattr(config, name))]
+    if bad:
+        record("plan", FAIL, f"{', '.join(n.upper() for n in bad)} must be HH:MM")
+    if config.pay_rate < 0:
+        record("pay rate", FAIL, "PAY_RATE can't be negative")
+    elif config.pay_rate:
+        record("pay rate", PASS, f"${config.pay_rate:g}/h for earnings estimates")
+
+
 async def main(warm: bool = False) -> int:
     config = load_settings()
 
@@ -434,6 +474,7 @@ async def main(warm: bool = False) -> int:
     await check_voice(config, warm=warm)
     await check_telegram(config)
     check_extras(config)
+    await check_skills(config)
 
     width = max(len(name) for name, _, _ in results)
     for name, status, detail in results:
