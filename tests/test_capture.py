@@ -126,6 +126,56 @@ async def main() -> None:
         check("in the log too", [str(d["on_date"]) for d in days], ["2026-09-21"])
         await store._exec("delete from habits where name = 'capture reading'")
 
+        # -- a connection check stores nothing ------------------------------------------------
+        before = await store._one("select count(*) as n from episodes where source = 'capture'")
+        checked = await post({"check": True})
+        after = await store._one("select count(*) as n from episodes where source = 'capture'")
+        check("a check answers 200 and stores nothing", (checked.status, checked.body, after["n"] - before["n"]),
+              (200, {"ok": True}, 0))
+        check("a check with a wrong token is still refused", (await post({"check": True}, "Bearer " + "u" * 40)).status,
+              401)
+
+        # -- act: false is memory only (Capture acted on it itself) -----------------------
+        await store._exec("truncate reminders")
+        await store._exec("delete from list_items where list = 'capturetest'")
+        quiet = await ingest(store, on, {"text": "remind me tomorrow at 7 to bring the lab", "act": False},
+                             auth, now=NOW, skills=skills)
+        check("act false: stored, no reminder set", (quiet.status, "reminder" in quiet.body,
+                                                     len(await store.upcoming_reminders())), (201, False, 0))
+        quiet_list = await ingest(store, on, {"text": "add milk to my capturetest list", "act": False},
+                                  auth, now=NOW, skills=skills)
+        check("act false: no skill action either", "action" in quiet_list.body, False)
+        check("act must be a boolean", (await post({"text": "x", "act": "no"})).status, 400)
+
+        # -- client_id: a retry after a lost response is the same capture --------------------
+        await store._exec("truncate capture_refs")
+        await store._exec("truncate reminders")
+        first = await post({"text": "remind me tomorrow at 7 to bring the lab", "client_id": "cap-123"})
+        again = await post({"text": "remind me tomorrow at 7 to bring the lab", "client_id": "cap-123"})
+        check("the retry gets the first answer back", (first.status, again.status, again.body.get("id"),
+                                                       again.body.get("duplicate")),
+              (201, 200, first.body.get("id"), True))
+        check("and nothing twice: one reminder", len(await store.upcoming_reminders()), 1)
+        check("a different id is a different capture",
+              (await post({"text": "bakery idea", "client_id": "cap-124"})).status, 201)
+        check("a bad id is refused", (await post({"text": "x", "client_id": "has spaces"})).status, 400)
+        await store._exec("insert into capture_refs (client_id) values ('cap-inflight')")
+        check("one still being stored: retry later", (await post({"text": "x", "client_id": "cap-inflight"})).status,
+              409)
+
+        class Broken:
+            async def embed_one(self, text):
+                raise RuntimeError("disk full")
+
+        try:
+            await ingest(store, on, {"text": "x", "client_id": "cap-broken"}, auth, now=NOW, embedder=Broken())
+        except RuntimeError:
+            pass
+        check("a failed store lets its retry in", await store.capture_response("cap-broken"), None)
+        await store._exec("truncate capture_refs")
+        await store._exec("truncate reminders")
+        await store._exec("delete from list_items where list = 'capturetest'")
+
     # -- the route caps the body before reading it all -------------------------------
     import httpx
 

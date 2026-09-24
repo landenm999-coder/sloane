@@ -28,7 +28,7 @@ EXPECTED_TABLES = {
     "emails", "reminders", "school_changes", "alerts", "skill_sessions", "nudges_said",
     "list_items", "countdowns", "cards", "card_reviews", "habits", "habit_log",
     "clients", "client_notes", "focus_sessions", "expenses", "skill_settings",
-    "colleges", "college_tasks", "roleplays",
+    "colleges", "college_tasks", "roleplays", "capture_refs",
 }
 
 PASS, FAIL, SKIP, WARN = "PASS", "FAIL", "SKIP", "WARN"

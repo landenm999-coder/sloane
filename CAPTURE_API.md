@@ -26,12 +26,15 @@ Content-Type: application/json
 | `text` | string, 1–20,000 chars | yes | what he said or typed, already transcribed |
 | `kind` | `"note"` \| `"transcript"` | no (default `"note"`) | a typed note, or a transcribed voice capture |
 | `captured_at` | ISO 8601 string | no | when he said it. With no offset it's read as America/Denver. Future times are clamped to now |
+| `client_id` | string, 1–100 of `A-Z a-z 0-9 - _` | no, but send it | this capture's own id, the same on every retry. A retry after a lost response gets the first answer back (`200`, `"duplicate": true`) instead of a second episode and a second reminder |
+| `check` | `true` | no | a connection test: checks the token, answers `200 {"ok": true}`, stores nothing. Send only this field |
+| `act` | boolean | no (default `true`) | `false` stores it as memory only: no reminder, no skill action. Send `false` when Capture already acted on it (its own reminders and expenses), or he'd get everything twice |
 
 The whole body must be 64 KB or less.
 
 ```json
 {"text": "remind me tomorrow at 7 to bring the lab", "kind": "transcript",
- "captured_at": "2026-09-22T21:14:03-06:00"}
+ "captured_at": "2026-09-22T21:14:03-06:00", "client_id": "7f3c9a0e-...", "act": false}
 ```
 
 ## Responses
@@ -39,9 +42,12 @@ The whole body must be 64 KB or less.
 | status | body | client should |
 |---|---|---|
 | `201` | `{"stored": true, "id": "<uuid>", "kind": "note"}` | mark it sent |
+| `200` + ok | `{"ok": true}` | the answer to `{"check": true}`: connected, token good |
 | `201` + reminder | `…, "reminder": "tomorrow at 7:00 AM: bring the lab"` | show "Reminder set: …" |
 | `201` + no time | `…, "reminder": null, "note": "…no time could be read…"` | show "Saved as a note (no time found)" |
 | `201` + action | `…, "action": "Added milk to your grocery list; 3 things on it now."` | show the `action` line |
+| `200` | the first answer, plus `"duplicate": true` | mark it sent: this `client_id` was already stored |
+| `409` | `{"error": "…being stored right now…"}` | the first try is still in flight; retry shortly |
 | `400` | `{"error": "…"}` | the request is wrong; don't retry, surface it |
 | `401` | `{"error": "unauthorized"}` | the token is wrong; ask him to re-enter it |
 | `413` | `{"error": "…"}` | too long; split it or trim it |
@@ -58,10 +64,12 @@ The whole body must be 64 KB or less.
   lunch", "did reading", "Keegan's birthday is March 3" -- is acted on by the same rules, and `action` says what
   was done. It is never taken as the answer to a quiz running in the chat.
 - Nothing else. It is not an instruction channel: text that says "email Keegan" is stored as a note, not acted on.
+- With `"act": false`, only the first of these: memory, nothing acted on.
 
 ## Client checklist
 
 1. Settings: Sloane URL + token (secure storage), and a "Test connection" button that posts
-   `{"text": "capture test", "kind": "note"}` and expects `201`.
-2. After each capture is transcribed, POST it. On failure, queue it offline and retry; don't drop it.
+   `{"check": true}` and expects `200`. (Nothing is stored, so testing doesn't leave "capture test" in her memory.)
+2. After each capture is transcribed, POST it with a `client_id` made once per capture. On failure, queue it
+   offline and retry with the same `client_id`; don't drop it.
 3. Show the `reminder` line, or the `action` line, when present.

@@ -578,6 +578,7 @@ sql/
   025_provenance.sql  messages.trusted: a reply built from outside text
   026_colleges.sql  applications and their checklists
   027_deca.sql     scored practice role-plays
+  028_capture_refs.sql  a capture retried after a lost response is stored once
 scripts/
   doctor.py      validates every credential
   seed_state.py  tier 1 from a markdown file

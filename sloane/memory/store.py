@@ -1430,6 +1430,28 @@ class Store:
             (limit,),
         )
 
+    # -- capture retries (sql/028) ------------------------------------------------
+
+    async def claim_capture(self, client_id: str) -> bool:
+        """True if this capture id is new (and now claimed); False if seen before."""
+        await self._exec("delete from capture_refs where at < now() - interval '30 days'")
+        row = await self._one(
+            "insert into capture_refs (client_id) values (%s) on conflict do nothing returning client_id",
+            (client_id,),
+        )
+        return row is not None
+
+    async def capture_response(self, client_id: str) -> Row | None:
+        """What was answered the first time; `body` is null while that is still under way."""
+        return await self._one("select body from capture_refs where client_id = %s", (client_id,))
+
+    async def finish_capture(self, client_id: str, body: dict) -> None:
+        await self._exec("update capture_refs set body = %s where client_id = %s", (Jsonb(body), client_id))
+
+    async def release_capture(self, client_id: str) -> None:
+        """A capture that failed part-way: its retry must be let in."""
+        await self._exec("delete from capture_refs where client_id = %s and body is null", (client_id,))
+
     # -- ops ------------------------------------------------------------------
 
     async def log_usage(

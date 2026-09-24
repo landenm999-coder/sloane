@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import hmac
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -46,6 +47,10 @@ KINDS = ("note", "transcript")
 class Result:
     status: int
     body: dict
+
+
+# A capture's own id, so a retry after a lost response is recognised.
+_CLIENT_ID = re.compile(r"[A-Za-z0-9_-]{1,100}")
 
 
 def enabled(config: Settings) -> bool:
@@ -77,6 +82,9 @@ async def ingest(
         return Result(401, {"error": "unauthorized"})
     if not isinstance(payload, dict):
         return Result(400, {"error": "expected a JSON object"})
+    if payload.get("check") is True:
+        # The app's "Test connection": the token is good, and nothing is stored.
+        return Result(200, {"ok": True})
 
     text = payload.get("text")
     if not isinstance(text, str) or not text.strip():
@@ -86,6 +94,12 @@ async def ingest(
     kind = payload.get("kind", "note")
     if kind not in KINDS:
         return Result(400, {"error": f"kind must be one of {', '.join(KINDS)}"})
+    act = payload.get("act", True)
+    if not isinstance(act, bool):
+        return Result(400, {"error": "act must be true or false"})
+    client_id = payload.get("client_id")
+    if client_id is not None and (not isinstance(client_id, str) or not _CLIENT_ID.fullmatch(client_id)):
+        return Result(400, {"error": "client_id must be 1-100 letters, digits, '-' or '_'"})
     zone = ZoneInfo(config.timezone)
     when = now or datetime.now(zone)
     captured_at = None
@@ -99,7 +113,26 @@ async def ingest(
         if captured_at > when:
             captured_at = when  # a phone clock ahead of ours is not the future
 
-    text = text.strip()
+    if client_id is not None and not await store.claim_capture(client_id):
+        prior = await store.capture_response(client_id)
+        if prior is None or prior["body"] is None:
+            return Result(409, {"error": "that capture is being stored right now; retry shortly"})
+        return Result(200, {**prior["body"], "duplicate": True})
+    try:
+        body = await _store(store, text.strip(), kind, act, captured_at, when, zone,
+                            embedder=embedder, skills=skills)
+    except BaseException:
+        if client_id is not None:
+            await remember("release capture ref", store.release_capture(client_id))
+        raise
+    if client_id is not None:
+        await remember("capture ref", store.finish_capture(client_id, body))
+    return Result(201, body)
+
+
+async def _store(store: Store, text: str, kind: str, act: bool, captured_at: datetime | None,
+                 when: datetime, zone: ZoneInfo, *, embedder=None, skills=None) -> dict[str, Any]:  # noqa: ANN001
+    """Store it in his voice, then (unless act is false) set its reminder or run its skill rule."""
     vector = None
     if embedder is not None:
         try:
@@ -111,6 +144,11 @@ async def ingest(
         embedding=vector, occurred_at=captured_at, trusted=True, source="capture",
     )
     body: dict[str, Any] = {"stored": True, "id": episode_id, "kind": kind}
+    if not act:
+        # Capture acted on it itself (its own reminders and expenses): here it
+        # is memory only, or he'd be reminded twice.
+        log.info("capture stored (memory only): %s, %s chars", kind, len(text))
+        return body
 
     # A captured "remind me ..." is a reminder, read by the chat's own rules.
     asked = REMIND_ME.match(text)
@@ -134,4 +172,4 @@ async def ingest(
         if answer is not None:
             body["action"] = answer.speech
     log.info("capture stored: %s, %s chars", kind, len(text))
-    return Result(201, body)
+    return body
