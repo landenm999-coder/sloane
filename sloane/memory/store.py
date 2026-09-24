@@ -1301,7 +1301,8 @@ class Store:
     # Only what cannot be rebuilt from upstream. Canvas, the calendar and shifts
     # re-sync; these were typed, promised, earned or decided by Landen.
     BACKUP_TABLES = ("state", "commitments", "people", "courses", "trust", "reminders", "jobs",
-                     "list_items", "countdowns", "cards", "habits", "habit_log")
+                     "list_items", "countdowns", "cards", "habits", "habit_log",
+                     "clients", "client_notes")
 
     async def restore_rows(self, table: str, rows: Sequence[Row]) -> int:
         """Merge backed-up rows back in. Existing rows win; returns rows inserted.
@@ -1840,6 +1841,78 @@ class Store:
               join habits h on h.id = l.habit_id and h.archived_at is null
              where l.on_date >= %s
              order by l.on_date
+            """,
+            (since,),
+        )
+
+    # -- clients (sql/019) -------------------------------------------------------------
+
+    CLIENT_OPEN_STAGES = ("lead", "talking", "proposal", "building", "live")
+
+    async def add_client(self, name: str, *, value_cents: int | None = None,
+                         follow_up_on: date | None = None, next_step: str | None = None) -> Row | None:
+        """A new client, or None if one by that name (any case) is already active."""
+        return await self._one(
+            """
+            insert into clients (name, value_cents, follow_up_on, next_step) values (%s, %s, %s, %s)
+            on conflict (lower(name)) where archived_at is null do nothing
+            returning *
+            """,
+            (name, value_cents, follow_up_on, next_step),
+        )
+
+    async def open_clients(self) -> list[Row]:
+        """The live pipeline, in the order /clients numbers it: follow-ups first."""
+        return await self._fetch(
+            """
+            select * from clients
+             where archived_at is null and stage = any(%s)
+             order by follow_up_on nulls last, created_at, id
+            """,
+            (list(self.CLIENT_OPEN_STAGES),),
+        )
+
+    async def all_clients(self) -> list[Row]:
+        return await self._fetch(
+            "select * from clients where archived_at is null order by created_at, id"
+        )
+
+    async def update_client(self, client_id: str, **fields: Any) -> Row | None:
+        """Set stage, value_cents, follow_up_on and/or next_step on one client."""
+        allowed = {"stage", "value_cents", "follow_up_on", "next_step"}
+        if not fields or set(fields) - allowed:
+            raise ValueError(f"cannot set {sorted(set(fields) - allowed) or 'nothing'}")
+        # Column names come from the fixed set above, never from input.
+        sets = ", ".join(f"{name} = %s" for name in fields)
+        stage_stamp = ", stage_changed_at = now()" if "stage" in fields else ""
+        return await self._one(
+            f"update clients set {sets}, updated_at = now(){stage_stamp} "  # noqa: S608
+            "where id = %s and archived_at is null returning *",
+            [*fields.values(), client_id],
+        )
+
+    async def archive_client(self, client_id: str) -> Row | None:
+        return await self._one(
+            "update clients set archived_at = now() where id = %s and archived_at is null returning *",
+            (client_id,),
+        )
+
+    async def add_client_note(self, client_id: str, note: str) -> None:
+        await self._exec("insert into client_notes (client_id, note) values (%s, %s)", (client_id, note))
+        await self._exec("update clients set updated_at = now() where id = %s", (client_id,))
+
+    async def client_notes(self, client_id: str, limit: int = 5) -> list[Row]:
+        return await self._fetch(
+            "select at, note from client_notes where client_id = %s order by at desc, id desc limit %s",
+            (client_id, limit),
+        )
+
+    async def clients_paid_since(self, since: datetime) -> list[Row]:
+        return await self._fetch(
+            """
+            select name, value_cents, stage_changed_at from clients
+             where archived_at is null and stage = 'paid' and stage_changed_at >= %s
+             order by stage_changed_at
             """,
             (since,),
         )
