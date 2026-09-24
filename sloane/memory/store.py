@@ -1301,7 +1301,7 @@ class Store:
     # Only what cannot be rebuilt from upstream. Canvas, the calendar and shifts
     # re-sync; these were typed, promised, earned or decided by Landen.
     BACKUP_TABLES = ("state", "commitments", "people", "courses", "trust", "reminders", "jobs",
-                     "list_items", "countdowns")
+                     "list_items", "countdowns", "cards")
 
     async def restore_rows(self, table: str, rows: Sequence[Row]) -> int:
         """Merge backed-up rows back in. Existing rows win; returns rows inserted.
@@ -1690,6 +1690,103 @@ class Store:
         return await self._one(
             "update countdowns set archived_at = now() where id = %s and archived_at is null returning *",
             (countdown_id,),
+        )
+
+    # -- cards (sql/017) -------------------------------------------------------------
+
+    async def add_cards(self, deck: str, pairs: Sequence[tuple[str, str]], due_on: date) -> list[Row]:
+        """Add (front, back) cards; a front already in the deck is skipped. Returns the added."""
+        added: list[Row] = []
+        for front, back in pairs:
+            row = await self._one(
+                """
+                insert into cards (deck, front, back, due_on) values (%s, %s, %s, %s)
+                on conflict (deck, lower(front)) where archived_at is null do nothing
+                returning *
+                """,
+                (deck, front, back, due_on),
+            )
+            if row is not None:
+                added.append(row)
+        return added
+
+    async def due_cards(self, today: date, deck: str | None = None, limit: int = 20) -> list[Row]:
+        """Cards due on or before today, lowest box first within the oldest due."""
+        return await self._fetch(
+            """
+            select * from cards
+             where archived_at is null and due_on <= %(today)s
+               and (%(deck)s::text is null or deck = %(deck)s)
+             order by due_on, box, created_at
+             limit %(limit)s
+            """,
+            {"today": today, "deck": deck, "limit": limit},
+        )
+
+    async def deck_cards(self, deck: str) -> list[Row]:
+        return await self._fetch(
+            "select * from cards where archived_at is null and deck = %s order by created_at, id",
+            (deck,),
+        )
+
+    async def card_decks(self, today: date) -> list[Row]:
+        """Each deck with its size, how many are due, and when the next one is."""
+        return await self._fetch(
+            """
+            select deck, count(*) as total,
+                   count(*) filter (where due_on <= %(today)s) as due,
+                   min(due_on) filter (where due_on > %(today)s) as next_due
+              from cards where archived_at is null
+             group by deck order by deck
+            """,
+            {"today": today},
+        )
+
+    async def get_card(self, card_id: str) -> Row | None:
+        return await self._one("select * from cards where id = %s", (card_id,))
+
+    async def record_review(self, card_id: str, *, correct: bool, box: int, due_on: date) -> Row | None:
+        """Move a card to its new box and due date, and log the review."""
+        row = await self._one(
+            """
+            update cards set box = %s, due_on = %s, reviews = reviews + 1,
+                   lapses = lapses + (case when %s then 0 else 1 end), reviewed_at = now()
+             where id = %s and archived_at is null
+            returning *
+            """,
+            (box, due_on, correct, card_id),
+        )
+        if row is not None:
+            await self._exec("insert into card_reviews (card_id, correct) values (%s, %s)", (card_id, correct))
+        return row
+
+    async def archive_cards(self, ids: Sequence[str]) -> int:
+        rows = await self._fetch(
+            "update cards set archived_at = now() where id = any(%s::uuid[]) and archived_at is null returning id",
+            (list(ids),),
+        )
+        return len(rows)
+
+    async def reviews_since(self, since: datetime) -> Row:
+        row = await self._one(
+            """
+            select count(*) as reviews, count(*) filter (where correct) as correct
+              from card_reviews where at >= %s
+            """,
+            (since,),
+        )
+        return row or {"reviews": 0, "correct": 0}
+
+    async def next_card_due(self, after: date, deck: str | None = None) -> Row | None:
+        """The next day with cards due after `after`, and how many."""
+        return await self._one(
+            """
+            select due_on, count(*) as n from cards
+             where archived_at is null and due_on > %(after)s
+               and (%(deck)s::text is null or deck = %(deck)s)
+             group by due_on order by due_on limit 1
+            """,
+            {"after": after, "deck": deck},
         )
 
 
