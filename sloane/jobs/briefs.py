@@ -393,6 +393,26 @@ async def heartbeat(ctx: JobContext, now: datetime | None = None) -> JobResult:
                      reason=f"said {len(new)}: " + ", ".join(key for key, _ in new))
 
 
+async def learn(ctx: JobContext, now: datetime | None = None) -> JobResult:
+    """12:20 AM, silent: follow-ups and facts from the day he just had (one bulk call)."""
+    from sloane.memory.learn import learn as learn_day
+    from sloane.router import NoProviderAvailable
+
+    decision = await ctx.governor.may_run(sends_message=False, purpose="bulk", now=now)
+    if not decision:
+        return JobResult("learn", ran=False, reason=decision.reason)
+    router = getattr(ctx.agent, "router", None)
+    if router is None:
+        return JobResult("learn", ran=False, reason="no model router")
+    moment = now or datetime.now(ZoneInfo(ctx.config.timezone))
+    try:
+        added, facts = await learn_day(ctx.store, router, ctx.config, moment)
+    except NoProviderAvailable as exc:
+        return JobResult("learn", ran=False, reason=f"nothing learned, no model: {exc}")
+    return JobResult("learn", ran=True, reason=f"{added} follow-up{'s' if added != 1 else ''}, "
+                                               f"{facts} fact{'s' if facts != 1 else ''} learned")
+
+
 HANDLERS: dict[str, Callable[..., Awaitable[JobResult]]] = {
     "morning_brief": morning_brief,
     "pre_shift": pre_shift,
@@ -406,4 +426,5 @@ HANDLERS: dict[str, Callable[..., Awaitable[JobResult]]] = {
     "weekly_review": weekly_review,
     "backup": backup,
     "heartbeat": heartbeat,
+    "learn": learn,
 }

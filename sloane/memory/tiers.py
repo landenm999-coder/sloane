@@ -93,7 +93,11 @@ def render_state(rows: Sequence[Row], budget: int, *, tz: str = "") -> tuple[str
 
 
 def render_working_set(rows: Sequence[Row], budget: int, *, tz: str = "") -> tuple[str, int]:
-    lines = [f"- [{r.get('kind', 'open')}] {r['summary']}" for r in rows]
+    lines = []
+    for r in rows:
+        due = r.get("due_on")
+        when = f" (for {due:%a %b} {due.day})" if due is not None and hasattr(due, "strftime") else ""
+        lines.append(f"- [{r.get('kind', 'open')}] {r['summary']}{when}")
     kept, used = fit(lines, budget)
     return _block("LOOPS", kept, "open in the last 7 days"), used
 

@@ -32,6 +32,7 @@ UNIT = [
     "test_live.py",  # integration only
     "test_actions.py",
     "test_lookup.py",
+    "test_learn.py",  # its integration half runs when DATABASE_URL is set
 ]
 INTEGRATION = [
     "test_store.py", "test_school.py", "test_jobs.py", "test_agency.py", "test_mail.py",

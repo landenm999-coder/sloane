@@ -167,7 +167,7 @@ class Store:
     async def get_working_set(self, limit: int = 25) -> list[Row]:
         return await self._fetch(
             """
-            select kind, summary, salience, opened_at
+            select kind, summary, salience, opened_at, due_on
             from working_set
             where closed_at is null
             order by salience desc, opened_at desc
@@ -214,6 +214,17 @@ class Store:
                and opened_at < now() - make_interval(days => %s)
             """,
             (days,),
+        )
+        # A follow-up he never mentioned again fades after two weeks, or two
+        # days past the day it was for (sql/024).
+        await self._exec(
+            """
+            update working_set
+               set closed_at = now()
+             where closed_at is null and kind = 'follow_up'
+               and (opened_at < now() - interval '14 days'
+                    or (due_on is not null and due_on < current_date - 2))
+            """
         )
         await self._exec(
             """
@@ -2086,6 +2097,63 @@ class Store:
              where id = (select id from expenses where archived_at is null order by created_at desc limit 1)
             returning *
             """
+        )
+
+    # -- memory (sql/024) -------------------------------------------------------------------
+
+    async def his_messages(self, chat_id: int, since: datetime, until: datetime) -> list[Row]:
+        """What he said (not what she said) in a window, oldest first."""
+        return await self._fetch(
+            """
+            select body, at from messages
+             where chat_id = %s and direction = 'in' and kind in ('text', 'voice')
+               and body is not null and body <> '' and body not like '/%%'
+               and at >= %s and at < %s
+             order by at
+            """,
+            (chat_id, since, until),
+        )
+
+    async def open_follow_ups(self) -> list[Row]:
+        return await self._fetch(
+            """
+            select id, summary, due_on, opened_at from working_set
+             where kind = 'follow_up' and closed_at is null
+             order by due_on nulls last, opened_at, id
+            """
+        )
+
+    async def add_follow_up(self, summary: str, due_on: date | None) -> Row:
+        row = await self._one(
+            """
+            insert into working_set (kind, summary, salience, due_on)
+            values ('follow_up', %s, 0.7, %s) returning id, summary, due_on
+            """,
+            (summary, due_on),
+        )
+        assert row is not None
+        return row
+
+    async def close_follow_up(self, item_id: str) -> Row | None:
+        return await self._one(
+            """
+            update working_set set closed_at = now()
+             where id = %s and kind = 'follow_up' and closed_at is null
+            returning id, summary
+            """,
+            (item_id,),
+        )
+
+    async def learned_facts(self) -> list[Row]:
+        return await self._fetch(
+            "select key, value, source, updated_at from state where pinned and category = 'learned' order by key"
+        )
+
+    async def unpin_state(self, key: str) -> Row | None:
+        """Take a fact out of every prompt. Kept in the table, never deleted."""
+        return await self._one(
+            "update state set pinned = false, updated_at = now() where key = %s and pinned returning key, value",
+            (key,),
         )
 
 

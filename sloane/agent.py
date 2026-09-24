@@ -110,6 +110,8 @@ class Agent:
         self._router = router or Router(self._config, usage_sink=usage_sink(store))
         self._embedder = embedder or Embedder(self._config)
         self.skills = skills
+        # The nightly learn job asks the bulk lane through the same router.
+        self.router = self._router
         # Memory writes run after the reply is on its way (invariant 5, taken
         # literally). settle() waits for them: shutdown, tests, the eval.
         self._pending: set[asyncio.Task] = set()

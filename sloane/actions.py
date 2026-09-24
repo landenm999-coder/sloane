@@ -42,6 +42,7 @@ SKILLS: dict[str, str] = {
     "birthday": "/birthday <name> <date>",
     "spent": "/spent <amount> <what>",
     "budget": "/budget <amount>",
+    "followup": "/followup <what he'll do> [<day>]  ·  /followup done <words from it> (when he says it's done)",
 }
 # Words that make a command destructive. He types those himself.
 DENY = frozenset({"drop", "remove", "clear", "forget", "undo", "delete", "archive", "reset",

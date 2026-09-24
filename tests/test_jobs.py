@@ -197,7 +197,7 @@ async def main() -> None:
             sorted(sched.registered),
             sorted(["morning_brief", "pre_shift", "post_shift", "wrap",
                     "reflection", "entity_sync", "inbox", "reminders", "watchdog",
-                    "weekly_review", "backup", "heartbeat"]),
+                    "weekly_review", "backup", "heartbeat", "learn"]),
         )
         nxt = sched.next_runs()
 
