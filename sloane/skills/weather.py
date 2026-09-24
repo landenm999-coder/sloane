@@ -16,7 +16,9 @@ Two nudges, through the heartbeat, each once a day at most:
 
 A forecast is fetched at most every 20 minutes. If Open-Meteo is down, the
 last forecast is used for up to three hours, and after that the skill says it
-cannot read the weather rather than repeating a stale one.
+cannot read the weather rather than repeating a stale one. A failed fetch is
+not retried for five minutes: every reply waits for FACTS, so an outage must
+cost one slow reply, not all of them.
 """
 
 from __future__ import annotations
@@ -37,6 +39,11 @@ log = logging.getLogger(__name__)
 
 FRESH_SECONDS = 20 * 60
 STALE_OK_SECONDS = 3 * 3600
+# After a failed fetch, wait this long before trying again. Every reply reads
+# FACTS, and FACTS waits for every skill: an outage must cost one slow reply,
+# not every reply for an afternoon.
+RETRY_AFTER_SECONDS = 5 * 60
+TIMEOUT_SECONDS = 6.0
 # A chance at or above this is "likely".
 LIKELY = 60
 
@@ -182,6 +189,7 @@ class Weather(Skill):
         self.location = location
         self.celsius = ctx.config.weather_units.strip().lower().startswith("c")
         self._cache: tuple[float, Forecast] | None = None
+        self._retry_at = 0.0
 
     # -- units ---------------------------------------------------------------------
 
@@ -202,6 +210,10 @@ class Weather(Skill):
         now = clock.monotonic()
         if self._cache and now - self._cache[0] < FRESH_SECONDS:
             return self._cache[1]
+        if now < self._retry_at:
+            if self._cache and now - self._cache[0] < STALE_OK_SECONDS:
+                return self._cache[1]
+            raise WeatherUnavailable("Open-Meteo failed a moment ago; trying again in a few minutes")
         lat, lon = self.location
         params = {
             "latitude": f"{lat:.4f}", "longitude": f"{lon:.4f}",
@@ -214,17 +226,19 @@ class Weather(Skill):
             "forecast_days": 3,
         }
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
                 response = await client.get(f"{self.ctx.config.weather_api_base.rstrip('/')}/forecast", params=params)
             if response.status_code != 200:
                 raise WeatherUnavailable(f"Open-Meteo answered HTTP {response.status_code}")
             fresh = parse_forecast(response.json(), self.ctx.config.timezone)
         except (httpx.HTTPError, ValueError, WeatherUnavailable) as exc:
+            self._retry_at = now + RETRY_AFTER_SECONDS
             if self._cache and now - self._cache[0] < STALE_OK_SECONDS:
                 log.warning("weather fetch failed, using the last forecast: %s", exc)
                 return self._cache[1]
             raise WeatherUnavailable(str(exc)) from exc
         self._cache = (now, fresh)
+        self._retry_at = 0.0
         return fresh
 
     # -- words -------------------------------------------------------------------------

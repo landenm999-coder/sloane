@@ -96,6 +96,8 @@ async def integration() -> None:
         check("follow up with a client", (await reg.route("follow up with parker dental on monday")).speech,
               "Follow up with Parker Dental Monday.")
         check("follow up with someone else: the agent's", await reg.route("follow up with Keegan friday"), None)
+        check("a first name that starts a client's name is not that client",
+              await reg.route("follow up with Pea tomorrow"), None)
 
         now["at"] += timedelta(days=2)  # Saturday: Bella's follow-up (Friday) is overdue
         check("overdue shows as overdue", (await cmd("bella")).speech,
@@ -110,6 +112,10 @@ async def integration() -> None:
         check("panel", (await clients.panel())["lines"], ["Lead: Parker Dental"])
         now["at"] = datetime(2026, 9, 28, 15, 0, tzinfo=DEN)
         check("no nudge in the afternoon", await clients.nudges(), [])
+        for i in range(8):
+            await cmd(f"add Extra {i} follow up in {i + 3} days")
+        lines = await clients.facts()
+        check("the overflow line says only what is true", lines[-1], "- CLIENT 1 more open, not listed here (/clients has all)")
         _ = date
 
 

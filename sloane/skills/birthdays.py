@@ -106,7 +106,10 @@ class Birthdays(Skill):
 
     async def match(self, text: str) -> Answer | None:
         if found := _SET.match(text):
-            if dates.find(found["when"], self.ctx.today()) is None:
+            when = dates.find(found["when"], self.ctx.today())
+            # "...is tomorrow, what should I get him?" is a question with a date
+            # in it, not a birthday to save: it must be the date and nothing else.
+            if when is None or dates.remove(found["when"], when).strip(" ,.!?"):
                 return None
             return await self.remember_birthday(found["name"], found["when"])
         if found := _ASK.match(text):

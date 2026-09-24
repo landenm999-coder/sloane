@@ -36,6 +36,7 @@ def at(hour: int, minute: int = 0, day: date = THU) -> datetime:
 
 check("durations", [parse_duration(x) for x in ["2h", "90m", "1.5 hours", "1h 30m", "45", "soon", "0"]],
       [120, 90, 90, 90, 45, None, None])
+check("a word before a duration is not a duration", parse_duration("essay 90m"), None)
 check("guesses from the title", [guess_minutes(t) for t in ["Unit 3 Test", "Final essay draft", "Lab 4 writeup",
                                                               "Read chapter 5", "Worksheet 2.3", "Something"]],
       [60, 90, 60, 40, 30, 30])
@@ -100,6 +101,10 @@ async def integration() -> None:
 
         check("an estimate", (await reg.command("estimate", "lab 4 writeup 1h 30m")).speech,
               "Got it: Lab 4 writeup takes about 1h 30m.")
+        await assignment("a6", "Lab 5 prep", at(8, 0, THU + timedelta(days=3)))
+        check("the last word of the name is kept", (await reg.command("estimate", "lab 5 prep 45m")).speech,
+              "Got it: Lab 5 prep takes about 45m.")
+        await store._exec("delete from assignments where external_id = 'a6'")
         check("an ambiguous estimate", (await reg.command("estimate", "physics 20m")).speech, "5 match; say a bit more.")
         check("a bad duration", (await reg.command("estimate", "lab 4 soon")).speech, "How long? Try 45m, 2h or 1h 30m.")
         facts = await planner.facts()

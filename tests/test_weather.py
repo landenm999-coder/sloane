@@ -149,6 +149,13 @@ async def main() -> None:
         FAILURES.append("a forecast over three hours old must not be used")
     check("the command says it can't", (await reg.command("weather", "")).speech,
           "I can't reach the weather right now.")
+    tried = len(Stub.calls)
+    for _ in range(3):
+        try:
+            await skill.facts()
+        except WeatherUnavailable:
+            pass
+    check("after a failure it waits before asking again, so replies don't", len(Stub.calls), tried)
     lines, notes = await reg.facts()
     check("and FACTS gets a note, not a stale line", (lines, notes), ([], ["weather could not be read this turn"]))
 

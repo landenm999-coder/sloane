@@ -51,6 +51,11 @@ ASK = [
     ("mitosis", "mitochondria"),
     ("", "anything"),
     ("the answer is a long ramble that happens to include cell somewhere in it", "cell"),
+    ("type 1 diabetes", "type 2 diabetes"),
+    ("photosystem i", "photosystem II"),
+    ("not mitochondria", "mitochondria"),
+    ("it isn't the mitochondria", "mitochondria"),
+    ("world war 1", "World War II"),
 ]
 for said, back in ASK:
     check(f"he judges: {said!r} for {back!r}", grade(said, back), None)

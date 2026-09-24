@@ -37,7 +37,7 @@ _GUESSES: tuple[tuple[re.Pattern, int], ...] = (
     (re.compile(r"\b(?:worksheet|homework|hw|practice|problems|questions|review)\b", re.I), 30),
 )
 _DURATION = re.compile(
-    r"(?:(?P<h>\d+(?:\.\d+)?)\s*(?:h|hr|hrs|hour|hours))?\s*(?:(?P<m>\d+)\s*(?:m|min|mins|minute|minutes))?\s*$",
+    r"\s*(?:(?P<h>\d+(?:\.\d+)?)\s*(?:h|hr|hrs|hour|hours))?\s*(?:(?P<m>\d+)\s*(?:m|min|mins|minute|minutes))?\s*",
     re.I,
 )
 _ASK = re.compile(
@@ -60,7 +60,9 @@ def parse_duration(text: str) -> int | None:
     text = text.strip().lower()
     if text.isdigit():
         return int(text) if 0 < int(text) <= 1440 else None
-    found = _DURATION.search(text)
+    # The whole of it, or "writeup 2h" would read as a duration and eat a word
+    # of the assignment's name.
+    found = _DURATION.fullmatch(text)
     if not found or not (found["h"] or found["m"]):
         return None
     minutes = round(float(found["h"] or 0) * 60) + int(found["m"] or 0)

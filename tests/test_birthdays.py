@@ -63,6 +63,9 @@ async def integration() -> None:
               "Keegan Hart's birthday is October 1, in 7 days.")
         check("ask about someone unknown: the agent's", await reg.route("when's Zed's birthday"), None)
         check("not a birthday sentence", await reg.route("Maya's birthday is going to be fun"), None)
+        check("a question after the date is the agent's",
+              await reg.route("Keegan's birthday is tomorrow, what should I get him?"), None)
+        check("and nothing was saved", (await store._one("select birth_month from people where id = %s", (keegan,)))["birth_month"], 10)
         check("list", await cmd(), "Next up: Keegan Hart, in 7 days on Thu Oct 1.")
         check("FACTS: only the next two weeks", await skill.facts(), ["- BIRTHDAY Keegan Hart: Thu Oct 1 (in 7 days)"])
         check("a week out", [n.text for n in await skill.nudges()],

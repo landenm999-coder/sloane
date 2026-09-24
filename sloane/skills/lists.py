@@ -51,7 +51,12 @@ _ALL = re.compile(
     + _END,
     re.I,
 )
-_SPLIT = re.compile(r"\s*(?:,\s*and\s+|,|\s+and\s+|\s*&\s*|\s+\+\s+|;)\s*", re.I)
+_SPLIT = re.compile(r"\s*(?:,|;|\s+&\s+|\s+\+\s+)\s*", re.I)
+_AND = re.compile(r"\s+and\s+", re.I)
+# Things that are one item with "and" in the name.
+_ONE_THING = ("mac and cheese", "salt and pepper", "peanut butter and jelly", "chips and salsa",
+              "rice and beans", "bread and butter", "fish and chips", "chips and queso",
+              "cookies and cream", "sweet and sour", "half and half", "shampoo and conditioner")
 
 
 def list_name(raw: str) -> str:
@@ -64,9 +69,20 @@ def list_name(raw: str) -> str:
 
 
 def split_items(raw: str) -> list[str]:
-    """'milk, eggs, and bread' -> ['milk', 'eggs', 'bread']."""
+    """'milk, eggs, and bread' -> ['milk', 'eggs', 'bread']; 'mac and cheese' stays one."""
+    text = raw.strip()
+    kept: dict[str, str] = {}
+    for i, phrase in enumerate(_ONE_THING):
+        text, n = re.subn(rf"\b{re.escape(phrase)}\b", f"\x00{i}\x00", text, flags=re.I)
+        if n:
+            kept[f"\x00{i}\x00"] = phrase
+    parts = []
+    for chunk in _SPLIT.split(text):
+        parts += _AND.split(re.sub(r"^and\s+", "", chunk.strip(), flags=re.I))
     items = []
-    for part in _SPLIT.split(raw.strip()):
+    for part in parts:
+        for token, phrase in kept.items():
+            part = part.replace(token, phrase)
         part = re.sub(r"^(?:some|a|an)\s+", "", part.strip(" .!?\"'"), flags=re.I)
         if part:
             items.append(safe_field(part, limit=MAX_ITEM))

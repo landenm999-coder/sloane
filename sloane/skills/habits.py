@@ -94,7 +94,7 @@ class Habits(Skill):
         today = self.ctx.today()
         on = today
         found = dates.find(raw, today, future=False)
-        if found is not None and (today - found.day).days <= 7:
+        if found is not None and 0 <= (today - found.day).days <= 7:
             on, raw = found.day, dates.remove(raw, found)
         elif found is not None:
             return Answer("I can only mark habits for the last week.")

@@ -19,6 +19,7 @@ from collections.abc import Awaitable, Sequence
 from datetime import date, datetime
 from typing import Any, TypeVar
 
+from psycopg.errors import ForeignKeyViolation
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
@@ -1331,12 +1332,26 @@ class Store:
             names = ", ".join(f'"{c}"' for c in cols)
             marks = ", ".join(["%s"] * len(cols))
             # Identifiers are checked against information_schema above.
-            done = await self._one(
-                f"insert into {table} ({names}) values ({marks}) "  # noqa: S608
-                "on conflict do nothing returning 1 as ok",
-                [row[c] for c in cols],
-            )
+            try:
+                done = await self._one(
+                    f"insert into {table} ({names}) values ({marks}) "  # noqa: S608
+                    "on conflict do nothing returning 1 as ok",
+                    [row[c] for c in cols],
+                )
+            except ForeignKeyViolation:
+                # Its parent wasn't restored (a newer row by the same name won):
+                # skip this one rather than stop every table after it.
+                done = None
             inserted += 1 if done else 0
+        # A restored serial id must move its sequence on, or the next insert
+        # hands out an id that was just restored and fails.
+        serial = (await self._one("select pg_get_serial_sequence(%s, 'id') as seq", (table,))
+                  if "id" in real else None)
+        if serial and serial["seq"]:
+            await self._exec(
+                f"select setval(%s, greatest((select coalesce(max(id), 0) from {table}), 1))",  # noqa: S608
+                (serial["seq"],),
+            )
         return inserted
 
     async def export(self) -> dict[str, list[Row]]:

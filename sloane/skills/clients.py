@@ -74,12 +74,15 @@ def _words(text: str) -> list[str]:
     return re.findall(r"\w+", re.sub(r"['\u2019]s\b|['\u2019]", "", text.lower()))
 
 
-def _starts(name: str, prefix: list[str]) -> bool:
-    """Every word he typed matches the name's words in order; the last may be cut short."""
+def _starts(name: str, prefix: list[str], *, partial: bool = True) -> bool:
+    """Every word he typed matches the name's words in order; with `partial`,
+    the last may be cut short ("/client bel" for Bella's Bakery)."""
     words = _words(name)
     if not prefix or len(prefix) > len(words):
         return False
-    return words[: len(prefix) - 1] == prefix[:-1] and words[len(prefix) - 1].startswith(prefix[-1])
+    last = words[len(prefix) - 1]
+    return words[: len(prefix) - 1] == prefix[:-1] and (
+        last.startswith(prefix[-1]) if partial else last == prefix[-1])
 
 
 class Clients(Skill):
@@ -92,8 +95,12 @@ class Clients(Skill):
 
     # -- finding one ---------------------------------------------------------------
 
-    async def _resolve(self, text: str) -> tuple[dict | None, str, list[dict]]:
-        """(client, the rest of the words, the numbered list). Number or name prefix."""
+    async def _resolve(self, text: str, *, partial: bool = True) -> tuple[dict | None, str, list[dict]]:
+        """(client, the rest of the words, the numbered list). Number or name prefix.
+
+        A slash command may cut the last word short; a plain sentence may not,
+        or "follow up with Pete" would land on Peterson Plumbing.
+        """
         rows = await self.ctx.store.open_clients()
         closed = [r for r in await self.ctx.store.all_clients() if r["stage"] not in OPEN]
         text = text.strip()
@@ -106,7 +113,7 @@ class Clients(Skill):
             prefix = _words(" ".join(words[:k]))
             if not prefix:
                 continue
-            hits = [r for r in rows + closed if _starts(r["name"], prefix)]
+            hits = [r for r in rows + closed if _starts(r["name"], prefix, partial=partial)]
             if len(hits) == 1:
                 return hits[0], " ".join(words[k:]), rows
             if len(hits) > 1:
@@ -250,7 +257,7 @@ class Clients(Skill):
         when = dates.find(rest, today)
         if when is None:
             return None
-        client, leftover, _ = await self._resolve(dates.remove(rest, when))
+        client, leftover, _ = await self._resolve(dates.remove(rest, when), partial=False)
         if client is None:
             return None  # not a client of his: the agent's (or a promise)
         return await self.act(client, f"follow up {when.day.isoformat()} {leftover}".strip())
@@ -268,7 +275,7 @@ class Clients(Skill):
             lines.append(f"- CLIENT {safe_field(r['name'], limit=MAX_NAME)}: "
                          f"{safe_field(self._summary(r, today), limit=240)}")
         if len(rows) > FACTS_CLIENTS:
-            lines.append(f"- CLIENT {len(rows) - FACTS_CLIENTS} more, no follow-up set")
+            lines.append(f"- CLIENT {len(rows) - FACTS_CLIENTS} more open, not listed here (/clients has all)")
         return lines
 
     async def panel(self) -> dict | None:

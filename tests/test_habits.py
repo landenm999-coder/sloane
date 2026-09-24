@@ -69,6 +69,7 @@ async def integration() -> None:
         # Build a three-day reading streak going into today.
         check("backfill yesterday", await cmd("did", "reading yesterday"), "Marked reading for yesterday. Streak: 1 day.")
         check("a date too old", await cmd("did", "reading sept 1"), "I can only mark habits for the last week.")
+        check("never a day that hasn't happened", await cmd("did", "reading tomorrow"), "I can only mark habits for the last week.")
         await cmd("did", "reading tuesday")
         facts = await habits.facts()
         check("FACTS", facts, [

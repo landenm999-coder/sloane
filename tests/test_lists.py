@@ -32,6 +32,8 @@ check("list names", [list_name(n) for n in ["My Groceries", "grocery", "to-do", 
 check("items split on commas and 'and'", split_items("milk, eggs, and some bread"), ["milk", "eggs", "bread"])
 check("items split on '&' and '+'", split_items("chips & salsa + limes"), ["chips", "salsa", "limes"])
 check("one item stays whole", split_items("AA batteries."), ["AA batteries"])
+check("& inside a word, and a dish with 'and' in it", split_items("m&ms and mac and cheese"), ["m&ms", "mac and cheese"])
+check("commas then a final and", split_items("chips, salt and pepper, and limes"), ["chips", "salt and pepper", "limes"])
 
 ADD = _ADD.match("Add milk, eggs and bread to my grocery list.")
 check("add: items", ADD["items"], "milk, eggs and bread")

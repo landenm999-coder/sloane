@@ -67,13 +67,29 @@ def deck_name(raw: str) -> str:
 
 def normalize(text: str) -> str:
     text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
-    text = re.sub(r"[^\w\s.]", " ", text.lower())
+    text = re.sub(r"['\u2019]", "", text.lower())  # "isn't" -> "isnt", one word
+    text = re.sub(r"[^\w\s.]", " ", text)
     text = re.sub(r"(?<!\d)\.|\.(?!\d)", " ", text)  # keep 3.14, drop sentence dots
     return " ".join(w for w in text.split() if w not in {"a", "an", "the"})
 
 
+_ROMAN = {"i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x", "xi", "xii"}
+_NEGATIONS = {"not", "no", "never", "isnt", "isn", "wasnt", "wasn", "arent", "aren", "neither", "nor",
+              "dont", "don", "doesnt", "doesn", "cant", "can", "t"}
+
+
+def _numerals(words: list[str]) -> list[str]:
+    """Numbers and Roman numerals, the words a typo rule must never wave through."""
+    return sorted(w for w in words if w.replace(".", "").isdigit() or w in _ROMAN)
+
+
 def grade(answer: str, back: str) -> bool | None:
-    """True when the answer is plainly right; None when he should judge it."""
+    """True when the answer is plainly right; None when he should judge it.
+
+    Only "plainly": "type 1" for "type 2", "photosystem I" for "photosystem II"
+    and "not mitochondria" for "mitochondria" all go to him, because a wrong
+    answer marked right is a card he won't see again for days.
+    """
     said = normalize(answer)
     if not said:
         return None
@@ -81,9 +97,13 @@ def grade(answer: str, back: str) -> bool | None:
     for want in dict.fromkeys(o for o in options if o):
         if said == want or said.replace(" ", "") == want.replace(" ", ""):
             return True
+        want_words, said_words = want.split(), said.split()
+        if _numerals(said_words) != _numerals(want_words):
+            continue
+        if (set(said_words) - set(want_words)) & _NEGATIONS:
+            continue
         if len(want) >= 5 and SequenceMatcher(None, said, want).ratio() >= 0.88:
             return True
-        want_words, said_words = want.split(), said.split()
         if set(want_words) <= set(said_words) and len(said_words) <= 2 * len(want_words) + 3:
             return True
     return None
