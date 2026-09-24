@@ -2,9 +2,12 @@
 
 **Read this first if you are a new Claude Code session picking up Sloane.**
 This file records what exists, what's verified, what's in flight and what's left.
-It's kept up to date at the end of every work session. Last updated: 2026-09-23.
+It's kept up to date at the end of every work session. Last updated: 2026-09-24.
 
 - Repo: `github.com/landenm999-coder/sloane`, branch `main` (commit straight to main; CI runs on push).
+- **The skills build-out (2026-09-24) is on branch `claude/cloud-credits-build-nh2vtj`, draft PR
+  landenm999-coder/sloane#12, not yet on main.** Everything under "Skills build-out" below lives there
+  until that PR is merged.
 - Separate from **Capture** (`landenm999-coder/capture`), a voice-capture PWA that will later feed Sloane
   through an API. Keep them in separate repos. The old `claude/sloane-personal-assistant-nodd15` branch on
   capture is stale and can be deleted by Landen.
@@ -40,6 +43,22 @@ fixed with regression tests. The third found nothing high or medium.
 The post-v1 work was reviewed twice: by hand (`c7c88a7`), then by an adversarial review agent (`217d9ae`, no high findings; the medium and every low were fixed with tests, including the installer running correctly under `curl | bash`). The real-model eval grew to 30 checks and passes 30/30.
 Test suites: 21/21.
 
+**Skills build-out (PR #12).** The skills registry got the things it was designed for:
+- a `heartbeat` job: every quarter hour, 7 AM–10 PM, no model. It says each skill nudge once.
+- ten skills: lists, countdowns, weather, flashcards and quizzes, habits, clients, a study plan, focus,
+  birthdays, money
+- the `/tv` dashboard
+- `sloane/dates.py`
+- Capture running skill rules
+
+Two real bugs were found and fixed along the way, each with a regression test:
+- Skill FACTS lines rendered before DUE lines, so enough of them pushed every due date out of the budget.
+  They now come last, and the budget is 2,000.
+- A skill table held a foreign key into `reminders`, which broke the core's truncates. Skill tables may no
+  longer reference core tables, and `test_invariants` enforces it.
+
+Suites: 36/36. Real-model eval: 43/43 (five new questions answered from skill FACTS).
+
 **She has never run against the real services.** This sandbox can't reach Telegram, Groq, Canvas, Google or
 Supabase. Everything external is tested against local stubs, and the real-model eval (via `claude -p`) scores
 30/30. The next real milestone is Landen deploying it.
@@ -72,9 +91,15 @@ Supabase. Everything external is tested against local stubs, and the real-model 
 | Ops | Dockerfile (arm64), compose (loopback port, `claude-auth` + `models` volumes), systemd unit, `doctor.py` (checks every credential), `seed_state.py`, `seed_courses.py`, `gmail_auth.py` (stdlib PKCE consent → writes `.env`), `eval.py` (golden questions, real model) | root, `scripts/` |
 | Agent setup | `CLAUDE.md` (invariants + how to work) and the `.claude/hooks/session-start.sh` web hook (creates `.venv`, starts pgvector Postgres, exports `DATABASE_URL`) | root, `.claude/` |
 | CI | `test.yml` (py3.12 + pgvector, migrations applied twice), `image.yml` (linux/arm64 build + smoke), Dependabot | `.github/` |
+| Heartbeat (PR #12) | `heartbeat` job `5,20,35,50 7-22 * * *`: `skills.nudges()` → new keys claimed in `nudges_said` in one statement → one message; failed send unclaims; quiet hours hold; keys unoffered 30 days pruned. No model | `jobs/briefs.py` `heartbeat`, `sql/014`, `tests/test_heartbeat.py` |
+| Dates (PR #12) | `dates.find(text, today, future=)` → `Found(day, span)`: ISO, 5/22, may 22, 22 may, the 30th, in N days/weeks/months, today/tomorrow/yesterday, (next) weekday; "sat/sun/wed" need a qualifier; impossible dates refused; `remove()` strips the date and its connecting words | `sloane/dates.py`, `tests/test_dates.py` |
+| Skills (PR #12) | lists (015), countdowns (016), weather (Open-Meteo, `WEATHER_LOCATION`), cards + `/quiz` sessions (017, Leitner, rule marking, `/cards make` is the one model call), habits (018), clients (019), plan (020 `estimate_minutes`, `PLAN_*`), focus (021, end = a reminder row), birthdays (022, on `people`), money (023 + `skill_settings`, `PAY_RATE`) | `sloane/skills/*.py`, one `tests/test_<skill>.py` each |
+| TV (PR #12) | `GET /tv`: self-contained HTML (CSP `default-src 'none'`), everything escaped, refresh 60 s, clock ticks; SQL + `skills.panels()`; a failed read is a banner. `GET /panels` JSON | `sloane/dashboard.py`, `tests/test_dashboard.py` |
+| Capture + skills (PR #12) | a capture that is exactly a skill phrase is acted on (`action` in the 201 body); `Registry.route(sessions=False)` so a capture is never a quiz answer | `capture.py`, `CAPTURE_API.md` |
 
 Telegram commands (all listed by `/help`): `/today /week /grades /done /status /brief /jobs /sync /inbox /remind /reminders /unremind /promise /promises /kept /trust /revoke /cancel /usage /state /help`, plus plain "remind me …".
-HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /state /facts /jobs POST /sync POST /jobs/{name}/run`, plus `POST /capture` (token).
+Skill commands (PR #12): `/list /countdown /weather /card /cards /quiz /habit /habits /did /client /clients /plan /estimate /focus /birthday /birthdays /spent /budget /end`, plus plain phrases (each skill's docstring lists them).
+HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /state /facts /jobs /tv /panels POST /sync POST /jobs/{name}/run`, plus `POST /capture` (token).
 
 ## Invariants (a violation is a bug even if tests pass)
 
@@ -91,7 +116,9 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
 
 ## In flight
 
-Nothing half-done. (Update this section before stopping if something is.)
+- **PR landenm999-coder/sloane#12 (draft)**: the skills build-out. It's complete and green (36/36 suites,
+  eval 43/43), waiting on review and merge to main. After merging, the box needs `git pull`, a rebuild and
+  the migrations (`sql/014`–`023`, all idempotent). `install.sh` does all of that.
 
 ## Backlog (ideas, in priority order)
 
@@ -101,6 +128,11 @@ Nothing half-done. (Update this section before stopping if something is.)
 2. Infinite Campus (grades), deliberately out of v1. Needs district credentials, and repeated automated logins can
    lock the account.
 3. P5 phone calls, beyond v1.
+4. More skills, if he wants them: a college-applications tracker (deadlines with checklists, heads-up
+   nudges; it's application season), a stock watchlist (quotes only, since trading is a hard line), and a
+   DECA roleplay practice session (the model plays the judge). Each is one module plus a migration.
+5. The eval shows her mentioning the planted calendar injection in almost every answer. That's correct but
+   noisy. Consider flagging an ingested injection once (a watchdog-style alert) rather than on every turn.
 
 ## Only Landen can do (the whole list; see DEPLOY.md)
 

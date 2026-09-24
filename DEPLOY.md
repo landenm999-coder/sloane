@@ -271,6 +271,29 @@ checks a password, and it stays off until you set one.
 
    Only `/capture` answers cross-origin; `/facts`, `/state` and the rest never do.
 
+## 7e. Optional: the TV dashboard (2 minutes)
+
+With `tailscale serve` from 7d running, open `https://<box>.<tailnet>.ts.net/tv`
+on any device signed in to your tailnet: an old tablet on the wall, a laptop, a
+TV with the Tailscale app. It shows the clock, the weather, today and tomorrow,
+overdue and due-soon work, reminders, promises, grades and a card for each
+skill, and refreshes itself every minute. It never loads anything from the
+internet and needs no token (it is as private as `/facts`: your tailnet only).
+Put it in full screen and leave it.
+
+## 7f. Skill settings (optional)
+
+The skills need nothing to start. Three settings in `.env` make them better:
+
+```bash
+WEATHER_LOCATION=39.52,-104.76   # already set for Parker; blank turns weather off
+PAY_RATE=15                      # your hourly pay, for "about $240 earned this week"
+PLAN_BEDTIME=22:30               # when /plan stops filling your evening
+```
+
+`SKILLS_DISABLED=money,habits` switches skills off by name. `doctor.py` lists
+which skills loaded and checks the weather reaches Open-Meteo.
+
 ## 8. Run her
 
 ```bash
@@ -309,10 +332,17 @@ ran and whether it worked. `/sync` pulls Canvas, the calendar and shifts now.
 `/usage` shows model calls in the last day. `/state` shows her durable facts.
 `/inbox` triages new email now.
 
+The skills (`/help` lists them all): "add milk to my grocery list", `/countdown
+graduation may 22`, "is it going to rain?", `/card bio: q :: a` then `/quiz`,
+`/habit add reading` then "did reading", `/client add Bella's Bakery $1200`,
+`/plan` for tonight, `/focus 25 essay`, `/birthday Keegan mar 3`, "spent 12 on
+lunch". `/end` stops a quiz.
+
 ---
 
 **Backups.** Every night at 12:30 she writes what only you could recreate
-(state, promises, people, courses, trust, reminders) to
+(state, promises, people, courses, trust, reminders, and every skill's data:
+lists, countdowns, flashcards, habits, clients, focus, spending) to
 `/var/lib/sloane/models/backups/sloane-YYYY-MM-DD.json` inside the `models`
 volume, keeping 14. Copy one off the box with
 `docker cp sloane:/var/lib/sloane/models/backups ./sloane-backups`.
@@ -339,6 +369,8 @@ it's working.
 | `gmail` FAIL: access revoked or expired | The OAuth app is still in **Testing** (7-day tokens), or you removed its access. Publish it (7c step 4) and rerun `scripts/gmail_auth.py`. |
 | No email drafts, triage works | Drafts only go to people who can answer (not `noreply@`), at most three a run, and not once today's scheduled budget is spent. `/jobs` shows the inbox line. |
 | Container restarting | `journalctl -u sloane -n 100`. Usually a malformed `.env` line. |
+| No weather anywhere | `WEATHER_LOCATION` blank or not `lat,lon`, or Open-Meteo unreachable. `doctor.py` says which. |
+| A skill command answers "hit an error" | That skill failed on its own; the rest of her is fine. The log has the traceback; `SKILLS_DISABLED=<name>` turns it off until it's fixed. |
 
 **Nothing here needs an inbound port.** If you ever find yourself opening one to
 fix something, stop — the answer is somewhere else.
@@ -348,7 +380,8 @@ fix something, stop — the answer is somewhere else.
 ## What starts on its own
 
 The five daily briefs start the moment she's running — the first you'll hear
-is the 6:35 AM brief. `TELEGRAM_CHAT_ID` must be set or the briefs run and
+is the 6:35 AM brief. The heartbeat starts too, but it only speaks when a
+skill has something new (a countdown a week out, rain before your shift). `TELEGRAM_CHAT_ID` must be set or the briefs run and
 record but have nobody to send to; `/jobs` will show that plainly. The inbox
 job runs only once Gmail is set up (7c); until then `/jobs` lists it as
 deferred with the reason `gmail is not configured`.

@@ -4,7 +4,10 @@ Always-on personal assistant for Landen. Reached by Telegram text and voice
 notes. She runs the day: what's due, what shift, what slipped, what's next.
 
 **v1 is built: P0 (the spine), P1 (memory + school), P2 (rhythm), P3 (voice)
-and P4 (agency, including Gmail).** What's left is deployment, which only
+and P4 (agency, including Gmail).** On top of it sit ten **skills** (lists,
+countdowns, weather, flashcards, habits, clients, a study plan, focus,
+birthdays, money), a **heartbeat** that lets them speak up once when it
+matters, and a **TV dashboard**. What's left is deployment, which only
 Landen can do; see [DEPLOY.md](DEPLOY.md) and [ROADMAP.md](ROADMAP.md).
 
 Total running cost: **$0/mo**, every layer on a free tier.
@@ -20,7 +23,7 @@ Total running cost: **$0/mo**, every layer on a free tier.
 
 | | |
 |---|---|
-| Schema | 18 tables, idempotent, `vector(384)` + HNSW cosine index |
+| Schema | 31 tables, idempotent, `vector(384)` + HNSW cosine index |
 | Memory | all four tiers, with per-tier token budgets |
 | Embeddings | `bge-small-en-v1.5`, 384-dim, local, cached on a volume |
 | Retrieval | hybrid: vector + full-text fused with RRF, then aged |
@@ -28,7 +31,7 @@ Total running cost: **$0/mo**, every layer on a free tier.
 | Providers | `claude_code`, `groq`, `anthropic` behind one `Provider` base |
 | Contract | `Reply(speech, detail)` parsed from 5 model-output shapes |
 | Hard lines | 6 pairs, enforced in code before execution |
-| Interface | Telegram long polling: text, voice, buttons; `/today` `/week` `/grades` `/done` `/status` `/brief` `/jobs` `/sync` `/inbox` `/remind` `/reminders` `/promise` `/promises` `/kept` `/trust` `/revoke` `/usage` `/state` |
+| Interface | Telegram long polling: text, voice, buttons; `/today` `/week` `/grades` `/done` `/status` `/brief` `/jobs` `/sync` `/inbox` `/remind` `/reminders` `/promise` `/promises` `/kept` `/trust` `/revoke` `/usage` `/state`, plus the skills' `/list` `/countdown` `/weather` `/card(s)` `/quiz` `/habit(s)` `/did` `/client(s)` `/plan` `/estimate` `/focus` `/birthday(s)` `/spent` `/budget` `/end` |
 | School | Canvas assignments + secret `.ics` calendar, both read-only |
 | Shifts | generated from the fixed 3–7 PM Mon–Fri rule, DST-correct |
 | Sync | `/sync` on Telegram, `POST /sync` over HTTP, `entity_sync` job every 4h |
@@ -49,9 +52,51 @@ Total running cost: **$0/mo**, every layer on a free tier.
 | Voice briefs | `VOICE_BRIEFS=morning_brief` sends that brief as a voice note (text if voice fails) |
 | Status | `/status`: open problems, last sync, provider health, last brief, Gmail — from her own bookkeeping, no model |
 | Gmail | triage every 3h in one batched call; replies drafted in his voice, sent only on Approve |
-| HTTP | `/health`, `/usage`, `/state`, `/facts`, `/jobs`, `POST /sync`, `POST /jobs/{name}/run`, `POST /capture` (token) |
+| Skills | ten plug-in skills (below): lists, countdowns, weather, flashcards + quizzes, habits, clients, a study plan, focus, birthdays, money. Each adds its own commands, plain-English rules, FACTS lines, a TV card and nudges, without touching the core |
+| Heartbeat | every quarter hour, 7 AM–10 PM, no model: what the skills think is worth saying now (rain before your shift, a streak about to break, a follow-up due), each said once |
+| TV dashboard | `GET /tv`: the day at a glance for a screen on the wall — clock, weather, today, overdue, due soon, reminders, grades, and a card per skill. No model, no outside requests, refreshes itself |
+| HTTP | `/health`, `/usage`, `/state`, `/facts`, `/jobs`, `/tv`, `/panels`, `POST /sync`, `POST /jobs/{name}/run`, `POST /capture` (token) |
 
 Not built: Infinite Campus (deferred — see below).
+
+### Skills
+
+A skill is one module in `sloane/skills/`, discovered at startup; the contract
+is the docstring of `sloane/skills/__init__.py`. Every one of these works with
+no model and no setup (weather needs a location), and each can be switched off
+with `SKILLS_DISABLED`.
+
+| Skill | Say or type | What it does |
+|---|---|---|
+| Lists | "add milk and eggs to my grocery list", "cross milk off", "what's on my grocery list", `/list` | any list you name; items are checked off, never deleted |
+| Countdowns | `/countdown graduation may 22`, "how many days until graduation?" | a named day; heads-up a week out, the day before, the day of |
+| Weather | "what's the weather?", "is it going to rain?", "do I need a jacket?", `/weather` | Open-Meteo (free, no key); rain before your shift and snow tomorrow morning as nudges |
+| Flashcards | `/card bio: q :: a`, `/cards add deca`, `/cards make bio <notes>`, `/quiz`, `/quiz bio all` | Leitner spaced repetition; quizzes are sessions, marked by rule and never marked wrong without asking you; `/cards make` writes cards from your notes (the one model call) |
+| Habits | `/habit add reading`, "did reading", `/habits` | streaks counted in code; one evening nudge for a streak about to break |
+| Clients | `/client add Bella's Bakery $1200 follow up friday: send mockups`, `/clients`, `/client bella signed` | the website business pipeline: stages, values, follow-ups (a morning nudge), notes |
+| Study plan | `/plan`, `/plan tomorrow`, "plan my night", `/estimate lab 2h` | tonight's free time (after school, minus the shift and commute and calendar) filled with what's due soonest; says what won't fit |
+| Focus | `/focus 25 essay`, `/focus`, `/focus stop` | a timer whose end is a real reminder; the day's focus time |
+| Birthdays | `/birthday Keegan mar 3`, "Keegan's birthday is March 3" | on the same people your promises point at; a week out, the evening before, the morning of |
+| Money | "spent 12 on lunch", `/spent`, `/budget 100` | spending by category against a weekly budget; with `PAY_RATE`, an estimate of what this week's shifts earned. Tracking only |
+
+Everything a skill puts in FACTS is a row from SQL or a number from an API,
+never third-party text, and skill lines come **after** the school rows, so a
+long grocery list can never push a due date out of the budget. Spoken into
+Capture, the same phrases do the same thing.
+
+### Heartbeat and the TV
+
+The `heartbeat` job (`:05`, `:20`, `:35`, `:50` from 7 AM to 10 PM) asks every
+skill for nudges and says each one once, as one message if there are several.
+The key is recorded in `nudges_said`, so a skill can offer the same nudge every
+tick until its condition clears; a send that fails is retried next tick; quiet
+hours hold everything.
+
+`GET /tv` is a single self-contained page (no scripts or fonts from anywhere
+else, `Content-Security-Policy: default-src 'none'`). Open it on anything on
+your tailnet — an old tablet, a TV browser — at `https://<box>.<tailnet>.ts.net/tv`.
+Every value on it is escaped: assignment titles are ingested text. `GET /panels`
+is the same skill data as JSON.
 
 ### Agency (P4)
 
@@ -149,6 +194,7 @@ on the Groq or API lane, not on the CLI lane.
 | 22:00 daily | `wrap` — what slipped, the first thing tomorrow | yes |
 | 00:15 daily | `reflection` — rebuilds tier 2, prunes stale events | **never** |
 | every 4h | `entity_sync` — Canvas, calendar, shifts | never |
+| every 15 min, 7 AM–10 PM | `heartbeat` — each skill's nudges, each said once, no model | only when a skill has something new |
 
 The crons live in the `jobs` table as Parker wall-clock and the scheduler runs
 in `TIMEZONE`, so 6:35 stays 6:35 across daylight saving. A brief is the same
@@ -384,6 +430,9 @@ python tests/test_embed.py      # dimension guard, degradation
 python tests/test_matching.py   # course matching, and what it refuses
 python tests/test_conflicts.py  # should-have-caught-this, and must-not-cry-wolf
 python tests/test_voice.py      # real ffmpeg transcode; text always survives
+python tests/test_dates.py      # dates from words, by rules
+python tests/test_weather.py    # the weather skill against a stub Open-Meteo
+python tests/test_dashboard.py  # /tv: every card, everything escaped
 
 # integration — needs a Postgres with pgvector and the schema applied
 DATABASE_URL=... python tests/test_store.py
@@ -392,6 +441,9 @@ DATABASE_URL=... python tests/test_jobs.py     # governor, briefs, scheduler —
 DATABASE_URL=... python tests/test_agency.py   # ledger, decay, edits, hard lines, races
 DATABASE_URL=... python tests/test_mail.py     # stub Gmail: triage, fencing, approve-only sends
 DATABASE_URL=... python tests/test_reminders.py  # parser table, claim-once, quiet hours, bot paths
+DATABASE_URL=... python tests/test_heartbeat.py  # nudges said once, retried, quiet hours
+# and one suite per skill: test_lists, test_countdowns, test_cards, test_habits,
+# test_clients, test_plan, test_focus, test_birthdays, test_money
 
 # or all of it
 python tests/run.py
@@ -438,13 +490,15 @@ sloane/
   router.py      THE UPGRADE LEVER
   agent.py       context assembly to budget, one turn, the hard-line gate
   telegram.py    long-poll bot: text, voice notes, buttons, commands
-  main.py        FastAPI: /health /usage /state /facts /jobs /sync
+  main.py        FastAPI: /health /usage /state /facts /jobs /sync /tv /panels /capture
+  dates.py       "may 22", "the 30th", "next friday" -> a date, by rules
+  dashboard.py   the /tv page: SQL + skill panels, escaped, self-contained
   providers/     claude_code · groq · anthropic_api · tts (groq, piper)
   jobs/
     conflicts.py collisions computed in code, and what they refuse to flag
     governor.py  quiet hours + a budget that defers scheduled work
     watchdog.py  what's broken, told once; what's fixed, told once
-    briefs.py    the five daily jobs, reflection, sync and inbox
+    briefs.py    the five daily jobs, reflection, sync, inbox and the heartbeat
     scheduler.py APScheduler driven by the jobs table, local time
   school/        all read-only
     canvas.py    GET-only Canvas client, Link-header pagination
@@ -461,6 +515,10 @@ sloane/
   mail/
     gmail.py     OAuth refresh + five REST calls; no delete, no SDK
     inbox.py     batched triage, drafts in his voice, reply/draft actions
+  skills/
+    __init__.py  the contract and the registry
+    lists.py countdowns.py weather.py cards.py habits.py clients.py
+    plan.py focus.py birthdays.py money.py
   memory/
     store.py     THE ONLY FILE THAT TALKS SQL
     embed.py     fastembed, 384-dim, local
@@ -477,6 +535,11 @@ sql/
   009_weekly.sql   the Sunday review and the nightly backup jobs, idempotent
   010_grades.sql   course grades on courses; 'grade' change kind, idempotent
   011_done_locally.sql  his own "handed it in" mark, never touched by sync
+  012_snooze_once.sql  a reminder can be snoozed once
+  013_skills.sql   skill sessions (a quiz holds his next messages)
+  014_heartbeat.sql  nudges said once + the heartbeat job
+  015-023          one per skill: lists, countdowns, cards, habits, clients,
+                   estimates, focus, birthdays, money (+ skill_settings)
 scripts/
   doctor.py      validates every credential
   seed_state.py  tier 1 from a markdown file
