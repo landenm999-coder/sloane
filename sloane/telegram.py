@@ -129,14 +129,18 @@ class _Live:
         if self.message_id is not None and now - self.last < STREAM_EDIT_EVERY:
             return
         body = text[: TELEGRAM_LIMIT - len(CURSOR)] + CURSOR
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            if self.message_id is None:
-                sent = await self.bot._call(client, "sendMessage", chat_id=self.chat_id, text=body)
-                self.message_id = sent.get("message_id")
-                self.stop_typing()
-            else:
-                await self.bot._call(client, "editMessageText", chat_id=self.chat_id,
-                                     message_id=self.message_id, text=body)
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                if self.message_id is None:
+                    sent = await self.bot._call(client, "sendMessage", chat_id=self.chat_id, text=body)
+                    self.message_id = sent.get("message_id")
+                    self.stop_typing()
+                else:
+                    await self.bot._call(client, "editMessageText", chat_id=self.chat_id,
+                                         message_id=self.message_id, text=body)
+        except (httpx.HTTPError, RuntimeError) as exc:
+            log.debug("live update skipped: %s", exc)  # the finished reply still arrives
+            return
         self.shown, self.last = text, now
 
     async def finish(self, reply: Reply) -> bool:
@@ -149,15 +153,22 @@ class _Live:
         if detail and detail != reply.speech.strip():
             text = f"{text}\n\n{detail}"
         parts = split_message(text)
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            try:
-                await self.bot._call(client, "editMessageText", chat_id=self.chat_id,
-                                     message_id=self.message_id, text=parts[0])
-            except RuntimeError as exc:
-                if "not modified" not in str(exc):
-                    log.warning("could not finish the live reply: %s", exc)
-            for part in parts[1:]:
-                await self.bot._call(client, "sendMessage", chat_id=self.chat_id, text=part)
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                try:
+                    await self.bot._call(client, "editMessageText", chat_id=self.chat_id,
+                                         message_id=self.message_id, text=parts[0])
+                except RuntimeError as exc:
+                    if "not modified" not in str(exc):
+                        raise
+                for part in parts[1:]:
+                    await self.bot._call(client, "sendMessage", chat_id=self.chat_id, text=part)
+        except (httpx.HTTPError, RuntimeError) as exc:
+            # The half-written message can't be finished: send the whole reply,
+            # rather than leave him with a cursor and no action results.
+            log.warning("could not finish the live reply, sending it whole: %s", exc)
+            await self.bot.send(self.chat_id, reply)
+            return True
         await remember("outbound message", self.bot._store.log_message(
             chat_id=self.chat_id, direction="out", kind="text", body=text[:4000], trusted=not reply.tainted))
         return True

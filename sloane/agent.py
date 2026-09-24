@@ -24,7 +24,7 @@ from sloane.contract import Reply, parse
 from sloane.jobs.conflicts import find as find_conflicts, render as render_conflicts
 from sloane.memory.embed import Embedder, EmbedUnavailable
 from sloane.memory.store import Store, remember
-from sloane.memory.tiers import assemble, usage_sink
+from sloane.memory.tiers import assemble, conversation_that_fits, usage_sink
 from sloane.persona import system_prompt
 from sloane.router import NoProviderAvailable, Router
 from sloane.skills import Registry
@@ -69,7 +69,9 @@ def _stamp(moment: datetime) -> str:
 def _without_current(rows: list, question: str) -> list:
     """The conversation minus the message being answered (it's logged first)."""
     rows = list(rows)
-    if rows and rows[-1].get("direction") == "in" and (rows[-1].get("body") or "").strip() == question.strip():
+    # The log keeps the first 4,000 characters (a long voice note is cut).
+    if rows and rows[-1].get("direction") == "in" and \
+            (rows[-1].get("body") or "").strip() == question.strip()[:4000].strip():
         rows.pop()
     return rows
 
@@ -230,9 +232,12 @@ class Agent:
         tiers, notes = await self._facts(when)
         episodes = await self._recall(question)
         conversation = _without_current(tiers["conversation"], question)
-        if conversation:
-            # What is already in CONVERSATION verbatim needn't come back as RECALL.
-            start = conversation[0]["at"]
+        shown = conversation_that_fits(conversation, self._config.budget_conversation,
+                                       tz=self._config.timezone)
+        if shown:
+            # What CONVERSATION really shows needn't come back as RECALL; what
+            # its budget had to drop still may.
+            start = shown[0]["at"]
             episodes = [e for e in episodes if not (e.get("occurred_at") and e["occurred_at"] >= start)]
 
         # Computed, not inferred. A collision the model happens not to mention

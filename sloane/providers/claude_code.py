@@ -79,9 +79,10 @@ def _unknown_option(stderr: str) -> bool:
     return "unknown option" in low or "unrecognized option" in low or "unknown argument" in low
 
 
-# A warm process older than this is replaced rather than used: an idle
-# process is memory the box could use, and a login may have moved on.
-WARM_MAX_AGE = 20 * 60
+# An idle process is swapped for a fresh one this often, on a timer, so the
+# next turn is warm however long he's been away (and a process never idles
+# on a login that has since moved on).
+WARM_MAX_AGE = 30 * 60
 
 TextSink = Callable[[str], Awaitable[None]]
 
@@ -115,6 +116,7 @@ class ClaudeCodeProvider(Provider):
     _idle: dict[tuple[str, str, str], _Warm] = {}
     _primary: tuple[str, str, str] | None = None
     _spawning: set[asyncio.Task] = set()
+    _filling: set[tuple[str, str, str]] = set()
 
     def __init__(self, settings: Settings) -> None:
         self._cli = settings.claude_cli
@@ -237,24 +239,41 @@ class ClaudeCodeProvider(Provider):
     async def _fill(self, system: str) -> None:
         key = self._key(system)
         warm = ClaudeCodeProvider._idle.get(key)
-        if warm is not None and warm.proc.returncode is None:
-            return
+        if (warm is not None and warm.proc.returncode is None) or key in ClaudeCodeProvider._filling:
+            return  # already warm, or another fill is starting one right now
+        ClaudeCodeProvider._filling.add(key)
         try:
             proc = await self._spawn(system)
         except ProviderError as exc:
             log.warning("could not keep a claude process warm: %s", exc.message)
             return
-        if ClaudeCodeProvider._primary != key:
-            _kill(proc)  # closed (or re-pointed) while it was starting
+        finally:
+            ClaudeCodeProvider._filling.discard(key)
+        current = ClaudeCodeProvider._idle.get(key)
+        if ClaudeCodeProvider._primary != key or (current is not None and current.proc.returncode is None):
+            _kill(proc)  # closed, re-pointed, or someone else's is already waiting
             return
         ClaudeCodeProvider._idle[key] = _Warm(proc, time.monotonic())
+        self._later(self._recycle(system, proc))
 
-    def _refill_later(self, system: str) -> None:
-        if ClaudeCodeProvider._primary != self._key(system):
-            return
-        task = asyncio.get_running_loop().create_task(self._fill(system))
+    async def _recycle(self, system: str, proc: asyncio.subprocess.Process) -> None:
+        """After WARM_MAX_AGE, swap this process for a fresh one if it is still idle."""
+        await asyncio.sleep(WARM_MAX_AGE)
+        key = self._key(system)
+        warm = ClaudeCodeProvider._idle.get(key)
+        if warm is not None and warm.proc is proc:
+            del ClaudeCodeProvider._idle[key]
+            _kill(proc)
+            await self._fill(system)
+
+    def _later(self, coro) -> None:  # noqa: ANN001
+        task = asyncio.get_running_loop().create_task(coro)
         ClaudeCodeProvider._spawning.add(task)
         task.add_done_callback(ClaudeCodeProvider._spawning.discard)
+
+    def _refill_later(self, system: str) -> None:
+        if ClaudeCodeProvider._primary == self._key(system):
+            self._later(self._fill(system))
 
     async def _take(self, system: str) -> tuple[asyncio.subprocess.Process, bool]:
         """(a process for this turn, whether it was already warm)."""
@@ -276,10 +295,21 @@ class ClaudeCodeProvider(Provider):
             await proc.stdin.drain()
             proc.stdin.close()
         except (BrokenPipeError, ConnectionResetError, AssertionError) as exc:
-            _kill(proc)
             if was_warm:  # it died while idle; one fresh try
+                _kill(proc)
                 return await self._streamed(system, prompt, on_text)
-            raise ProviderError(self.name, f"could not send the prompt: {exc}") from exc
+            # A fresh one that exited before reading its input: an old CLI
+            # rejecting a flag says so on stderr, and gets the one-shot call.
+            detail = ""
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=5)
+                if proc.stderr is not None:
+                    detail = (await proc.stderr.read()).decode(errors="replace").strip()
+            except asyncio.TimeoutError:
+                _kill(proc)
+            if _unknown_option(detail):
+                raise _OldCli(detail) from exc
+            raise ProviderError(self.name, f"could not send the prompt: {detail or exc}") from exc
         try:
             return await asyncio.wait_for(self._read(proc, on_text, started), timeout=self._timeout)
         except asyncio.TimeoutError as exc:
@@ -348,6 +378,7 @@ class ClaudeCodeProvider(Provider):
         for task in list(cls._spawning):
             task.cancel()
         cls._spawning.clear()
+        cls._filling.clear()
         for warm in cls._idle.values():
             _kill(warm.proc)
         cls._idle.clear()

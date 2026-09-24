@@ -62,6 +62,13 @@ check("the conversation is the last block before the question",
       prompt.index("CONVERSATION") > prompt.index("LANDEN:") - 400 and "CONVERSATION" in prompt, True)
 
 
+# -- a long voice question is logged cut to 4,000 characters; still recognised ------
+from sloane.agent import _without_current  # noqa: E402
+
+long_question = "tell me about " + "x" * 5000
+check("the cut copy of the question is dropped too",
+      _without_current([msg("out", "hi", 0), msg("in", long_question[:4000], 1)], long_question), [msg("out", "hi", 0)])
+
 # -- the agent reads it, minus the message it is answering ------------------------
 class Store:
     def __init__(self, conversation):
@@ -114,6 +121,21 @@ async def agent_half() -> None:
     recall = prompt.split("RECALL", 1)[1].split("\n\n", 1)[0] if "RECALL" in prompt else ""
     check("recall doesn't repeat the conversation", "Two things: the lab" in recall, False)
     check("but still brings older things", "older thought about labs" in recall, True)
+
+    # A long morning that doesn't fit: recall keeps what CONVERSATION had to drop.
+    morning = [msg("out", "Morning brief: " + "word " * 900, 0), msg("in", "ok", 1), msg("out", "sure", 2)]
+
+    class LongStore(Store):
+        async def search_episodes(self, *a, **k):
+            return [{"occurred_at": T0, "role": "sloane", "text": "the essay is the big one this morning"}]
+
+    tight = isolated(timezone="America/Denver", telegram_chat_id=4242, budget_conversation=60)
+    recorder2 = Recorder()
+    agent2 = Agent(LongStore(morning), tight, router=Router(tight, factory=lambda n, c, b: recorder2),
+                   embedder=NoEmbedder())
+    await agent2.answer("what did you say about the essay?")
+    check("what CONVERSATION couldn't fit still comes back as RECALL",
+          "the essay is the big one this morning" in recorder2.prompts[0], True)
 
     no_owner = isolated(timezone="America/Denver")
     quiet = Recorder()

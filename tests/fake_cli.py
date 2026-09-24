@@ -19,6 +19,8 @@ class _Stdin:
     def write(self, data: bytes) -> None:
         if self.proc.cli.die_idle and self.proc.warm_age_ticks:
             raise BrokenPipeError("the process died while idle")
+        if self.proc.rejected and self.proc.cli.broken_pipe:
+            raise BrokenPipeError("it exited before reading its input")
         self.proc.received += data
 
     async def drain(self) -> None:
@@ -52,6 +54,7 @@ class FakeProc:
         self.killed = False
         self.warm_age_ticks = 0
         rejected = next((a for a in argv if a in cli.reject), None)
+        self.rejected = rejected
         self.streaming = "--input-format" in argv
         self.stdin = _Stdin(self)
         if rejected:
@@ -93,7 +96,9 @@ class FakeProc:
 
 class FakeCli:
     def __init__(self, reply: str = "hello", *, reject: set[str] | None = None, chunk: int = 4,
-                 error: bool = False, die_idle: bool = False, delay: float = 0.0) -> None:
+                 error: bool = False, die_idle: bool = False, delay: float = 0.0,
+                 broken_pipe: bool = False) -> None:
+        self.broken_pipe = broken_pipe
         self.reply = reply
         self.reject = reject or set()
         self.chunk = chunk

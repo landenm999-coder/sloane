@@ -134,6 +134,31 @@ def render_recall(rows: Sequence[Row], budget: int, *, tz: str = "UTC") -> tuple
 CONVERSATION_LINE = 700  # characters of one message; a long brief keeps its head
 
 
+def conversation_that_fits(rows: Sequence[Row], budget: int, *, tz: str = "UTC") -> list[Row]:
+    """The newest rows whose lines fit the budget: what CONVERSATION will show."""
+    kept: list[Row] = []
+    used = 0
+    for r in reversed(rows):
+        cost = estimate_tokens(_conversation_line(r, tz, "Landen")) + 1
+        if used + cost > budget:
+            break
+        kept.append(r)
+        used += cost
+    return list(reversed(kept))
+
+
+def _conversation_line(r: Row, tz: str, name: str) -> str:
+    from sloane.ingest import safe_field
+
+    who = name if r.get("direction") == "in" else "Sloane"
+    text = safe_field(r.get("body"), limit=CONVERSATION_LINE)
+    if r.get("trusted") is False:
+        # Built from an email or web page: strangers' words don't ride here,
+        # unfenced, in a turn that can act for him.
+        text = "(a reply built from outside text -- email or the web -- left out here)"
+    return f"- {_when(r.get('at'), tz)} {who}: {text}" if text else ""
+
+
 def render_conversation(rows: Sequence[Row], budget: int, *, tz: str = "UTC",
                         name: str = "Landen") -> tuple[str, int]:
     """The recent exchange, oldest first, each message flattened to one line.
@@ -141,18 +166,7 @@ def render_conversation(rows: Sequence[Row], budget: int, *, tz: str = "UTC",
     Newest messages win the budget: the last thing said is what "it" means.
     Flattened with safe_field, so a message body can't forge a block header.
     """
-    from sloane.ingest import safe_field
-
-    lines = []
-    for r in rows:
-        who = name if r.get("direction") == "in" else "Sloane"
-        text = safe_field(r.get("body"), limit=CONVERSATION_LINE)
-        if r.get("trusted") is False:
-            # Built from an email or web page: strangers' words don't ride here,
-            # unfenced, in a turn that can act for him.
-            text = "(a reply built from outside text -- email or the web -- left out here)"
-        if text:
-            lines.append(f"- {_when(r.get('at'), tz)} {who}: {text}")
+    lines = [line for line in (_conversation_line(r, tz, name) for r in rows) if line]
     kept, used = fit(list(reversed(lines)), budget)
     return (
         _block("CONVERSATION", list(reversed(kept)),

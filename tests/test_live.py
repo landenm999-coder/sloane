@@ -90,6 +90,25 @@ async def integration() -> None:
         logged = await store._fetch("select body from messages where chat_id = 5151 and direction = 'out'")
         check("logged once, as finished", [r["body"] for r in logged], [final["text"]])
 
+        # The final edit fails (not "not modified"): the whole reply is sent anew.
+        calls.clear()
+        failing = {"edits": 0}
+
+        async def edit_fails(client, method, **payload):
+            calls.append((method, payload))
+            if method == "editMessageText":
+                failing["edits"] += 1
+                if failing["edits"] > 2:
+                    raise RuntimeError("telegram editMessageText -> 400: message to edit not found")
+            return {"message_id": 88} if method == "sendMessage" else {}
+
+        bot._call = edit_fails
+        await message("what's due tomorrow, again?")
+        sends = [p["text"] for m, p in calls if m == "sendMessage"]
+        check("a failed final edit is followed by the whole reply", sends[-1].endswith(tg.CURSOR), False)
+        check("with all of it", "- Essay, 11:59 PM" in sends[-1], True)
+        bot._call = fake_call
+
         # Nothing streamed (a provider that can't): the reply is sent the plain way.
         calls.clear()
         bot._agent = StreamingAgent(stream=False)

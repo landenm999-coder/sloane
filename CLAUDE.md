@@ -23,7 +23,9 @@ Update its "In flight" and "Backlog" sections before you stop.
 8. School systems are read-only. She never submits work and never emails school staff (drafts only).
 9. Anything Sloane *initiates* goes through `Agency.propose()`. A thing Landen explicitly asks for (e.g. `/remind`)
    is its own approval. That includes the commands her reply carries when he asks in words (`sloane/actions.py`):
-   his own messages only, an allowlist, nothing destructive, every result shown.
+   his own messages only, a rule per command, nothing destructive, `grounded()` (its words come from his message
+   or the offer he said yes to), every result shown. A reply built from outside text is `tainted`: stored untrusted,
+   and a placeholder in CONVERSATION.
 
 ## Skills: how a new feature plugs in
 

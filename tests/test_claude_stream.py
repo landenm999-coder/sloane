@@ -112,6 +112,36 @@ async def main() -> None:
     await provider.prewarm("S")
     check("nor kept warm", len(cli.procs), 2)
 
+    # -- an old CLI that exits before reading its input is still recognised -------------
+    cli = FakeCli("one shot", reject={"--input-format"}, broken_pipe=True)
+    provider = fresh(cli)
+    check("a broken pipe from a CLI that rejects streaming falls back",
+          (await provider.stream("S", "hi")).text, "one shot")
+
+    # -- two refills at once keep one process, not two ------------------------------------
+    cli = FakeCli("x")
+    provider = fresh(cli)
+    cc.ClaudeCodeProvider._primary = provider._key("S")
+    await asyncio.gather(provider._fill("S"), provider._fill("S"), provider._fill("S"))
+    alive = [p for p in cli.procs if not p.killed]
+    check("racing refills leave exactly one live process", (len(alive), len(cc.ClaudeCodeProvider._idle)), (1, 1))
+
+    # -- an idle process is recycled on a timer, so the next turn is still warm ------------
+    cli = FakeCli("x")
+    provider = fresh(cli)
+    old_age = cc.WARM_MAX_AGE
+    cc.WARM_MAX_AGE = 0.05
+    try:
+        await provider.prewarm("S")
+        first = cli.procs[0]
+        await asyncio.sleep(0.2)
+        idle = cc.ClaudeCodeProvider._idle.get(provider._key("S"))
+        check("the stale one is killed and a fresh one waits",
+              (first.killed, idle is not None and idle.proc is not first), (True, True))
+    finally:
+        cc.WARM_MAX_AGE = old_age
+        cc.ClaudeCodeProvider.close_all()
+
     # -- through the router, on_text reaches the provider ---------------------------------
     cli = FakeCli('{"speech": "hi", "detail": "hi"}')
     fresh(cli)
