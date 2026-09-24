@@ -1976,6 +1976,34 @@ class Store:
             "select * from focus_sessions where started_at >= %s order by started_at", (since,)
         )
 
+    # -- birthdays (sql/022) -------------------------------------------------------------
+
+    async def set_birthday(self, person_id: str, month: int | None, day: int | None) -> Row | None:
+        return await self._one(
+            "update people set birth_month = %s, birth_day = %s where id = %s returning id, name, birth_month, birth_day",
+            (month, day, person_id),
+        )
+
+    async def birthdays(self) -> list[Row]:
+        return await self._fetch(
+            """
+            select id, name, birth_month, birth_day from people
+             where birth_month is not null and birth_day is not null
+             order by birth_month, birth_day, name
+            """
+        )
+
+    async def find_people(self, name: str) -> list[Row]:
+        """People whose name is this, or starts with it (case-insensitive)."""
+        return await self._fetch(
+            """
+            select id, name, birth_month, birth_day from people
+             where lower(name) = lower(%(n)s) or lower(name) like lower(%(n)s) || ' %%'
+             order by (lower(name) = lower(%(n)s)) desc, created_at
+            """,
+            {"n": name},
+        )
+
 
 async def remember(what: str, coro: Awaitable[T]) -> T | None:
     """Run a memory write that must never cost us the reply.
