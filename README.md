@@ -289,7 +289,7 @@ Not before.
 | 1 State | `state` | always in prompt | 1,500 tok |
 | 2 Working set | `working_set` | always in prompt | 1,500 tok |
 | 3 Episodic | `episodes` | `search_episodes()`, decayed | 2,000 tok |
-| 4 Entities | `assignments` `shifts` `courses` `people` `commitments` | SQL, exact | 1,200 tok |
+| 4 Entities | `assignments` `shifts` `courses` `people` `commitments`, plus each skill's lines | SQL, exact | 2,000 tok |
 
 Tiers 1 and 2 ride in *every* prompt — that is why she never re-asks what class
 he has third period.

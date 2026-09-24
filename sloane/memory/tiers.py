@@ -3,7 +3,7 @@
     tier 1  STATE    durable facts               always present   ~1,500 tok
     tier 2  LOOPS    last 7 days, open loops     always present   ~1,500 tok
     tier 3  RECALL   embedded episodes           retrieved        ~2,000 tok
-    tier 4  FACTS    entity rows from SQL        exact            ~500 tok
+    tier 4  FACTS    entity rows from SQL        exact            ~2,000 tok
 
 Tiers 1 and 2 ride in every prompt. That is why she never re-asks what class he
 has third period. Most assistants build only tier 3, which is why they feel
@@ -167,9 +167,6 @@ def render_facts(
         lines.append(f"- EVENT {when}: {e['title']}{where}")
     for r in reminders:
         lines.append(f"- REMINDER set for {_when(r.get('due_at'), tz)}: {r['text']}")
-    # Skill lines (weather, lists, countdowns ...). Each is already one exact
-    # "- ..." line, and each skill keeps its own few.
-    lines.extend(extra)
     for a in assignments:
         course = f" [{a['course']}]" if a.get("course") else ""
         lines.append(f"- DUE {_when(a.get('due_at'), tz)}: {a['title']}{course}")
@@ -192,6 +189,10 @@ def render_facts(
             letter = f" ({c['current_grade']})" if c.get("current_grade") else ""
             score = f" — current grade {c['current_score']:g}%{letter}"
         lines.append(f"- CLASS {period}: {c['name']}{teacher}{score}")
+    # Skill lines (weather, lists, countdowns, habits ...) come last. Each is an
+    # exact "- ..." line, but there can be dozens of them, and a grocery list
+    # must never be the reason a due date fell out of the budget.
+    lines.extend(extra)
 
     kept, used = fit(lines, budget)
     if len(kept) < len(lines):

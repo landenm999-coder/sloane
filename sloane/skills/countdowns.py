@@ -20,6 +20,7 @@ from sloane.ingest import safe_field
 from sloane.skills import Answer, Nudge, Skill, SkillContext
 
 MAX_NAME = 80
+FACTS_COUNTDOWNS = 8  # the soonest; the rest are on /countdown
 # Heads-up days before each countdown: a week out, the day before, the day.
 HEADS_UP = {7: "One week until {name} ({when}).", 1: "Tomorrow: {name}.", 0: "Today: {name}."}
 
@@ -115,7 +116,7 @@ class Countdowns(Skill):
     async def facts(self) -> list[str]:
         today = self.ctx.today()
         lines = []
-        for r in await self._upcoming():
+        for r in (await self._upcoming())[:FACTS_COUNTDOWNS]:
             left = (r["on_date"] - today).days
             away = "today" if left == 0 else ("tomorrow" if left == 1 else f"{_days(left)} away")
             lines.append(f"- COUNTDOWN {safe_field(r['name'], limit=MAX_NAME)}: "

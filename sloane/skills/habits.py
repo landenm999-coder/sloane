@@ -23,6 +23,7 @@ from sloane.skills import Answer, Nudge, Skill, SkillContext
 
 MAX_NAME = 60
 HISTORY_DAYS = 400  # long enough for a year-long streak
+FACTS_HABITS = 10
 
 _DID = re.compile(
     r"^\s*(?:i\s+)?(?:did|done|finished|completed|knocked\s+out)\s+(?:with\s+)?(?:my\s+|the\s+)?"
@@ -180,7 +181,7 @@ class Habits(Skill):
         habits, logged = await self._state()
         today = self.ctx.today()
         lines = []
-        for h in habits:
+        for h in habits[:FACTS_HABITS]:
             days = logged[str(h["id"])]
             run = streak(days, today)
             state = "done today" if today in days else "not done yet today"

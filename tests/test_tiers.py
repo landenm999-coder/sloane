@@ -126,6 +126,16 @@ check("the shift survives a heavy week", "SHIFT" in heavy.facts, True)
 check("so does the event", "DECA call" in heavy.facts, True)
 check("a cut list says it was cut", "not listed is not the same as none" in heavy.facts, True)
 check("and still fits its budget", heavy.spent["facts"] <= CFG.budget_entities, True)
+# --- ten skills' worth of lines never push a due date out ---------------------
+chatty = assemble(
+    assignments=[{"title": f"Worksheet {i}", "course": "Stat", "due_at": due} for i in range(6)],
+    skill_facts=[f"- LIST grocery (40 open): {'milk, ' * 20}eggs {i}" for i in range(30)],
+    config=CFG,
+)
+check("every DUE line survives a lot of skill lines",
+      sum(1 for line in chatty.facts.splitlines() if line.startswith("- DUE")), 6)
+check("the skill lines are what gets cut", "not listed is not the same as none" in chatty.facts, True)
+
 light = assemble(overdue=[{"title": f"Old log {i}", "due_at": due} for i in range(20)], config=CFG)
 check("overdue is capped and counted", ("Old log 8" in light.facts, "12 more, older" in light.facts),
       (False, True))
