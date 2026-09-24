@@ -67,3 +67,42 @@ def unfence(text: object) -> str:
     raw = text if isinstance(text, str) else str(text)
     raw = raw.translate(_BIDI)
     return raw.replace("<<<", "‹‹‹").replace(">>>", "›››")
+
+
+# -- text written as orders to her ---------------------------------------------------------
+#
+# Outside text that tries to instruct her is still only data (invariant 7), and
+# she never obeys it. But a planted calendar entry sits in FACTS on every turn,
+# and "tell him about it once" is not something a prompt can count. So the
+# code spots it: the heartbeat tells him once, and the FACTS line says he has
+# been told. Deliberately narrow -- "please disregard the previous
+# instructions about the field trip" is a teacher, not an attack.
+
+_OVERRIDE = re.compile(
+    r"\b(?:ignore|disregard|forget|override|bypass)\s+((?:[\w']+\s+){0,3}?)"
+    r"(?:instructions?|rules|prompts?|directives|guidelines|programming)\b(?!\s+(?:about|for|on|regarding)\b)",
+    re.I,
+)
+_OVERRIDE_WHICH = {"previous", "prior", "above", "earlier", "preceding", "all", "any", "your", "system", "existing"}
+_ADDRESSED = re.compile(r"\b(?:landen|sloane|assistant|ai|chatbot|language\s+model|you\s+are|you\s+must)\b"
+                        r"|(?:^|\s)/[a-z]+\b", re.I)
+_UNMISTAKABLE = re.compile(
+    r"\bsystem\s+prompt\b|\bjailbreak|\byou\s+are\s+now\b|\bnew\s+instructions\s*:"
+    r"|\b(?:do\s+not|don'?t|never)\s+(?:tell|mention|inform|remind|show)\s+(?:landen|him|the\s+user)\b"
+    r"|^\s*(?:system|assistant)\s*:",
+    re.I,
+)
+
+
+def planted(text: object) -> bool:
+    """Does this outside text read as instructions aimed at her?"""
+    raw = safe_field(text, limit=2000)
+    if not raw:
+        return False
+    if _UNMISTAKABLE.search(raw):
+        return True
+    for hit in _OVERRIDE.finditer(raw):
+        which = {w.lower() for w in hit.group(1).split()}
+        if which & _OVERRIDE_WHICH and _ADDRESSED.search(raw):
+            return True
+    return False

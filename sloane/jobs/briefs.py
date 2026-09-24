@@ -34,6 +34,7 @@ from zoneinfo import ZoneInfo
 from sloane.agent import Agent
 from sloane.config import Settings
 from sloane.contract import Reply
+from sloane.ingest import planted, safe_field
 from sloane.jobs.governor import Governor
 from sloane.memory.store import Store, remember
 
@@ -305,8 +306,6 @@ WEEKLY_QUESTION = (
 
 async def weekly_review(ctx: JobContext, now: datetime | None = None) -> JobResult:
     """Sunday 7 PM: the week behind (from our own records), the week ahead (FACTS)."""
-    from sloane.ingest import safe_field
-
     decision = await ctx.governor.may_run(sends_message=True, now=now)
     if not decision:
         return JobResult("weekly_review", ran=False, reason=decision.reason)
@@ -358,15 +357,38 @@ async def backup(ctx: JobContext, now: datetime | None = None) -> JobResult:
     return JobResult("backup", ran=True, sent=False, reason=f"{rows} rows -> {path.name}")
 
 
-async def heartbeat(ctx: JobContext, now: datetime | None = None) -> JobResult:
-    """Every quarter hour, waking hours: what the skills think is worth saying.
+PLANTED_DAYS = 14  # how far ahead the calendar is checked for planted text
 
-    No model call. Each nudge key is said once, however many ticks offer it; a
-    nudge that could not be delivered is offered again on the next tick. Several
-    new nudges in one tick go out as one message, never a burst.
+
+async def planted_nudges(ctx: JobContext, now: datetime | None = None) -> list[tuple[str, str]]:
+    """(key, text): a calendar entry written as orders to her, told to him once.
+
+    FACTS marks the entry on every turn so she neither obeys it nor repeats the
+    warning; this is the one time he hears about it.
     """
-    if ctx.skills is None or not ctx.skills.skills:
-        return JobResult("heartbeat", ran=False, reason="no skills loaded")
+    zone = ZoneInfo(ctx.config.timezone)
+    today = (now.astimezone(zone) if now else datetime.now(zone)).date()
+    out = []
+    for e in await ctx.store.events_between(today, today + timedelta(days=PLANTED_DAYS)):
+        if not (planted(e.get("title")) or planted(e.get("location"))):
+            continue
+        start = e["starts_at"].astimezone(zone)
+        when = f"{start:%a %b} {start.day}" + ("" if e.get("all_day") else f" at {start.strftime('%I:%M %p').lstrip('0')}")
+        out.append((f"planted:event:{e['id']}",
+                    f"⚠️ A calendar entry on {when} reads like instructions aimed at me: "
+                    f"\"{safe_field(e['title'], limit=90)}\". I treat it as data and won't act on it. "
+                    "If you don't know who put it there, delete it from your calendar."))
+    return out
+
+
+async def heartbeat(ctx: JobContext, now: datetime | None = None) -> JobResult:
+    """Every quarter hour, waking hours: what's worth saying, without a model.
+
+    The skills' nudges, and the core's one: a planted calendar entry, told once.
+    Each nudge key is said once, however many ticks offer it; a nudge that could
+    not be delivered is offered again on the next tick. Several new nudges in
+    one tick go out as one message, never a burst.
+    """
     if ctx.say is None:
         return JobResult("heartbeat", ran=False, reason="no chat to deliver to")
     speaking = ctx.governor.may_send(now)
@@ -374,8 +396,14 @@ async def heartbeat(ctx: JobContext, now: datetime | None = None) -> JobResult:
         return JobResult("heartbeat", ran=False, reason=speaking.reason)
 
     offered: dict[str, str] = {}
-    for nudge in await ctx.skills.nudges():
-        offered.setdefault(nudge.key, nudge.text)
+    try:
+        for key, text in await planted_nudges(ctx, now):
+            offered.setdefault(key, text)
+    except Exception:  # noqa: BLE001 - the skills' nudges still go out
+        log.exception("could not check the calendar for planted text")
+    if ctx.skills is not None:
+        for nudge in await ctx.skills.nudges():
+            offered.setdefault(nudge.key, nudge.text)
     await remember("prune nudges", ctx.store.prune_nudges())
     if not offered:
         return JobResult("heartbeat", ran=True, reason="nothing to say")
