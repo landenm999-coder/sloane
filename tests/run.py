@@ -24,11 +24,12 @@ UNIT = [
     "test_changes.py",
     "test_skills.py",  # its integration half runs when DATABASE_URL is set
     "test_cors.py",
+    "test_dates.py",
 ]
 INTEGRATION = [
     "test_store.py", "test_school.py", "test_jobs.py", "test_agency.py", "test_mail.py",
     "test_reminders.py", "test_watchdog.py", "test_capture.py",
-    "test_promises.py", "test_weekly.py", "test_heartbeat.py",
+    "test_promises.py", "test_weekly.py", "test_heartbeat.py", "test_lists.py",
 ]
 
 

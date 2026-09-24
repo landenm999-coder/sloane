@@ -1,6 +1,6 @@
 """The skills registry: commands, rule matches, sessions, FACTS, panels, nudges.
 
-DESTRUCTIVE: truncates skill_sessions.
+DESTRUCTIVE: truncates skill_sessions; clears update ids 1001-1100 from messages.
 
 The unit half runs against an in-memory store; the integration half runs the
 same flows through the real session table and the real bot.
@@ -209,6 +209,9 @@ async def integration() -> None:
                       telegram_chat_id=42, telegram_bot_token="x")
     async with Store(config) as store:
         await store._exec("truncate skill_sessions")
+        # The bot dedupes on update_id: clear the ids this test sends so a
+        # second run against the same database is not silently skipped.
+        await store._exec("delete from messages where update_id between 1001 and 1100")
         check("no session to start with", await store.active_session(30), None)
         first = await store.start_session("counter", {"n": 0})
         second = await store.start_session("counter", {"n": 5})

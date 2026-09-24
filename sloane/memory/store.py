@@ -1300,7 +1300,8 @@ class Store:
 
     # Only what cannot be rebuilt from upstream. Canvas, the calendar and shifts
     # re-sync; these were typed, promised, earned or decided by Landen.
-    BACKUP_TABLES = ("state", "commitments", "people", "courses", "trust", "reminders", "jobs")
+    BACKUP_TABLES = ("state", "commitments", "people", "courses", "trust", "reminders", "jobs",
+                     "list_items")
 
     async def restore_rows(self, table: str, rows: Sequence[Row]) -> int:
         """Merge backed-up rows back in. Existing rows win; returns rows inserted.
@@ -1597,6 +1598,71 @@ class Store:
         rows = await self._fetch(
             "delete from nudges_said where offered_at < now() - make_interval(days => %s) returning key",
             (days,),
+        )
+        return len(rows)
+
+    # -- lists (sql/015) -----------------------------------------------------------
+
+    async def add_list_items(self, name: str, items: Sequence[str]) -> list[Row]:
+        """Add items to a list; one already open there (any case) is not doubled.
+
+        Returns the rows actually added.
+        """
+        added: list[Row] = []
+        for item in items:
+            row = await self._one(
+                """
+                insert into list_items (list, item)
+                select %(list)s, %(item)s
+                 where not exists (
+                   select 1 from list_items
+                    where list = %(list)s and lower(item) = lower(%(item)s) and done_at is null
+                 )
+                returning *
+                """,
+                {"list": name, "item": item},
+            )
+            if row is not None:
+                added.append(row)
+        return added
+
+    async def open_list_items(self, name: str | None = None) -> list[Row]:
+        """Open items, oldest first, in one list or every list."""
+        return await self._fetch(
+            """
+            select id, list, item, added_at from list_items
+             where done_at is null and (%(list)s::text is null or list = %(list)s)
+             order by list, added_at, id
+            """,
+            {"list": name},
+        )
+
+    async def list_names(self) -> list[Row]:
+        """Every list that has ever had an item, with how many are open."""
+        return await self._fetch(
+            """
+            select list, count(*) filter (where done_at is null) as open,
+                   max(added_at) as last_added
+              from list_items group by list order by list
+            """
+        )
+
+    async def check_off_items(self, ids: Sequence[str]) -> list[Row]:
+        """Mark items done (never deleted). Returns the ones that were open."""
+        return await self._fetch(
+            """
+            update list_items set done_at = now()
+             where id = any(%s::uuid[]) and done_at is null
+            returning id, list, item
+            """,
+            (list(ids),),
+        )
+
+    async def clear_list(self, name: str) -> int:
+        """Check off everything open on a list. Returns how many."""
+        rows = await self._fetch(
+            "update list_items set done_at = now() where list = %s and done_at is null returning id",
+            (name,),
         )
         return len(rows)
 
