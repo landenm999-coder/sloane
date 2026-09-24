@@ -171,6 +171,13 @@ class Settings(BaseSettings):
     # Overridable so tests can point it at a local stub.
     weather_api_base: str = "https://api.open-meteo.com/v1"
 
+    # Study plan (skills/plan.py): when his own time starts and ends, "HH:MM".
+    # School days start after school; the shift and its commute are carved out.
+    plan_school_day_start: str = "15:00"
+    plan_weekend_start: str = "09:00"
+    plan_bedtime: str = "22:30"
+    plan_commute_minutes: int = 30
+
     # --- behaviour -----------------------------------------------------------
     timezone: str = "America/Denver"
     max_reply_tokens: int = 1024

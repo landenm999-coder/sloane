@@ -1917,6 +1917,30 @@ class Store:
             (since,),
         )
 
+    # -- plan (sql/020) ------------------------------------------------------------------
+
+    async def plannable_assignments(self, until: date) -> list[Row]:
+        """Open or missing work due by the end of `until` (local), overdue included."""
+        return await self._fetch(
+            """
+            select a.id, a.title, a.due_at, a.all_day, a.status, a.points_possible,
+                   a.estimate_minutes, c.name as course
+              from assignments a
+              left join courses c on c.id = a.course_id
+             where a.status in ('open', 'missing') and not a.done_locally
+               and a.due_at is not null
+               and (a.due_at at time zone %(tz)s)::date <= %(until)s
+             order by a.due_at, c.period nulls last
+            """,
+            {"tz": self._config.timezone, "until": until},
+        )
+
+    async def set_estimate(self, assignment_id: str, minutes: int | None) -> Row | None:
+        return await self._one(
+            "update assignments set estimate_minutes = %s where id = %s returning id, title, estimate_minutes",
+            (minutes, assignment_id),
+        )
+
 
 async def remember(what: str, coro: Awaitable[T]) -> T | None:
     """Run a memory write that must never cost us the reply.
