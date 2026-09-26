@@ -147,6 +147,9 @@ def create_app() -> FastAPI:
             bot.run_job = scheduler.run
         try:
             await scheduler.start()
+            # Canvas, the calendar and shifts now, if the last sync is missing
+            # or stale: a fresh install shouldn't wait for the next 4-hour slot.
+            asyncio.create_task(scheduler.catch_up("entity_sync", timedelta(hours=4)))
         except Exception:  # noqa: BLE001 - no scheduler is bad; no bot is worse
             log.exception("scheduler failed to start; replies still work")
 

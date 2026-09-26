@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -159,6 +159,23 @@ class Scheduler:
         except Exception as exc:  # noqa: BLE001 - bookkeeping never fails a job
             log.warning("could not record job %s: %s", name, exc)
         return result
+
+    async def catch_up(self, name: str, max_age: timedelta, now: datetime | None = None) -> JobResult | None:
+        """Run `name` now if it never ran, last failed, or last ran over `max_age` ago.
+
+        A fresh install, or a box that was off, would otherwise know nothing
+        new from Canvas or the calendar until the job's next slot -- up to four
+        hours in which "what's due tomorrow?" has nothing to go on.
+        """
+        now = now or datetime.now(self._zone)
+        row = next((r for r in await self._ctx.store.jobs() if r["name"] == name), None)
+        if row is None or not row.get("enabled", True) or name not in HANDLERS:
+            return None
+        last = row.get("last_run_at")
+        if last is not None and row.get("last_status") in ("ok", "partial") and now - last < max_age:
+            return None
+        log.info("catching up on %s (last run: %s)", name, last or "never")
+        return await self.run(name)
 
     def next_runs(self) -> dict[str, datetime | None]:
         return {job.id: job.next_run_time for job in self._sched.get_jobs()}

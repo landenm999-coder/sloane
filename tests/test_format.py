@@ -36,6 +36,12 @@ TABLE = [
      "<code>**not bold**</code> and <b>bold</b>"),
     ("only http(s) links", "[x](javascript:alert(1))", "[x](javascript:alert(1))"),
     ("a stray NUL can't forge a slot", "a\x000\x00b **c**", "a0b <b>c</b>"),
+    ("a table is one bullet per row, header dropped",
+     "| Day | Due |\n|---|---|\n| Fri | Lab 4 |\n| Mon | Essay |",
+     "• <b>Fri</b> · Lab 4\n• <b>Mon</b> · Essay"),
+    ("text around a table is kept", "This week:\n| a | b |\n|:--|--:|\n| x | y |\nThat's all.",
+     "This week:\n• <b>x</b> · y\nThat's all."),
+    ("a lone pipe isn't a table", "either | or", "either | or"),
 ]
 for label, raw, want in TABLE:
     check(label, to_html(raw), want)

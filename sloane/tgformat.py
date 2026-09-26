@@ -2,7 +2,7 @@
 little that matters and nothing more.
 
 `**bold**`, `` `code` ``, fenced code blocks, `[links](https://...)`, headings and
-list bullets become Telegram HTML. Everything else is escaped, and a marker
+list bullets become Telegram HTML, and a table becomes one bullet per row. Everything else is escaped, and a marker
 only turns into a tag when it has a partner on the same line, so the output is
 always well-formed, even for a reply that is still streaming in with half a
 `**` on the end. Telegram refusing it anyway is handled by the caller, which
@@ -22,6 +22,43 @@ _BOLD = re.compile(r"\*\*(?=\S)(.+?)(?<=\S)\*\*")
 _HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*#*\s*$")
 _BULLET = re.compile(r"^(\s*)[-*+]\s+")
 _SLOT = "\x00{}\x00"
+_TABLE_ROW = re.compile(r"^\s*\|.*\|\s*$")
+_RULE_CELL = re.compile(r"^\s*:?-+:?\s*$")
+
+
+def _is_rule(line: str) -> bool:
+    """A table's header rule: every cell only dashes, with optional colons."""
+    cells = [c for c in line.strip().strip("|").split("|")]
+    return "-" in line and bool(cells) and all(_RULE_CELL.match(c) for c in cells)
+
+
+def _tables(text: str) -> str:
+    """Markdown tables as bullet lines: a phone can't show columns, and pipes
+    read as noise. The header row goes (the rows carry the meaning)."""
+    lines = text.split("\n")
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        if not _TABLE_ROW.match(lines[i]):
+            out.append(lines[i])
+            i += 1
+            continue
+        block = []
+        while i < len(lines) and (_TABLE_ROW.match(lines[i]) or _is_rule(lines[i])):
+            block.append(lines[i])
+            i += 1
+        if len(block) > 1 and _is_rule(block[1]):
+            block = block[2:]  # the header and its rule
+        for row in block:
+            if _is_rule(row):
+                continue
+            cells = [c.strip() for c in row.strip().strip("|").split("|")]
+            cells = [c for c in cells if c]
+            if not cells:
+                continue
+            first = cells[0] if "**" in cells[0] else f"**{cells[0]}**"
+            out.append("- " + " · ".join([first, *cells[1:]]))
+    return "\n".join(out)
 
 
 def to_html(text: str) -> str:
@@ -34,6 +71,7 @@ def to_html(text: str) -> str:
 
     text = (text or "").replace("\x00", "")
     text = _FENCE.sub(lambda m: keep(f"<pre>{html.escape(m.group(1).rstrip(), quote=False)}</pre>"), text)
+    text = _tables(text)
     text = _CODE.sub(lambda m: keep(f"<code>{html.escape(m.group(1), quote=False)}</code>"), text)
     text = _LINK.sub(lambda m: keep(f'<a href="{html.escape(m.group(2), quote=True)}">'
                                     f"{html.escape(m.group(1), quote=False)}</a>"), text)
