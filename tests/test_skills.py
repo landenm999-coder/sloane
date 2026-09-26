@@ -120,6 +120,12 @@ async def unit() -> None:
     check("and says why", "boom" in failed.detail, True)
 
     check("a crashing match falls through to the next skill", (await reg.route("count for me")).speech, "counting")
+    check("her name in front doesn't hide the request",
+          [(await reg.route(t)).speech for t in ("Sloane, count for me", "hey Sloane count for me", "sloane: count for me")],
+          ["counting", "counting", "counting"])
+    from sloane.skills import unaddressed
+    check("only her name is set aside", [unaddressed("Sloane"), unaddressed("Sloanes idea"), unaddressed("ask Sloane")],
+          ["Sloane", "Sloanes idea", "ask Sloane"])
     check("nothing matches: the agent answers", await reg.route("what's due?"), None)
 
     check("a command can open a session", (await reg.command("count", "")).speech, "Say anything.")

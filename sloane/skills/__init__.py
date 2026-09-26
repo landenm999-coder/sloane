@@ -38,6 +38,7 @@ import asyncio
 import importlib
 import logging
 import pkgutil
+import re
 from collections.abc import Awaitable, Callable, Iterable
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -60,6 +61,17 @@ END_COMMAND = "end"
 # note queued offline). A context variable, so concurrent messages never see
 # each other's time.
 _AS_OF: ContextVar[datetime | None] = ContextVar("sloane_skill_as_of", default=None)
+
+
+# "Sloane, add milk to the list": her name in front is how he talks to her, not
+# part of what he asked, and no skill's rule should have to know it.
+_ADDRESSED = re.compile(r"^\s*(?:(?:hey|hi|ok|okay|yo)[\s,!]+)?sloane\b[\s,:!.-]*", re.I)
+
+
+def unaddressed(text: str) -> str:
+    """The message without "Sloane," (or "hey Sloane,") in front."""
+    stripped = _ADDRESSED.sub("", text, count=1)
+    return stripped if stripped.strip() else text
 
 
 def cap(text: str) -> str:
@@ -246,9 +258,10 @@ class Registry:
                     await self.ctx.store.touch_session(str(row["id"]), state)
                 return answer
 
+        plain = unaddressed(text)
         for skill in self.skills:
             try:
-                answer = await skill.match(text)
+                answer = await skill.match(plain)
             except Exception:  # noqa: BLE001 - a broken rule falls through to the agent
                 log.exception("skill %s failed to match", skill.name)
                 continue
