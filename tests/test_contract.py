@@ -23,6 +23,17 @@ def case(label: str, raw: str, speech: str, detail: str) -> None:
     check(f"{label} / detail", reply.detail, detail)
 
 
+# --- a model that stops one brace short -------------------------------------
+# Measured on the CLI: about one JSON object in three came back without its
+# closing brace. Unrepaired, the whole object was his reply, read aloud.
+short = parse('{"speech": "Two things are due Friday.", "detail": "Stat and the essay.", '
+              '"do": ["/remind 7pm start the essay"]')
+check("an object missing its last brace is still the reply",
+      (short.speech, short.detail, short.actions),
+      ("Two things are due Friday.", "Stat and the essay.", ("/remind 7pm start the essay",)))
+check("and one cut off mid-string keeps what arrived",
+      parse('Sure: {"speech": "Hi.", "detail": "The lab is due at 11:59').detail, "The lab is due at 11:59")
+
 # --- shape 1: bare JSON ------------------------------------------------------
 case(
     "shape 1 bare json",

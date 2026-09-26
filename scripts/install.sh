@@ -42,10 +42,33 @@ p.write_text("\n".join(out) + "\n")
 PY
 }
 
+# field ASK KEY PROMPT: ask (with `ask` or `secret`) until the answer passes
+# scripts/env_check.py, then write it to $draft. The reason for a retry goes to
+# the terminal; the value is never shown.
+field() {
+  local how=$1 key=$2 prompt=$3 v out
+  while :; do
+    v=$("$how" "$prompt")
+    if out=$(SLOANE_VALUE="$v" python3 "$DIR/scripts/env_check.py" "$key" 2>"$TTY"); then
+      set_env "$draft" "$key" "$out"
+      return
+    fi
+  done
+}
+
 # Everything runs inside main(), called on the last line. Under `curl | bash`
 # the script *is* bash's stdin; wrapping it means bash has read all of it
 # before the first command runs, so nothing below can swallow the rest.
 main() {
+  # She runs as a systemd service. WSL can have systemd off; say how to turn it on
+  # now, not after ten minutes of building.
+  if [ ! -d /run/systemd/system ]; then
+    echo "systemd isn't running here, and Sloane runs as a systemd service." >&2
+    printf '%s\n' "On Windows (WSL): printf '[boot]\nsystemd=true\n' | sudo tee /etc/wsl.conf" >&2
+    echo "then in PowerShell: wsl --shutdown   and open Ubuntu again and rerun this." >&2
+    exit 1
+  fi
+
   # -- 1. Docker ------------------------------------------------------------------
   if ! command -v docker >/dev/null 2>&1; then
     say "Installing Docker"
@@ -55,6 +78,11 @@ main() {
     sudo usermod -aG docker "$USER" || true
   fi
   command -v git >/dev/null 2>&1 || sudo apt-get install -y -qq git >/dev/null
+  if ! systemctl cat docker.service >/dev/null 2>&1; then
+    echo "Docker here isn't a system service (Docker Desktop's WSL integration?), and her" >&2
+    echo "service needs one. Turn that integration off for this distro, then run this again." >&2
+    exit 1
+  fi
 
   # -- 2. The code ----------------------------------------------------------------
   if [ -d "$DIR/.git" ]; then
@@ -82,14 +110,32 @@ main() {
     # shellcheck disable=SC2064  # expand $draft now: the trap must remove this file
     trap "rm -f '$draft'" EXIT
     cp .env.example "$draft"
+    # Each answer is checked as it's given (scripts/env_check.py): a bad paste
+    # gets the reason and the question again, not a broken .env.
+    field secret DATABASE_URL 'DATABASE_URL (Supabase session pooler, port 5432): '
+    field secret GROQ_API_KEY 'GROQ_API_KEY: '
+    field secret TELEGRAM_BOT_TOKEN 'TELEGRAM_BOT_TOKEN: '
+    field ask TELEGRAM_CHAT_ID 'TELEGRAM_CHAT_ID (a number): '
+    field ask CANVAS_BASE_URL 'CANVAS_BASE_URL (e.g. https://dcsd.instructure.com): '
+    field secret CANVAS_TOKEN 'CANVAS_TOKEN (Enter if Canvas has no New Access Token button): '
+    if grep -q '^CANVAS_TOKEN=$' "$draft"; then
+      # No token: the Calendar Feed still gives every due date.
+      field secret CANVAS_FEED_URL 'CANVAS_FEED_URL (Canvas → Calendar → Calendar Feed link): '
+    fi
+    field secret CALENDAR_ICS_URL 'CALENDAR_ICS_URL (the secret iCal address): '
     local v
-    v=$(secret 'DATABASE_URL (Supabase session pooler, port 5432): ');        set_env "$draft" DATABASE_URL "$v"
-    v=$(secret 'GROQ_API_KEY: ');                                              set_env "$draft" GROQ_API_KEY "$v"
-    v=$(secret 'TELEGRAM_BOT_TOKEN: ');                                        set_env "$draft" TELEGRAM_BOT_TOKEN "$v"
-    v=$(ask 'TELEGRAM_CHAT_ID (a number): ');                                  set_env "$draft" TELEGRAM_CHAT_ID "$v"
-    v=$(ask 'CANVAS_BASE_URL (e.g. https://dcsd.instructure.com): ');          set_env "$draft" CANVAS_BASE_URL "$v"
-    v=$(secret 'CANVAS_TOKEN: ');                                              set_env "$draft" CANVAS_TOKEN "$v"
-    v=$(secret 'CALENDAR_ICS_URL (the secret iCal address): ');                set_env "$draft" CALENDAR_ICS_URL "$v"
+    # Two about her, not credentials. Enter keeps the default.
+    v=$(ask 'What should she call you? (Enter for Landen, or e.g. sir): ')
+    [ -n "$v" ] && set_env "$draft" ADDRESS_AS "$v"
+    v=$(ask 'A British voice for her voice notes? [y/N]: ')
+    case "$v" in
+      [yY]*) set_env "$draft" SPEAK_PROVIDER piper
+             set_env "$draft" PIPER_VOICE en_GB-cori-medium ;;
+    esac
+    v=$(ask 'Morning brief as a voice note, not text? [y/N]: ')
+    case "$v" in
+      [yY]*) set_env "$draft" VOICE_BRIEFS morning_brief ;;
+    esac
     mv "$draft" .env
     echo "Saved .env (chmod 600). Edit it later with: nano $DIR/.env"
   else
@@ -132,9 +178,12 @@ main() {
   sudo systemctl restart sloane
   touch .installed
 
-  say "Done. Message your bot on Telegram -- she should answer."
+  say "Done. She'll message you on Telegram in a minute to say she's up."
+  echo "Nothing? Open her chat in Telegram and press Start; she keeps trying for half an hour."
+  echo "Then:     say hi, and work down START_HERE.md (step 5: try everything)"
   echo "Logs:     journalctl -u sloane -f"
   echo "Health:   curl -s localhost:8000/health"
+  echo "Check-up: cd $DIR && sudo docker compose run --rm sloane python scripts/doctor.py"
   echo "Upgrade:  run this same command again"
 }
 

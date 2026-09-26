@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from sloane.config import Settings
 from sloane.providers.base import Completion, Provider, ProviderError, Usage
@@ -161,26 +162,40 @@ check("no Sloane credential reaches the CLI",
       [k for k in _env if _env[k].startswith("secret-")], [])
 check("but it can still find itself and its login", ("PATH" in _env, "HOME" in _env), (True, True))
 
-_seen = {}
+from fake_cli import FakeCli  # noqa: E402
 
-
-async def _fake_exec(*argv, **kw):
-    _seen["argv"], _seen["kw"] = argv, kw
-    raise OSError("stop here")
-
+cli = FakeCli()
 _real = _cc.asyncio.create_subprocess_exec
-_cc.asyncio.create_subprocess_exec = _fake_exec
+_cc.asyncio.create_subprocess_exec = cli.exec
 _cc.shutil.which = lambda name: "/usr/bin/claude"
 try:
     run(_cc.ClaudeCodeProvider(Settings(database_url="")).complete("s", "p"))
-except Exception:  # noqa: BLE001 - the fake refuses to start, by design
-    pass
 finally:
     _cc.asyncio.create_subprocess_exec = _real
-argv = list(_seen.get("argv", ()))
+argv, kw = cli.calls[0]
 check("tools are switched off", argv[argv.index("--tools") + 1] if "--tools" in argv else None, "")
 check("MCP servers are not loaded", "--strict-mcp-config" in argv, True)
-check("the environment is the scrubbed one", _seen.get("kw", {}).get("env") == _env, True)
+check("the environment is the scrubbed one", kw.get("env") == _env, True)
+check("her persona replaces Claude Code's prompt, never appends to it",
+      (argv[argv.index("--system-prompt") + 1] if "--system-prompt" in argv else None,
+       "--append-system-prompt" in argv), ("s", False))
+check("fast start: no session files, no slash commands, no user settings",
+      all(flag in argv for flag in _cc.FAST_FLAGS), True)
+
+# An older CLI that rejects a flag gets the minimal set, once, and keeps it.
+old = FakeCli(reject={"--disable-slash-commands", "--input-format"})
+_cc.asyncio.create_subprocess_exec = old.exec
+try:
+    got = run(_cc.ClaudeCodeProvider(Settings(database_url="")).complete("s", "p"))
+    check("an old CLI still answers", got.text, "hello")
+    run(_cc.ClaudeCodeProvider(Settings(database_url="")).complete("s", "p"))
+    check("streaming, then fast flags, then the minimal set, and the minimal set from then on",
+          [("--input-format" in c, "--disable-slash-commands" in c) for c, _ in old.calls],
+          [(True, True), (False, True), (False, False), (False, False)])
+    check("still tool-less", all(c[c.index("--tools") + 1] == "" for c, _ in old.calls), True)
+finally:
+    _cc.asyncio.create_subprocess_exec = _real
+    _cc.ClaudeCodeProvider.legacy = _cc.ClaudeCodeProvider.no_stream = False
 
 # -- request URLs carry credentials; httpx must not log them -------------------
 import logging as _logging

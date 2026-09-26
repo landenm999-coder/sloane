@@ -53,7 +53,10 @@ class Settings(BaseSettings):
     groq_tts_model: str = "canopylabs/orpheus-v1-english"
     groq_tts_voice: str = "hannah"
     piper_bin: str = "piper"
-    piper_voice: str = ""  # path to a Piper .onnx voice on the box
+    # A Piper voice: a name like en_GB-cori-medium (British; fetched once into
+    # EMBED_CACHE_DIR) or a path to an .onnx on the box. SPEAK_PROVIDER=piper
+    # makes it her main voice rather than the fallback.
+    piper_voice: str = ""
     ffmpeg_bin: str = "ffmpeg"
     # Groq's free TTS allowance is about 100 requests a day, and a long reply
     # can take two. Past this she answers in text and says so in the log.
@@ -79,6 +82,9 @@ class Settings(BaseSettings):
     # coursework; it is never logged and never echoed into a reply.
     canvas_base_url: str = ""
     canvas_token: str = ""
+    # Canvas → Calendar → Calendar Feed. Used only without a token: due dates,
+    # no grades or turned-in state. A credential, like the calendar's.
+    canvas_feed_url: str = ""
 
     # The calendar's secret .ics URL is itself the credential -- anyone holding
     # it can read the whole calendar -- so it is treated like a password.
@@ -164,7 +170,30 @@ class Settings(BaseSettings):
     def disabled_skills(self) -> frozenset[str]:
         return frozenset(n.strip() for n in self.skills_disabled.split(",") if n.strip())
 
+    # Weather (skills/weather.py): "latitude,longitude", e.g. "39.52,-104.76"
+    # for Parker. Blank means no weather skill. Open-Meteo needs no key.
+    weather_location: str = ""
+    weather_units: str = "fahrenheit"  # or celsius
+    # Overridable so tests can point it at a local stub.
+    weather_api_base: str = "https://api.open-meteo.com/v1"
+
+    # Study plan (skills/plan.py): when his own time starts and ends, "HH:MM".
+    # School days start after school; the shift and its commute are carved out.
+    plan_school_day_start: str = "15:00"
+    plan_weekend_start: str = "09:00"
+    plan_bedtime: str = "22:30"
+    plan_commute_minutes: int = 30
+
+    # Money (skills/money.py): his hourly pay, for "about $240 earned this
+    # week" from the shifts. 0 leaves earnings out.
+    pay_rate: float = 0.0
+
     # --- behaviour -----------------------------------------------------------
+    # What she calls him when she addresses him: his name, or "sir" if he likes.
+    address_as: str = "Landen"
+    # Web lookups for what she can't know from here (news, prices, scores):
+    # his own messages only, through the Claude CLI's search tools alone.
+    web_lookup: bool = True
     timezone: str = "America/Denver"
     max_reply_tokens: int = 1024
 
@@ -172,7 +201,12 @@ class Settings(BaseSettings):
     budget_state: int = 1500
     budget_working_set: int = 1500
     budget_episodes: int = 2000
-    budget_entities: int = 1200
+    # FACTS: school rows first, then the skills' lines with what is left.
+    budget_entities: int = 2000
+    # The running conversation: what "it", "that" and "why" refer to.
+    budget_conversation: int = 1500
+    conversation_hours: int = 12
+    conversation_messages: int = 24
 
     # Retrieval decay: cosine similarity times 0.5 ** (age_days / half_life).
     recency_half_life_days: float = 14.0
@@ -210,6 +244,7 @@ class Settings(BaseSettings):
             + self.budget_working_set
             + self.budget_episodes
             + self.budget_entities
+            + self.budget_conversation
         )
 
 

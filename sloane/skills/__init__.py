@@ -9,9 +9,12 @@ A skill may offer any of these:
     match      plain messages it answers without a model ("add milk to my
                grocery list"), tried after the built-in rules and before the agent
     session    an ongoing mode (a quiz) that claims his next plain messages until
-               it ends, he sends /end, or it sits idle for SESSION_IDLE_MINUTES
+               it ends, he sends /end, or it sits idle for SESSION_IDLE_MINUTES.
+               A rule that opens one from plain words sets match_opens_session,
+               so a Capture note never starts one
     facts      lines for FACTS, the exact tier 4 block every answer and brief reads
-    panel      a JSON-able dict for the TV dashboard
+    panel      a JSON-able dict for the TV dashboard: {"title": ..., "lines": [...]}
+               is what /tv renders; anything else rides along in /panels
     nudges     things worth saying unprompted right now (the heartbeat job asks)
 
 Rules every skill keeps, because the core invariants apply here too:
@@ -37,7 +40,9 @@ import asyncio
 import importlib
 import logging
 import pkgutil
+import re
 from collections.abc import Awaitable, Callable, Iterable
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
@@ -53,6 +58,27 @@ SESSION_IDLE_MINUTES = 30
 
 # Handled by the registry itself, for whichever skill holds the session.
 END_COMMAND = "end"
+
+# "Now", for one routed message that was said earlier than it arrived (a Capture
+# note queued offline). A context variable, so concurrent messages never see
+# each other's time.
+_AS_OF: ContextVar[datetime | None] = ContextVar("sloane_skill_as_of", default=None)
+
+
+# "Sloane, add milk to the list": her name in front is how he talks to her, not
+# part of what he asked, and no skill's rule should have to know it.
+_ADDRESSED = re.compile(r"^\s*(?:(?:hey|hi|ok|okay|yo)[\s,!]+)?sloane\b[\s,:!.-]*", re.I)
+
+
+def unaddressed(text: str) -> str:
+    """The message without "Sloane," (or "hey Sloane,") in front."""
+    stripped = _ADDRESSED.sub("", text, count=1)
+    return stripped if stripped.strip() else text
+
+
+def cap(text: str) -> str:
+    """First letter up, the rest as he typed it: "DECA prep", not "Deca prep"."""
+    return text[:1].upper() + text[1:]
 
 
 @dataclass(frozen=True)
@@ -86,9 +112,16 @@ class SkillContext:
     embedder: Any = None
     # Plain text to Landen's chat. None until the bot exists (or with no owner).
     say: Callable[[str], Awaitable[None]] | None = None
+    # What time it is. None means the real clock; tests pin it.
+    clock: Callable[[], datetime] | None = None
 
     def now(self) -> datetime:
-        return datetime.now(ZoneInfo(self.config.timezone))
+        """Now, in Landen's timezone. Skills read the time only through here."""
+        zone = ZoneInfo(self.config.timezone)
+        pinned = _AS_OF.get()
+        if pinned is not None:
+            return pinned.astimezone(zone)
+        return self.clock().astimezone(zone) if self.clock is not None else datetime.now(zone)
 
     def today(self) -> date:
         return self.now().date()
@@ -102,6 +135,9 @@ class Skill:
     help: tuple[str, ...] = ()
     # Slash command names (without the slash) routed to `command()`.
     commands: frozenset[str] = frozenset()
+    # True if `match()` can open a session ("let's do a roleplay"). Such rules
+    # are skipped for a Capture note, which is never a conversation.
+    match_opens_session: bool = False
 
     def __init__(self, ctx: SkillContext) -> None:
         self.ctx = ctx
@@ -186,13 +222,26 @@ class Registry:
             log.exception("skill %s failed on /%s", skill.name, name)
             return Answer(f"/{name} hit an error, so I didn't do it.", detail=f"{type(exc).__name__}: {exc}"[:300])
 
-    async def route(self, text: str) -> Answer | None:
+    async def route(self, text: str, *, sessions: bool = True, at: datetime | None = None) -> Answer | None:
+        """See `_route`. `at` is when he said it, if that was earlier than now."""
+        token = _AS_OF.set(at) if at is not None else None
+        try:
+            return await self._route(text, sessions=sessions)
+        finally:
+            if token is not None:
+                _AS_OF.reset(token)
+
+    async def _route(self, text: str, *, sessions: bool = True) -> Answer | None:
         """A plain message: an open session first, then each skill's rules.
 
-        None means no skill wants it, and the agent answers as usual.
+        None means no skill wants it, and the agent answers as usual. With
+        `sessions=False` (a Capture note, not a chat reply) an open quiz never
+        takes it as an answer; only the rules are tried.
         """
+        row = None
         try:
-            row = await self.ctx.store.active_session(SESSION_IDLE_MINUTES)
+            if sessions:
+                row = await self.ctx.store.active_session(SESSION_IDLE_MINUTES)
         except Exception:  # noqa: BLE001 - no session state is not no reply
             log.exception("could not read the open skill session")
             row = None
@@ -214,9 +263,12 @@ class Registry:
                     await self.ctx.store.touch_session(str(row["id"]), state)
                 return answer
 
+        plain = unaddressed(text)
         for skill in self.skills:
+            if not sessions and skill.match_opens_session:
+                continue
             try:
-                answer = await skill.match(text)
+                answer = await skill.match(plain)
             except Exception:  # noqa: BLE001 - a broken rule falls through to the agent
                 log.exception("skill %s failed to match", skill.name)
                 continue

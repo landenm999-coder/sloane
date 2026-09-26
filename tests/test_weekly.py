@@ -105,6 +105,42 @@ async def main() -> None:
         except ValueError:
             pass
 
+        # A restored serial id moves the sequence on, so the next insert can't collide.
+        await store._exec("truncate clients restart identity cascade")  # a fresh box's sequences
+        client = await store.add_client("Restore Test Co")
+        notes = [{"id": n, "client_id": str(client["id"]), "note": f"note {n}"} for n in (1, 2, 3)]
+        check("notes restored with their ids", await store.restore_rows("client_notes", notes), 3)
+        try:
+            await store.add_client_note(str(client["id"]), "written after the restore")
+            added = True
+        except Exception as exc:  # noqa: BLE001
+            FAILURES.append(f"a note after a restore collided with a restored id: {exc}")
+            added = False
+        check("and a new note still goes in", added, True)
+        # A child whose parent was not restored is skipped, not fatal.
+        orphan = [{"habit_id": "00000000-0000-0000-0000-000000000001", "on_date": "2026-09-20"}]
+        try:
+            check("an orphan row is skipped", await store.restore_rows("habit_log", orphan), 0)
+        except Exception as exc:  # noqa: BLE001
+            FAILURES.append(f"an orphan row stopped the restore: {type(exc).__name__}")
+
+        # restore_backup.py restores in BACKUP_TABLES order, so every table has
+        # to come after the tables its foreign keys point at.
+        fks = await store._fetch(
+            """
+            select tc.table_name as child, ccu.table_name as parent
+              from information_schema.table_constraints tc
+              join information_schema.constraint_column_usage ccu
+                on ccu.constraint_name = tc.constraint_name and ccu.table_schema = tc.table_schema
+             where tc.constraint_type = 'FOREIGN KEY' and tc.table_schema = 'public'
+            """
+        )
+        order = Store.BACKUP_TABLES
+        wrong = sorted({(f["child"], f["parent"]) for f in fks
+                        if f["child"] in order and f["parent"] in order and f["child"] != f["parent"]
+                        and order.index(f["parent"]) > order.index(f["child"])})
+        check("backed-up tables are listed parents first", wrong, [])
+
         nowhere = JobContext(store=store, agent=agent, governor=Governor(store, config),
                              config=isolated(database_url=os.environ["DATABASE_URL"]))
         check("no folder configured: says so", (await backup(nowhere, SUNDAY)).ran, False)

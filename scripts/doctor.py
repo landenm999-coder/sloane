@@ -25,7 +25,10 @@ from sloane.router import MAIN_ORDER, build
 EXPECTED_TABLES = {
     "assignments", "commitments", "courses", "episodes", "jobs", "messages",
     "people", "proposals", "shifts", "state", "trust", "usage_log", "working_set", "events",
-    "emails", "reminders", "school_changes", "alerts", "skill_sessions",
+    "emails", "reminders", "school_changes", "alerts", "skill_sessions", "nudges_said",
+    "list_items", "countdowns", "cards", "card_reviews", "habits", "habit_log",
+    "clients", "client_notes", "focus_sessions", "expenses", "skill_settings",
+    "colleges", "college_tasks", "roleplays", "capture_refs",
 }
 
 PASS, FAIL, SKIP, WARN = "PASS", "FAIL", "SKIP", "WARN"
@@ -67,6 +70,17 @@ async def check_database(config: Settings) -> None:
         else:
             record("schema", PASS, f"{len(EXPECTED_TABLES)} tables present")
 
+        exposed = await store._fetch(
+            "select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace "
+            "where n.nspname = 'public' and c.relkind in ('r', 'p') and not c.relrowsecurity"
+        )
+        if exposed:
+            names = ", ".join(sorted(r["relname"] for r in exposed)[:5])
+            record("api lockdown", WARN, f"{len(exposed)} tables without row-level security ({names}), so "
+                   "Supabase's web API can reach them. Re-apply the migrations (sql/999_lock_public.sql).")
+        else:
+            record("api lockdown", PASS, "row-level security on every table; Supabase's web API sees nothing")
+
         ext = await store._fetch("select extversion from pg_extension where extname = 'vector'")
         if not ext:
             record("pgvector", FAIL, "the vector extension is not installed. Enable it in Supabase → Database → Extensions.")
@@ -83,7 +97,7 @@ async def check_database(config: Settings) -> None:
         # Name-based, not a count: migrations add jobs over time and a total
         # would go stale every phase.
         required = {"morning_brief", "pre_shift", "post_shift", "wrap",
-                    "reflection", "entity_sync"}
+                    "reflection", "entity_sync", "heartbeat"}
         names = {j["name"] for j in await store.jobs()}
         missing = required - names
         record(
@@ -160,12 +174,29 @@ async def check_school(config: Settings) -> None:
     """Canvas and the calendar feed. Both read-only, both credentials."""
     from sloane.school import SchoolError
 
-    if not config.canvas_token or not config.canvas_base_url:
+    if (not config.canvas_token or not config.canvas_base_url) and config.canvas_feed_url:
+        from datetime import datetime, timedelta, timezone
+
+        from sloane.school.calendar import fetch as fetch_ics
+        from sloane.school.canvas_feed import parse_feed
+
+        try:
+            now = datetime.now(timezone.utc)
+            items = parse_feed(await fetch_ics(config.canvas_feed_url, what="Canvas feed"),
+                               window_start=now - timedelta(days=config.sync_past_days),
+                               window_end=now + timedelta(days=config.sync_future_days), tz=config.timezone)
+        except SchoolError as exc:
+            record("canvas", FAIL, str(exc))
+        else:
+            record("canvas", PASS, f"{len(items)} assignments from the Calendar Feed "
+                   "(due dates only: a token adds grades and turned-in state)")
+    elif not config.canvas_token or not config.canvas_base_url:
         record(
             "canvas",
             WARN,
             "CANVAS_BASE_URL/CANVAS_TOKEN unset, so assignments will not sync. "
-            "Canvas → Account → Settings → New Access Token.",
+            "Canvas → Account → Settings → New Access Token, or, if that button isn't there, "
+            "CANVAS_FEED_URL from Canvas → Calendar → Calendar Feed.",
         )
     else:
         from sloane.school.canvas import CanvasClient
@@ -250,11 +281,25 @@ async def check_voice(config: Settings, *, warm: bool) -> None:
         else:
             record("voice: ffmpeg", WARN, "this ffmpeg lacks libopus; voice notes will fail over to text")
 
-    lanes = {"groq": bool(config.groq_api_key),
-             "piper": bool(config.piper_voice) and bool(shutil.which(config.piper_bin))}
+    import importlib.util
+
+    from sloane.providers.tts import PiperTTS
+
+    local = PiperTTS(config)
+    has_piper = importlib.util.find_spec("piper") is not None or bool(shutil.which(config.piper_bin))
+    usable = local.path is not None and (local.path.is_file() or local.by_name)
+    lanes = {"groq": bool(config.groq_api_key), "piper": usable and has_piper}
+    if local.path is not None:
+        if local.path.is_file():
+            record("voice: piper", PASS, f"{local.path.name} is on disk")
+        elif local.by_name:
+            record("voice: piper", WARN, f"{config.piper_voice} will be fetched at startup into {local.path.parent}")
+        else:
+            record("voice: piper", FAIL, f"PIPER_VOICE={config.piper_voice} is not a file; use a voice name "
+                   "like en_GB-cori-medium or a path to an .onnx")
     ready = [n for n, ok in lanes.items() if ok]
     if not ready:
-        record("voice: tts", WARN, "no speech provider ready (GROQ_API_KEY, or PIPER_VOICE + piper); replies stay text")
+        record("voice: tts", WARN, "no speech provider ready (GROQ_API_KEY, or PIPER_VOICE); replies stay text")
         return
     if not warm:
         record("voice: tts", PASS, f"configured: {', '.join(ready)} (live check with --warm)")
@@ -368,6 +413,29 @@ def check_embedder(config: Settings, *, warm: bool) -> None:
     )
 
 
+def check_values(config: Settings) -> None:
+    """The installer's paste checks, over whatever .env holds now (hand edits
+    included): the precise fix for a value that can't work, before the
+    connection checks below fail on it less helpfully."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from env_check import problem
+
+    wrong = []
+    for key in ("DATABASE_URL", "GROQ_API_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
+                "CANVAS_BASE_URL", "CANVAS_TOKEN", "CANVAS_FEED_URL", "CALENDAR_ICS_URL"):
+        value = getattr(config, key.lower())
+        if not value:
+            continue  # unset is each check's own business below
+        # As the app will use it: the installer's cleaning never ran on a hand edit.
+        issue = problem(key, str(value).strip())
+        if issue:
+            wrong.append(f"{key}: {issue}")
+    if wrong:
+        record("settings", FAIL, " | ".join(wrong) + " (nano .env, then restart)")
+    else:
+        record("settings", PASS, "every value is the right shape")
+
+
 def check_timezone(config: Settings) -> None:
     try:
         from zoneinfo import ZoneInfo
@@ -393,6 +461,11 @@ def check_extras(config: Settings) -> None:
         record("capture", FAIL, f"CAPTURE_TOKEN is under {MIN_TOKEN} characters, so capture stays off")
     else:
         record("capture", PASS, "POST /capture is on (reach it over Tailscale, never a public port)")
+        if not config.cors_origins.strip():
+            record("capture: cors", WARN, "CORS_ORIGINS is empty, so the Capture app (a web page) can't reach "
+                   "/capture; add its address, e.g. CORS_ORIGINS=https://<your-capture-app>.vercel.app (DEPLOY §7d)")
+        else:
+            record("capture: cors", PASS, f"/capture answers {config.cors_origins.strip()}")
 
     folder = config.backup_dir or (str(Path(config.embed_cache_dir) / "backups")
                                    if config.embed_cache_dir else "")
@@ -416,11 +489,52 @@ def check_extras(config: Settings) -> None:
         record("voice briefs", PASS, ", ".join(sorted(config.voice_brief_names)))
 
 
+async def check_skills(config: Settings) -> None:
+    """Which skills load, and whether their settings are usable."""
+    import pkgutil
+    import re
+
+    import sloane.skills as package
+    from sloane.skills import SkillContext, load
+    from sloane.skills.weather import WeatherUnavailable, parse_location
+
+    registry = load(SkillContext(store=None, config=config))
+    record("skills", PASS, ", ".join(registry.names) or "none loaded")
+    known = {m.name for m in pkgutil.iter_modules(package.__path__) if not m.name.startswith("_")}
+    unknown = sorted(config.disabled_skills - known - set(registry.names))
+    if unknown:
+        record("skills disabled", WARN, f"SKILLS_DISABLED names no such skill: {', '.join(unknown)}")
+
+    if not config.weather_location.strip():
+        record("weather", SKIP, "WEATHER_LOCATION unset, so there is no weather (e.g. 39.52,-104.76 for Parker)")
+    elif parse_location(config.weather_location) is None:
+        record("weather", FAIL, f"WEATHER_LOCATION {config.weather_location!r} is not 'latitude,longitude'")
+    else:
+        weather = registry.get("weather")
+        try:
+            forecast = await weather.forecast() if weather is not None else None
+        except WeatherUnavailable as exc:
+            record("weather", WARN, f"Open-Meteo did not answer: {exc}")
+        else:
+            now = "" if forecast is None or forecast.temp is None else f", {round(forecast.temp)}° now"
+            record("weather", PASS, f"Open-Meteo answered{now}")
+
+    bad = [name for name in ("plan_school_day_start", "plan_weekend_start", "plan_bedtime")
+           if not re.fullmatch(r"([01]?\d|2[0-3]):[0-5]\d", getattr(config, name))]
+    if bad:
+        record("plan", FAIL, f"{', '.join(n.upper() for n in bad)} must be HH:MM")
+    if config.pay_rate < 0:
+        record("pay rate", FAIL, "PAY_RATE can't be negative")
+    elif config.pay_rate:
+        record("pay rate", PASS, f"${config.pay_rate:g}/h for earnings estimates")
+
+
 async def main(warm: bool = False) -> int:
     config = load_settings()
 
     print(f"Sloane doctor — main={config.main_provider} bulk={config.bulk_provider}\n")
 
+    check_values(config)
     check_timezone(config)
     await check_database(config)
     check_embedder(config, warm=warm)
@@ -432,6 +546,7 @@ async def main(warm: bool = False) -> int:
     await check_voice(config, warm=warm)
     await check_telegram(config)
     check_extras(config)
+    await check_skills(config)
 
     width = max(len(name) for name, _, _ in results)
     for name, status, detail in results:

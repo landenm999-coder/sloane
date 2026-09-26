@@ -24,11 +24,26 @@ UNIT = [
     "test_changes.py",
     "test_skills.py",  # its integration half runs when DATABASE_URL is set
     "test_cors.py",
+    "test_dates.py",
+    "test_weather.py",
+    "test_dashboard.py",  # its integration half runs when DATABASE_URL is set
+    "test_conversation.py",  # likewise
+    "test_claude_stream.py",
+    "test_live.py",  # integration only
+    "test_actions.py",
+    "test_lookup.py",
+    "test_learn.py",  # its integration half runs when DATABASE_URL is set
+    "test_piper.py",
+    "test_format.py",
+    "test_env_check.py",
+    "test_canvas_feed.py",  # its integration half runs when DATABASE_URL is set
 ]
 INTEGRATION = [
     "test_store.py", "test_school.py", "test_jobs.py", "test_agency.py", "test_mail.py",
     "test_reminders.py", "test_watchdog.py", "test_capture.py",
-    "test_promises.py", "test_weekly.py",
+    "test_promises.py", "test_weekly.py", "test_heartbeat.py", "test_lists.py",
+    "test_countdowns.py", "test_cards.py", "test_habits.py", "test_clients.py", "test_plan.py", "test_focus.py", "test_birthdays.py", "test_money.py",
+    "test_colleges.py", "test_deca.py", "test_hello.py", "test_boot.py",
 ]
 
 

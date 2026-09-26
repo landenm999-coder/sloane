@@ -79,9 +79,26 @@ class SyncReport:
         return "\n".join(lines)
 
 
+async def _link_course(store: Store, external_id: str, name: str, unmatched: list[str]) -> None:
+    """Give a Canvas course a row, matched to a seeded period where one fits."""
+    if await store.course_id_for("canvas", external_id):
+        return
+    # Match against what the seed describes. A refusal here is deliberate: an
+    # unmatched course still works, just without a period and teacher, whereas
+    # a wrong match would put someone else's name on his homework.
+    candidate = best_match(name, await store.unlinked_courses())
+    if candidate is not None:
+        await store.link_course(str(candidate["id"]), source="canvas", external_id=external_id)
+    else:
+        unmatched.append(name)
+        await store.create_course(name=name, source="canvas", external_id=external_id)
+
+
 async def sync_courses_and_assignments(store: Store, config: Settings) -> list[SourceResult]:
     """Canvas. Read-only, and course-linked so assignments carry a period."""
     if not config.canvas_token or not config.canvas_base_url:
+        if config.canvas_feed_url:
+            return await sync_canvas_feed(store, config)
         return [
             SourceResult("canvas", True, 0, "not configured"),
         ]
@@ -97,26 +114,7 @@ async def sync_courses_and_assignments(store: Store, config: Settings) -> list[S
     unmatched: list[str] = []
     for course in courses:
         try:
-            existing = await store.course_id_for("canvas", course["external_id"])
-            if existing:
-                linked += 1
-                continue
-            # Match against what the seed describes. A refusal here is
-            # deliberate: an unmatched course still works, just without a
-            # period and teacher, whereas a wrong match would put someone
-            # else's name on his homework.
-            candidate = best_match(course["name"], await store.unlinked_courses())
-            if candidate is not None:
-                await store.link_course(
-                    str(candidate["id"]), source="canvas",
-                    external_id=course["external_id"],
-                )
-            else:
-                unmatched.append(course["name"])
-                await store.create_course(
-                    name=course["name"], source="canvas",
-                    external_id=course["external_id"],
-                )
+            await _link_course(store, course["external_id"], course["name"], unmatched)
             linked += 1
         except Exception as exc:  # noqa: BLE001 - one bad course is not the sync
             log.warning("could not link course %s: %s", course["external_id"], exc)
@@ -197,6 +195,54 @@ async def sync_courses_and_assignments(store: Store, config: Settings) -> list[S
         )
     )
     return results
+
+
+async def sync_canvas_feed(store: Store, config: Settings) -> list[SourceResult]:
+    """Canvas without a token: its Calendar Feed. Due dates only; see canvas_feed.py."""
+    from sloane.school.canvas_feed import parse_feed
+
+    now = datetime.now(timezone.utc)
+    try:
+        body = await fetch_ics(config.canvas_feed_url, what="Canvas feed")
+        items = parse_feed(body, window_start=now - timedelta(days=config.sync_past_days),
+                           window_end=now + timedelta(days=config.sync_future_days), tz=config.timezone)
+    except SchoolError as exc:
+        return [SourceResult("canvas feed", False, 0, str(exc))]
+
+    unmatched: list[str] = []
+    for external_id, name in sorted({(i["course_external_id"], i["course_name"] or i["course_external_id"])
+                                     for i in items if i["course_external_id"]}):
+        try:
+            await _link_course(store, external_id, name, unmatched)
+        except Exception as exc:  # noqa: BLE001 - one bad course is not the sync
+            log.warning("could not link course %s: %s", external_id, exc)
+
+    written = 0
+    baseline = not await store.has_assignments("canvas")
+    for item in items:
+        try:
+            course_id = (await store.course_id_for("canvas", item["course_external_id"])
+                         if item["course_external_id"] else None)
+            before, after = await store.upsert_assignment(
+                title=item["title"], source="canvas", external_id=item["external_id"],
+                due_at=item["due_at"], course_id=course_id,
+                # Ahead: open. Past: the feed can't say if it went in, so not overdue.
+                status="open" if item["due_at"] > now else "unknown",
+                url=item["url"],
+            )
+            written += 1
+            if not baseline:
+                for kind, detail in classify(before, after, now=now, tz=config.timezone):
+                    await remember("school change", store.record_school_change(
+                        assignment_id=str(after["id"]), kind=kind, title=item["title"],
+                        course=item["course_name"], detail=detail,
+                    ))
+        except Exception as exc:  # noqa: BLE001
+            log.warning("could not store assignment %s: %s", item["external_id"], exc)
+    detail = "due dates only (no grades or turned-in state without a token)"
+    if unmatched:
+        detail += f"; {len(unmatched)} unmatched to a seeded period: {', '.join(unmatched[:3])}"
+    return [SourceResult("canvas feed", True, written, detail)]
 
 
 async def sync_calendar(store: Store, config: Settings) -> SourceResult:

@@ -98,6 +98,21 @@ for path in modules():
     if "Reply(" in text and "parse(" not in text and path.name not in {"agent.py", "telegram.py"}:
         FAILURES.append(f"invariant 6: {path.relative_to(ROOT)} builds a Reply without parse()")
 
+# --- skills stay out of the core's way ------------------------------------------
+# A skill's migration may add columns to a core table (estimates, birthdays),
+# but a foreign key from a skill table into a core one would make the core's
+# own deletes and truncates fail because a skill exists. Skills start at 014.
+for path in sorted((ROOT / "sql").glob("*.sql")):
+    number = int(path.name.split("_", 1)[0])
+    if number < 14:
+        continue
+    text = path.read_text()
+    own = set(re.findall(r"create table if not exists (\w+)", text, re.I))
+    for target in re.findall(r"\breferences\s+(\w+)", text, re.I):
+        if target not in own:
+            FAILURES.append(f"skills: {path.name} references core table {target!r}; skill tables may "
+                            "only reference tables they create")
+
 if FAILURES:
     print(f"FAIL ({len(FAILURES)})")
     for f in FAILURES:

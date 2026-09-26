@@ -1,5 +1,7 @@
 # Deploying Sloane
 
+> The short version is [START_HERE.md](START_HERE.md). This file is the detail behind it.
+
 Target: an **Oracle Cloud Always Free** ARM instance. Free forever, 2 Ampere
 cores and 12 GB, which is more than she needs. Total running cost stays $0/mo.
 
@@ -85,6 +87,12 @@ CANVAS_BASE_URL  CANVAS_TOKEN  CALENDAR_ICS_URL
 ```
 
 Everything else already has a working default. `.env` is gitignored.
+The installer checks each value as you paste it (`scripts/env_check.py`) and
+`doctor.py` runs the same checks on a hand-edited `.env`: the `[YOUR-PASSWORD]`
+placeholder left in, the transaction pooler, the IPv6-only direct connection,
+a password with `@ # / ? $` in it (use letters and numbers), a username for
+the chat id, a Canvas page instead of its address, the calendar's public or
+web-page link instead of the secret iCal one.
 
 ```bash
 chmod 600 .env         # it holds four credentials
@@ -163,22 +171,29 @@ fallback lane, Canvas, the calendar and Telegram — and gives the fix for each.
 
 ---
 
-## 7b. Optional: a local voice fallback
+## 7b. Optional: a British voice (or a local fallback)
 
-Voice replies use Groq by default (free, ~100 a day). For a fallback with no
-cap, install Piper and one voice on the box:
+Voice replies use Groq by default: free, about 100 a day, American voices. Piper
+runs on the box instead, with no daily cap, and it has British voices. It's in the
+image already, so one line in `.env` is enough:
 
 ```bash
-# on the host, into the models volume so it survives rebuilds
-docker compose run --rm sloane sh -c '
-  cd /var/lib/sloane/models &&
-  curl -fsSLO https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium/en_US-amy-medium.onnx &&
-  curl -fsSLO https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium/en_US-amy-medium.onnx.json'
+# her main voice, British (the full JARVIS)
+SPEAK_PROVIDER=piper
+PIPER_VOICE=en_GB-cori-medium
 ```
 
-then set `PIPER_VOICE=/var/lib/sloane/models/en_US-amy-medium.onnx` in `.env`
-and install the `piper` binary. Without this, when Groq's daily speech allowance
-runs out she simply answers in text.
+She fetches the voice once (about 60 MB, into the `models` volume, so it survives
+rebuilds) when she starts. It's loaded into memory once, and after that a voice
+reply takes a fraction of a second. Until the download finishes, and whenever Piper
+fails, Groq speaks instead. Other voices: `en_GB-jenny_dioco-medium`,
+`en_GB-alba-medium` (Scottish), `en_GB-alan-medium` (male), `en_US-amy-medium`.
+
+To keep Groq as her voice and use Piper only as the fallback when Groq's allowance
+runs out, set `PIPER_VOICE` and leave `SPEAK_PROVIDER=groq`. Restart after changing
+either (`sudo systemctl restart sloane`).
+`docker compose run --rm sloane python scripts/doctor.py --warm` shows whether the voice is
+on disk yet, and has her say a test line.
 
 ## 7c. Optional: Gmail (about 10 minutes, once)
 
@@ -249,20 +264,9 @@ checks a password, and it stays off until you set one.
    your own devices. **Never use `tailscale funnel`**: that would put her on the
    public internet.
 
-3. In Capture's settings, enter that URL and the token (the full request/response contract is in `CAPTURE_API.md`). Test it from any
-   device on your tailnet:
-
-   ```bash
-   curl -s -X POST https://<box>.<tailnet>.ts.net/capture \
-     -H "Authorization: Bearer $CAPTURE_TOKEN" -H "Content-Type: application/json" \
-     -d '{"text": "remind me in 10 minutes to test capture"}'
-   ```
-
-   Whatever you capture is stored in your own voice, so she can recall it later. A captured
-   "remind me …" becomes a real reminder.
-
-4. Capture is a web page, so its POST to Sloane is cross-origin and the browser checks with
-   Sloane first. Allow Capture's address (the one in your phone's address bar) in `.env`, then restart:
+3. Capture is a web page, so its call to Sloane is cross-origin and the browser checks
+   with Sloane first. Allow Capture's address (the one in your phone's address bar), then
+   restart:
 
    ```bash
    echo 'CORS_ORIGINS=https://<your-capture-app>.vercel.app' >> .env
@@ -270,6 +274,48 @@ checks a password, and it stays off until you set one.
    ```
 
    Only `/capture` answers cross-origin; `/facts`, `/state` and the rest never do.
+   `doctor.py` warns if this is missing.
+
+4. In Capture, go to **Settings → Sloane**. Enter `https://<box>.<tailnet>.ts.net` and the
+   token, then press **Connect**. The test stores nothing. If Chrome asks whether the site may
+   reach devices on your local network, allow it. From then on, every capture is also
+   remembered by Sloane ("what was that idea about the bakery site?"). If the phone is off the
+   tailnet, captures wait on the phone and go when it's back.
+
+   By default she only *remembers* captures, because Capture already sets your reminders and
+   logs expenses. Tick **Let Sloane act on captures too** if you'd rather she also set
+   "remind me …" reminders (on Telegram) and ran her list and habit rules. You'd then hear
+   some things twice. The full contract is `CAPTURE_API.md`. To test from any device on
+   your tailnet:
+
+   ```bash
+   curl -s -X POST https://<box>.<tailnet>.ts.net/capture \
+     -H "Authorization: Bearer $CAPTURE_TOKEN" -H "Content-Type: application/json" \
+     -d '{"check": true}'          # {"ok": true}: connected, nothing stored
+   ```
+
+## 7e. Optional: the TV dashboard (2 minutes)
+
+With `tailscale serve` from 7d running, open `https://<box>.<tailnet>.ts.net/tv`
+on any device signed in to your tailnet: an old tablet on the wall, a laptop, a
+TV with the Tailscale app. It shows the clock, the weather, today and tomorrow,
+overdue and due-soon work, reminders, promises, grades and a card for each
+skill, and refreshes itself every minute. It never loads anything from the
+internet and needs no token (it is as private as `/facts`: your tailnet only).
+Put it in full screen and leave it.
+
+## 7f. Skill settings (optional)
+
+The skills need nothing to start. Three settings in `.env` make them better:
+
+```bash
+WEATHER_LOCATION=39.52,-104.76   # already set for Parker; blank turns weather off
+PAY_RATE=15                      # your hourly pay, for "about $240 earned this week"
+PLAN_BEDTIME=22:30               # when /plan stops filling your evening
+```
+
+`SKILLS_DISABLED=money,habits` switches skills off by name. `doctor.py` lists
+which skills loaded and checks the weather reaches Open-Meteo.
 
 ## 8. Run her
 
@@ -280,12 +326,37 @@ sudo systemctl enable --now sloane
 systemctl status sloane
 ```
 
-Then message the bot on Telegram. She should answer.
+Within a minute she messages you on Telegram ("Sloane here, up and running"). She
+says that once per version, so an upgrade gets "Updated and back up" and a plain
+restart gets nothing. Then say hi.
 
 ```bash
 docker compose run --rm sloane python -c "print('ok')"   # sanity
 curl -s localhost:8000/health                            # loopback only
 ```
+
+### The first day: try everything
+
+Each of these should work on day one. If one doesn't, `/status` and
+`docker compose run --rm sloane python scripts/doctor.py` say why.
+
+| Say or type on Telegram | What should happen |
+|---|---|
+| `hey, how's it going?` | a line back in her voice, not a briefing; "typing…" at once and the reply written in place |
+| `what's due tomorrow?`, then `and friday?` | the exact rows from Canvas; the follow-up understood without repeating yourself |
+| a voice note: "what's on today?" | a voice note back (British, if you set `PIPER_VOICE=en_GB-cori-medium`) |
+| `remind me in 2 minutes to test this` | a reminder in 2 minutes, with Snooze buttons |
+| `put batteries on the grocery list and remind me at 7 to charge the car` | both done in one go, each result shown under her reply |
+| `who won the Broncos game?` | "Checking.", then the answer with a source |
+| `/college add CU Boulder EA nov 1`, then `just finished my Boulder essays`, then `what's left for Boulder?` | the school, the checklist ticked, and what's left with the deadline |
+| `/roleplay` | a DECA scenario; present by text or voice, say "I'm done", answer 2 questions, get a score |
+| `/countdown DECA districts dec 3`, `/habit add reading`, `did reading` | a countdown and a streak (the heartbeat nudges you later) |
+| `spent 12 on lunch`, `/budget 60` | the week's spending against the budget |
+| `/plan` | tonight's free time filled with what's due soonest |
+| `my manager at work is Dana`, then the next morning `/memory` | the nightly learn job kept it |
+| `/today`, `/week`, `/grades`, `/status` | straight from the database, even if every model is down |
+| `https://<box>.<tailnet>.ts.net/tv` on a tablet | the wall dashboard |
+| a capture in the Capture app, then ask Sloane about it | she remembers it |
 
 ---
 
@@ -309,10 +380,35 @@ ran and whether it worked. `/sync` pulls Canvas, the calendar and shifts now.
 `/usage` shows model calls in the last day. `/state` shows her durable facts.
 `/inbox` triages new email now.
 
+Mostly, just talk to her. She follows the conversation ("and in stat?"), does what
+you ask in plain words ("put batteries on the list and remind me at 7"), looks things
+up when a question needs the outside world ("who won the Broncos game?"), and
+remembers what you tell her (`/memory` shows what she's kept; `/forget <n>` fixes it).
+`ADDRESS_AS=sir` in `.env` if you'd rather she called you that; `WEB_LOOKUP=false`
+turns lookups off.
+
+The skills (`/help` lists them all): "add milk to my grocery list", `/countdown
+graduation may 22`, "is it going to rain?", `/card bio: q :: a` then `/quiz`,
+`/habit add reading` then "did reading", `/client add Bella's Bakery $1200`,
+`/plan` for tonight, `/focus 25 essay`, `/birthday Keegan mar 3`, "spent 12 on
+lunch", `/college add CU Boulder EA nov 1` then "what's left for Boulder?", `/roleplay`
+for DECA practice (she plays the judge; answer by voice note for the real thing). `/end`
+stops a quiz or a role-play.
+
+**College applications, first.** It's application season, so add every school you're
+applying to now: `/college add <school> <EA|ED|RD> <deadline>` (several at once, one per
+line or split by `;`), a nickname in brackets
+if you use one (`/college add Colorado State University (CSU) RD feb 1`). Each gets
+the usual checklist; `/college csu skip scores` for a test-optional school,
+`/college csu add portfolio by oct 20` for anything extra. She reminds you two
+weeks, a week, three days and a day out, and the morning of.
+
 ---
 
 **Backups.** Every night at 12:30 she writes what only you could recreate
-(state, promises, people, courses, trust, reminders) to
+(state, promises, people, courses, trust, reminders, and every skill's data:
+lists, countdowns, flashcards, habits, clients, focus, spending, college
+applications, role-play scores) to
 `/var/lib/sloane/models/backups/sloane-YYYY-MM-DD.json` inside the `models`
 volume, keeping 14. Copy one off the box with
 `docker cp sloane:/var/lib/sloane/models/backups ./sloane-backups`.
@@ -329,16 +425,22 @@ it's working.
 
 | Symptom | Cause |
 |---|---|
-| `health` says `database: down` | Wrong `DATABASE_URL`, or you took the **transaction** pooler (6543). Use **session** (5432). |
+| Supabase emails "table publicly accessible" / RLS disabled | The migrations weren't all applied (the last one, `999_lock_public.sql`, turns row-level security on everywhere). Run the installer again. |
+| `health` says `database: down` | Wrong `DATABASE_URL`, or you took the **transaction** pooler (6543). Use **session** (5432). `doctor.py`'s `settings` line names which. |
 | `prepared statement already exists` | Same thing — transaction-mode pooler. The code disables prepared statements, so if you see this, an old image is running: rebuild. |
 | Bot silent, no errors | `TELEGRAM_CHAT_ID` does not match the account messaging her. She drops unknown chats on purpose. |
 | `claude_code` failing, everything else fine | The CLI login expired. Redo step 6. |
 | Canvas 401 | Token revoked or expired. Regenerate; district tokens sometimes have a lifetime. |
+| No **New Access Token** button in Canvas | The district turned student tokens off. Leave `CANVAS_TOKEN` blank and set `CANVAS_FEED_URL` to Canvas → Calendar → **Calendar Feed**. She gets every due date; not grades or whether it's turned in, so past-due work shows as unknown, never overdue. Say "finished X" to clear one. |
 | Recall empty, FACTS fine | The embedder never downloaded. `doctor.py --warm`. She still answers from FACTS, and full-text recall still works. |
 | No morning brief | `/jobs` — `deferred` means quiet hours or the budget held it (reason shown); `failed` shows the error; `never` means the scheduler didn't start — check the logs. |
 | `gmail` FAIL: access revoked or expired | The OAuth app is still in **Testing** (7-day tokens), or you removed its access. Publish it (7c step 4) and rerun `scripts/gmail_auth.py`. |
 | No email drafts, triage works | Drafts only go to people who can answer (not `noreply@`), at most three a run, and not once today's scheduled budget is spent. `/jobs` shows the inbox line. |
 | Container restarting | `journalctl -u sloane -n 100`. Usually a malformed `.env` line. |
+| Replies take 5+ seconds before anything shows | The warm `claude` process isn't there: check `journalctl -u sloane` for "could not keep a claude process warm", usually an expired Claude login (redo step 6). She still answers, just from a cold start |
+| She says she "tried to look that up and couldn't" | The lookup goes through `claude -p` with web search. Same login as above; or `WEB_LOOKUP=false` to stop her trying |
+| No weather anywhere | `WEATHER_LOCATION` blank or not `lat,lon`, or Open-Meteo unreachable. `doctor.py` says which. |
+| A skill command answers "hit an error" | That skill failed on its own; the rest of her is fine. The log has the traceback; `SKILLS_DISABLED=<name>` turns it off until it's fixed. |
 
 **Nothing here needs an inbound port.** If you ever find yourself opening one to
 fix something, stop — the answer is somewhere else.
@@ -348,7 +450,11 @@ fix something, stop — the answer is somewhere else.
 ## What starts on its own
 
 The five daily briefs start the moment she's running — the first you'll hear
-is the 6:35 AM brief. `TELEGRAM_CHAT_ID` must be set or the briefs run and
+is the 6:35 AM brief. The heartbeat starts too, but it only speaks when a
+skill has something new (a countdown a week out, rain before your shift). One
+`claude` process sits idle, ready for your next message (about 150 MB); it is
+replaced after every reply. At 12:20 AM she quietly reads back the day's
+messages for loose ends to follow up on. `TELEGRAM_CHAT_ID` must be set or the briefs run and
 record but have nobody to send to; `/jobs` will show that plainly. The inbox
 job runs only once Gmail is set up (7c); until then `/jobs` lists it as
 deferred with the reason `gmail is not configured`.

@@ -197,9 +197,35 @@ async def main() -> None:
             sorted(sched.registered),
             sorted(["morning_brief", "pre_shift", "post_shift", "wrap",
                     "reflection", "entity_sync", "inbox", "reminders", "watchdog",
-                    "weekly_review", "backup"]),
+                    "weekly_review", "backup", "heartbeat", "learn"]),
         )
         nxt = sched.next_runs()
+
+        # A stale or missing sync is caught up at startup, a fresh one isn't.
+        synced: list[str] = []
+        real_sync = HANDLERS["entity_sync"]
+
+        async def fake_sync(ctx, now=None):
+            from sloane.jobs.briefs import JobResult
+            synced.append("sync")
+            return JobResult("entity_sync", ran=True)
+
+        HANDLERS["entity_sync"] = fake_sync
+        try:
+            await store._exec("update jobs set last_run_at = null, last_status = null where name = 'entity_sync'")
+            await sched.catch_up("entity_sync", timedelta(hours=4))
+            check("never synced: it runs at startup", synced, ["sync"])
+            await sched.catch_up("entity_sync", timedelta(hours=4))
+            check("just synced: not again", synced, ["sync"])
+            await store._exec("update jobs set last_run_at = now() - interval '5 hours' where name = 'entity_sync'")
+            await sched.catch_up("entity_sync", timedelta(hours=4))
+            check("five hours old: runs again", synced, ["sync", "sync"])
+            await store._exec("update jobs set last_status = 'failed' where name = 'entity_sync'")
+            await sched.catch_up("entity_sync", timedelta(hours=4))
+            check("last one failed: runs again", synced, ["sync", "sync", "sync"])
+            check("an unknown job is left alone", await sched.catch_up("nope", timedelta(hours=4)), None)
+        finally:
+            HANDLERS["entity_sync"] = real_sync
 
         # Cron's weekday numbers, not APScheduler's: 1-5 is Monday to Friday.
         from sloane.jobs.scheduler import crontab_trigger

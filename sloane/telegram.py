@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from collections.abc import Awaitable, Callable
@@ -31,6 +32,7 @@ from sloane.providers.base import ProviderError
 from sloane.providers.groq import GroqProvider
 from sloane.agency import Agency, callback_data, parse_callback
 from sloane.skills import Answer, Registry
+from sloane.tgformat import formatted, to_html
 from sloane.voice import Voice
 
 log = logging.getLogger(__name__)
@@ -68,6 +70,156 @@ def split_message(text: str, limit: int = TELEGRAM_LIMIT) -> list[str]:
 
 API = "https://api.telegram.org"
 
+# /help's sections, and the source of the command menu Telegram shows on "/".
+EVERYDAY_HELP = (
+    "`/today` · `/week` — the schedule straight from the database, no AI",
+    "`/grades` — current course grades from Canvas",
+    "`/brief` — the morning brief, right now",
+    "`/remind 5pm call Keegan` — a reminder at a time; `/reminders`, `/unremind <n>`",
+    "`/promise <what> by <when>` — track a promise; `/promises`, `/kept <n>`",
+    "`/done <assignment>` — handed it in; stop counting it as due",
+)
+BEHIND_HELP = (
+    "`/status` — is anything broken? (no AI)",
+    "`/jobs` — what ran, and whether it worked",
+    "`/sync` — pull Canvas, the calendar and shifts now",
+    "`/inbox` — triage new email now",
+    "`/usage` — model calls in the last 24h",
+    "`/state` — the durable facts I hold",
+    "`/trust` — what I may do without asking; `/revoke <action> <target>` makes me ask again",
+)
+_MENU_COMMAND = re.compile(r"`/([a-z0-9_]{1,32})\b")
+
+
+def menu(lines: list[str] | tuple[str, ...]) -> list[dict]:
+    """Telegram's command menu from help lines: each command before a line's
+    dash, described by what follows it. First mention wins; Telegram's limits
+    (32-character names, 256-character descriptions, 100 commands) hold."""
+    out: list[dict] = []
+    seen: set[str] = set()
+    for line in lines:
+        head, dash, tail = line.partition(" — ")
+        if not dash:
+            continue
+        description = re.sub(r"\s+", " ", tail.replace("`", "").replace("**", "")).strip()[:256]
+        for name in _MENU_COMMAND.findall(head):
+            if name not in seen and description:
+                seen.add(name)
+                out.append({"command": name, "description": description})
+    return out[:100]
+
+# "typing…" lasts about five seconds on his screen; renew it a little sooner.
+# Calls whose text may carry her Markdown, shown as Telegram HTML.
+FORMATTED_METHODS = frozenset({"sendMessage", "editMessageText"})
+TYPING_EVERY = 4.5
+# A command or skill still working after this long shows "typing…".
+SLOW_SKILL_SECONDS = 0.6
+# Edits to a reply that is still being written: no more often than this, which
+# keeps well inside Telegram's per-chat limits and still reads as live.
+STREAM_EDIT_EVERY = 0.9
+# Don't open the message for the first two words; wait for a phrase.
+STREAM_MIN_CHARS = 14
+CURSOR = " ▍"
+
+
+def _shown(speech: str, detail: str) -> str:
+    """What he sees of a reply: speech, then detail when it adds something.
+
+    Mirrors Bot.send. While detail is still streaming in, a detail that is
+    only repeating the speech (as it does in conversation) stays hidden.
+    """
+    speech, detail = speech.strip(), detail.strip()
+    if not detail or speech.startswith(detail) or detail == speech:
+        return speech
+    return f"{speech}\n\n{detail}" if speech else detail
+
+
+class _Live:
+    """A reply shown while it is being written: one message, edited as it grows."""
+
+    def __init__(self, bot: "Bot", chat_id: int) -> None:
+        self.bot = bot
+        self.chat_id = chat_id
+        self.message_id: int | None = None
+        self.shown = ""
+        self.last = 0.0
+        self.typing: asyncio.Task | None = None
+
+    async def start_typing(self, after: float = 0.0) -> None:
+        """'typing…' until stopped. With `after`, only once that long has passed:
+        a rule that answers at once never flickers it."""
+        async def loop() -> None:
+            if after:
+                await asyncio.sleep(after)
+            while True:
+                try:
+                    async with httpx.AsyncClient(timeout=10.0) as client:
+                        await self.bot._call(client, "sendChatAction", chat_id=self.chat_id, action="typing")
+                except (httpx.HTTPError, RuntimeError) as exc:
+                    log.debug("typing indicator failed: %s", exc)
+                await asyncio.sleep(TYPING_EVERY)
+        self.typing = asyncio.get_running_loop().create_task(loop())
+
+    def stop_typing(self) -> None:
+        if self.typing is not None:
+            self.typing.cancel()
+            self.typing = None
+
+    async def update(self, raw: str) -> None:
+        """The provider's text so far. Shown once there's a phrase, then kept current."""
+        from sloane.contract import partial_reply
+
+        text = _shown(*partial_reply(raw))
+        if len(text) < STREAM_MIN_CHARS or text == self.shown:
+            return
+        now = time.monotonic()
+        if self.message_id is not None and now - self.last < STREAM_EDIT_EVERY:
+            return
+        body = text[: TELEGRAM_LIMIT - len(CURSOR)] + CURSOR
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                if self.message_id is None:
+                    sent = await self.bot._call(client, "sendMessage", chat_id=self.chat_id, text=body)
+                    self.message_id = sent.get("message_id")
+                    self.stop_typing()
+                else:
+                    await self.bot._call(client, "editMessageText", chat_id=self.chat_id,
+                                         message_id=self.message_id, text=body)
+        except (httpx.HTTPError, RuntimeError) as exc:
+            log.debug("live update skipped: %s", exc)  # the finished reply still arrives
+            return
+        self.shown, self.last = text, now
+
+    async def finish(self, reply: Reply) -> bool:
+        """Put the finished reply in place. False if nothing was shown yet."""
+        self.stop_typing()
+        if self.message_id is None:
+            return False
+        text = reply.speech or reply.detail or "(no reply)"
+        detail = (reply.detail or "").strip()
+        if detail and detail != reply.speech.strip():
+            text = f"{text}\n\n{detail}"
+        parts = split_message(text)
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                try:
+                    await self.bot._call(client, "editMessageText", chat_id=self.chat_id,
+                                         message_id=self.message_id, text=parts[0])
+                except RuntimeError as exc:
+                    if "not modified" not in str(exc):
+                        raise
+                for part in parts[1:]:
+                    await self.bot._call(client, "sendMessage", chat_id=self.chat_id, text=part)
+        except (httpx.HTTPError, RuntimeError) as exc:
+            # The half-written message can't be finished: send the whole reply,
+            # rather than leave him with a cursor and no action results.
+            log.warning("could not finish the live reply, sending it whole: %s", exc)
+            await self.bot.send(self.chat_id, reply)
+            return True
+        await remember("outbound message", self.bot._store.log_message(
+            chat_id=self.chat_id, direction="out", kind="text", body=text[:4000], trusted=not reply.tainted))
+        return True
+
 # Telegram holds the connection open for poll_timeout seconds; the HTTP read
 # timeout has to outlast that or every idle poll looks like a failure.
 TIMEOUT_MARGIN = 15
@@ -103,6 +255,19 @@ class Bot:
         return f"{API}/bot{self._token}/{method}"
 
     async def _call(self, client: httpx.AsyncClient, method: str, **payload) -> dict:
+        """One Bot API call. Message text is sent as HTML when it has formatting
+        (her detail is Markdown), and as the plain text if Telegram won't parse it."""
+        text = payload.get("text")
+        if method in FORMATTED_METHODS and isinstance(text, str) and "parse_mode" not in payload and formatted(text):
+            try:
+                return await self._post(client, method, **{**payload, "text": to_html(text), "parse_mode": "HTML"})
+            except RuntimeError as exc:
+                if "parse" not in str(exc).lower():
+                    raise
+                log.warning("telegram refused the formatting, sending plain text: %s", str(exc)[:200])
+        return await self._post(client, method, **payload)
+
+    async def _post(self, client: httpx.AsyncClient, method: str, **payload) -> dict:
         response = await client.post(self._url(method), json=payload)
         if response.status_code >= 400:
             raise RuntimeError(f"telegram {method} -> {response.status_code}: {response.text[:200]}")
@@ -123,9 +288,26 @@ class Bot:
         await remember(
             "outbound message",
             self._store.log_message(
-                chat_id=chat_id, direction="out", kind="text", body=text[:4000]
+                chat_id=chat_id, direction="out", kind="text", body=text[:4000],
+                trusted=not reply.tainted,
             ),
         )
+
+    async def set_menu(self) -> bool:
+        """The commands Telegram lists when he types "/", in his chat only.
+        Set at every start (it's one call), so a new skill shows up on its own."""
+        if not self._owner:
+            return False
+        skill_help = self.skills.help_lines() if self.skills is not None else []
+        commands = menu([*EVERYDAY_HELP, *skill_help, "`/help` — everything I can do", *BEHIND_HELP])
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                await self._call(client, "setMyCommands", commands=commands,
+                                 scope={"type": "chat", "chat_id": self._owner})
+        except (httpx.HTTPError, RuntimeError) as exc:
+            log.warning("could not set the command menu: %s", exc)
+            return False
+        return True
 
     async def say(self, text: str) -> None:
         """A plain line to Landen's chat. Nothing if there is no owner."""
@@ -244,7 +426,7 @@ class Bot:
                     pass
         await self.send(chat_id, Reply(speech=outcome.message, detail=""))
 
-    async def send_voice(self, chat_id: int, ogg: bytes) -> None:
+    async def send_voice(self, chat_id: int, ogg: bytes, said: str = "", trusted: bool = True) -> None:
         """Send an OGG/Opus clip as a Telegram voice note."""
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
@@ -256,7 +438,8 @@ class Bot:
             raise RuntimeError(f"telegram sendVoice -> {response.status_code}")
         await remember(
             "outbound voice",
-            self._store.log_message(chat_id=chat_id, direction="out", kind="voice"),
+            self._store.log_message(chat_id=chat_id, direction="out", kind="voice",
+                                    body=said[:4000] or None, trusted=trusted),
         )
 
     async def reply(self, chat_id: int, reply: Reply, *, as_voice: bool) -> None:
@@ -271,13 +454,13 @@ class Bot:
             ogg = await self._voice.render(reply.speech)
             if ogg is not None:
                 try:
-                    await self.send_voice(chat_id, ogg)
+                    await self.send_voice(chat_id, ogg, reply.speech, trusted=not reply.tainted)
                 except (httpx.HTTPError, RuntimeError, ValueError) as exc:
                     log.warning("voice note not delivered, falling back to text: %s", exc)
                 else:
                     detail = (reply.detail or "").strip()
                     if detail and detail != reply.speech.strip():
-                        await self.send(chat_id, Reply(speech="", detail=detail))
+                        await self.send(chat_id, Reply(speech="", detail=detail, tainted=reply.tainted))
                     return
         await self.send(chat_id, reply)
 
@@ -620,25 +803,22 @@ class Bot:
             return await self._inbox()
         if name in {"start", "help"}:
             skill_help = self.skills.help_lines() if self.skills is not None else []
+            # Talking first, the everyday next, the machinery last: most of
+            # what he needs is a sentence, not a command.
             return Reply(
-                speech="I am here. Text me or send a voice note.",
+                speech="Mostly, just talk to me, typed or as a voice note. The commands are below if you want them.",
                 detail="\n".join([
-                    "`/usage` — model calls in the last 24h",
-                    "`/state` — the durable facts I hold",
-                    "`/sync` — pull Canvas, the calendar and shifts now",
-                    "`/today` · `/week` — the schedule straight from the database, no AI",
-                    "`/grades` — current course grades from Canvas",
-                    "`/done <assignment>` — handed it in; stop counting it as due",
-                    "`/status` — is anything broken? (no AI)",
-                    "`/brief` — the morning brief, right now",
-                    "`/jobs` — what ran, and whether it worked",
-                    "`/inbox` — triage new email now",
-                    "`/remind 5pm call Keegan` — a reminder at a time (or just say \"remind me…\")",
-                    "`/reminders` — what's set; `/unremind <n>` cancels one",
-                    "`/promise <what> by <when>` — track a promise; `/promises`, `/kept <n>`",
-                    "`/trust` — what I may do without asking",
-                    "`/revoke <action> <target>` — make me ask again",
+                    "**Just talk**: \"what's due tomorrow?\" · \"remind me at 5 to call Keegan\" · "
+                    "\"put milk on the grocery list\" · \"who won the game?\" · \"help me plan tonight\"",
+                    "",
+                    "**Every day**",
+                    *EVERYDAY_HELP,
+                    "",
+                    "**Skills**",
                     *skill_help,
+                    "",
+                    "**Behind the scenes**",
+                    *BEHIND_HELP,
                 ]),
             )
         if self.skills is not None:
@@ -647,6 +827,58 @@ class Bot:
             if answer is not None:
                 return _reply(answer)
         return None
+
+    # -- acting for him ----------------------------------------------------------
+
+    async def _offer(self, chat_id: int) -> str:
+        """Her last message before his current one: what a bare "yes" answers."""
+        from datetime import timedelta
+
+        try:
+            rows = await self._store.recent_messages(chat_id, self._now() - timedelta(hours=2), 6)
+        except Exception:  # noqa: BLE001 - no offer on record means "yes" grounds nothing
+            return ""
+        earlier = rows[:-1] if rows and rows[-1].get("direction") == "in" else rows
+        outs = [r for r in earlier if r.get("direction") == "out" and r.get("trusted", True) is not False]
+        return (outs[-1].get("body") or "") if outs else ""
+
+    async def _act(self, reply: Reply, chat_id: int, said: str) -> Reply:
+        """Run the commands her reply carries, and show what each one did.
+
+        Each goes through _handle_command, exactly as if he had typed it. Only
+        the allowlist in sloane/actions.py may run, and only what he asked for:
+        a command's words must come from his message, or from the offer of
+        hers he just said yes to. Anything else is shown, never run.
+        """
+        from sloane import actions
+
+        commands = self.skills.command_names if self.skills is not None else frozenset()
+        allowed = actions.available(commands)
+        offer = await self._offer(chat_id)
+        lines = []
+        for proposed in reply.actions[: actions.MAX_ACTIONS]:
+            command = actions.check(proposed, allowed)
+            if command is None:
+                log.warning("refused an action from the model: %r", proposed[:120])
+                lines.append(f"✗ Not something I run for you: {safe_field(proposed, limit=120)}")
+                continue
+            if not actions.grounded(command, said, offer):
+                log.warning("did not run an action he didn't ask for: %r", command[:120])
+                lines.append(f"✗ Didn't run it (you didn't ask): {safe_field(command, limit=120)}")
+                continue
+            try:
+                result = await self._handle_command(command)
+            except Exception as exc:  # noqa: BLE001 - one failed action must not cost the reply
+                log.exception("action %r failed", command)
+                lines.append(f"✗ {safe_field(command, limit=120)} failed: {type(exc).__name__}")
+                continue
+            log.info("ran an action for him: %s", command.split()[0])
+            said = (result.speech or result.detail) if result is not None else "(no answer)"
+            lines.append(f"→ {said}")
+        done = "\n".join(lines)
+        same = reply.detail.strip() == reply.speech.strip()
+        detail = done if same or not reply.detail.strip() else f"{reply.detail.rstrip()}\n\n{done}"
+        return Reply(speech=reply.speech, detail=detail)
 
     # -- the loop --------------------------------------------------------------
 
@@ -716,6 +948,8 @@ class Bot:
                     Reply(speech="That voice note came back empty.", detail=""),
                 )
                 return
+            # The log is the conversation she reads back: it should say what he said.
+            await remember("voice transcript", self._store.set_message_body(update_id, body[:4000]))
 
         if not body:
             return
@@ -735,20 +969,43 @@ class Bot:
             await self.send(chat_id, await self._remind(asked.group(1)))
             return
 
+        # Most commands and skill rules answer at once; a few think (a role-play's
+        # judge, /cards make), and those show "typing…" while they do.
+        thinking = _Live(self, chat_id)
         if body.startswith("/"):
-            reply = await self._handle_command(body)
+            await thinking.start_typing(after=SLOW_SKILL_SECONDS)
+            try:
+                reply = await self._handle_command(body)
+            finally:
+                thinking.stop_typing()
             if reply is not None:
                 await self.send(chat_id, reply)
                 return
         elif self.skills is not None:
             # An open session (a quiz) first, then each skill's own rules
             # ("add milk to my grocery list"). No model unless the skill uses one.
-            answer = await self.skills.route(body)
+            await thinking.start_typing(after=SLOW_SKILL_SECONDS)
+            try:
+                answer = await self.skills.route(body)
+            finally:
+                thinking.stop_typing()
             if answer is not None:
                 await self.reply(chat_id, _reply(answer), as_voice=bool(voice))
                 return
 
-        reply = await self._agent.answer(body, channel=kind)
+        # Typing at once, then the reply as she writes it. A voice note waits
+        # for the whole answer (it is read aloud), so it only gets the typing.
+        live = _Live(self, chat_id)
+        await live.start_typing()
+        try:
+            reply = await self._agent.answer(body, channel=kind, on_text=None if voice else live.update,
+                                             can_act=True)
+        finally:
+            live.stop_typing()
+        if reply.actions:
+            reply = await self._act(reply, chat_id, body)
+        if not voice and await live.finish(reply):
+            return
         await self.reply(chat_id, reply, as_voice=bool(voice))
 
     async def poll_forever(self) -> None:

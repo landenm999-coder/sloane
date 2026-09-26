@@ -8,7 +8,9 @@
 
 Plus two that feed them: `entity_sync` (Canvas, calendar, shifts; silent) and
 `inbox` (Gmail triage every three hours, 7 AM-7 PM; speaks only when something
-needs him).
+needs him). And `heartbeat`, every quarter hour from 7 AM to 10 PM, which asks
+each skill (sloane/skills/) whether anything is worth saying now -- rain before
+his shift, a streak about to break -- and says each thing once, with no model.
 
 Each brief is the same agent turn Landen gets when he asks something, with a
 purpose-built question. That is deliberate: a brief is not a separate code path
@@ -32,6 +34,7 @@ from zoneinfo import ZoneInfo
 from sloane.agent import Agent
 from sloane.config import Settings
 from sloane.contract import Reply
+from sloane.ingest import planted, safe_field
 from sloane.jobs.governor import Governor
 from sloane.memory.store import Store, remember
 
@@ -303,8 +306,6 @@ WEEKLY_QUESTION = (
 
 async def weekly_review(ctx: JobContext, now: datetime | None = None) -> JobResult:
     """Sunday 7 PM: the week behind (from our own records), the week ahead (FACTS)."""
-    from sloane.ingest import safe_field
-
     decision = await ctx.governor.may_run(sends_message=True, now=now)
     if not decision:
         return JobResult("weekly_review", ran=False, reason=decision.reason)
@@ -356,6 +357,90 @@ async def backup(ctx: JobContext, now: datetime | None = None) -> JobResult:
     return JobResult("backup", ran=True, sent=False, reason=f"{rows} rows -> {path.name}")
 
 
+PLANTED_DAYS = 14  # how far ahead the calendar is checked for planted text
+
+
+async def planted_nudges(ctx: JobContext, now: datetime | None = None) -> list[tuple[str, str]]:
+    """(key, text): a calendar entry written as orders to her, told to him once.
+
+    FACTS marks the entry on every turn so she neither obeys it nor repeats the
+    warning; this is the one time he hears about it.
+    """
+    zone = ZoneInfo(ctx.config.timezone)
+    today = (now.astimezone(zone) if now else datetime.now(zone)).date()
+    out = []
+    for e in await ctx.store.events_between(today, today + timedelta(days=PLANTED_DAYS)):
+        if not (planted(e.get("title")) or planted(e.get("location"))):
+            continue
+        start = e["starts_at"].astimezone(zone)
+        when = f"{start:%a %b} {start.day}" + ("" if e.get("all_day") else f" at {start.strftime('%I:%M %p').lstrip('0')}")
+        out.append((f"planted:event:{e['id']}",
+                    f"⚠️ A calendar entry on {when} reads like instructions aimed at me: "
+                    f"\"{safe_field(e['title'], limit=90)}\". I treat it as data and won't act on it. "
+                    "If you don't know who put it there, delete it from your calendar."))
+    return out
+
+
+async def heartbeat(ctx: JobContext, now: datetime | None = None) -> JobResult:
+    """Every quarter hour, waking hours: what's worth saying, without a model.
+
+    The skills' nudges, and the core's one: a planted calendar entry, told once.
+    Each nudge key is said once, however many ticks offer it; a nudge that could
+    not be delivered is offered again on the next tick. Several new nudges in
+    one tick go out as one message, never a burst.
+    """
+    if ctx.say is None:
+        return JobResult("heartbeat", ran=False, reason="no chat to deliver to")
+    speaking = ctx.governor.may_send(now)
+    if not speaking:
+        return JobResult("heartbeat", ran=False, reason=speaking.reason)
+
+    offered: dict[str, str] = {}
+    try:
+        for key, text in await planted_nudges(ctx, now):
+            offered.setdefault(key, text)
+    except Exception:  # noqa: BLE001 - the skills' nudges still go out
+        log.exception("could not check the calendar for planted text")
+    if ctx.skills is not None:
+        for nudge in await ctx.skills.nudges():
+            offered.setdefault(nudge.key, nudge.text)
+    await remember("prune nudges", ctx.store.prune_nudges())
+    if not offered:
+        return JobResult("heartbeat", ran=True, reason="nothing to say")
+    fresh = set(await ctx.store.claim_nudges(list(offered)))
+    new = [(key, text) for key, text in offered.items() if key in fresh]
+    if not new:
+        return JobResult("heartbeat", ran=True, reason=f"{len(offered)} offered, all said before")
+    try:
+        await ctx.say("\n\n".join(text for _, text in new))
+    except Exception as exc:  # noqa: BLE001 - unclaim and retry next tick
+        log.warning("heartbeat not delivered, will retry: %s", exc)
+        await remember("unclaim nudges", ctx.store.unclaim_nudges([key for key, _ in new]))
+        return JobResult("heartbeat", ran=True, sent=False, reason=f"not delivered, will retry: {exc}")
+    return JobResult("heartbeat", ran=True, sent=True,
+                     reason=f"said {len(new)}: " + ", ".join(key for key, _ in new))
+
+
+async def learn(ctx: JobContext, now: datetime | None = None) -> JobResult:
+    """12:20 AM, silent: follow-ups and facts from the day he just had (one bulk call)."""
+    from sloane.memory.learn import learn as learn_day
+    from sloane.router import NoProviderAvailable
+
+    decision = await ctx.governor.may_run(sends_message=False, purpose="bulk", now=now)
+    if not decision:
+        return JobResult("learn", ran=False, reason=decision.reason)
+    router = getattr(ctx.agent, "router", None)
+    if router is None:
+        return JobResult("learn", ran=False, reason="no model router")
+    moment = now or datetime.now(ZoneInfo(ctx.config.timezone))
+    try:
+        added, facts = await learn_day(ctx.store, router, ctx.config, moment)
+    except NoProviderAvailable as exc:
+        return JobResult("learn", ran=False, reason=f"nothing learned, no model: {exc}")
+    return JobResult("learn", ran=True, reason=f"{added} follow-up{'s' if added != 1 else ''}, "
+                                               f"{facts} fact{'s' if facts != 1 else ''} learned")
+
+
 HANDLERS: dict[str, Callable[..., Awaitable[JobResult]]] = {
     "morning_brief": morning_brief,
     "pre_shift": pre_shift,
@@ -368,4 +453,6 @@ HANDLERS: dict[str, Callable[..., Awaitable[JobResult]]] = {
     "watchdog": watchdog,
     "weekly_review": weekly_review,
     "backup": backup,
+    "heartbeat": heartbeat,
+    "learn": learn,
 }

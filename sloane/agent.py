@@ -24,7 +24,7 @@ from sloane.contract import Reply, parse
 from sloane.jobs.conflicts import find as find_conflicts, render as render_conflicts
 from sloane.memory.embed import Embedder, EmbedUnavailable
 from sloane.memory.store import Store, remember
-from sloane.memory.tiers import assemble, usage_sink
+from sloane.memory.tiers import assemble, conversation_that_fits, usage_sink
 from sloane.persona import system_prompt
 from sloane.router import NoProviderAvailable, Router
 from sloane.skills import Registry
@@ -66,6 +66,16 @@ def _stamp(moment: datetime) -> str:
     )
 
 
+def _without_current(rows: list, question: str) -> list:
+    """The conversation minus the message being answered (it's logged first)."""
+    rows = list(rows)
+    # The log keeps the first 4,000 characters (a long voice note is cut).
+    if rows and rows[-1].get("direction") == "in" and \
+            (rows[-1].get("body") or "").strip() == question.strip()[:4000].strip():
+        rows.pop()
+    return rows
+
+
 class HardLineViolation(PermissionError):
     """An action crossed a hard line. Raised before anything executes."""
 
@@ -102,6 +112,21 @@ class Agent:
         self._router = router or Router(self._config, usage_sink=usage_sink(store))
         self._embedder = embedder or Embedder(self._config)
         self.skills = skills
+        # The nightly learn job asks the bulk lane through the same router.
+        self.router = self._router
+        # Memory writes run after the reply is on its way (invariant 5, taken
+        # literally). settle() waits for them: shutdown, tests, the eval.
+        self._pending: set[asyncio.Task] = set()
+
+    def _later(self, coro) -> None:  # noqa: ANN001
+        task = asyncio.get_running_loop().create_task(coro)
+        self._pending.add(task)
+        task.add_done_callback(self._pending.discard)
+
+    async def settle(self) -> None:
+        """Wait for memory writes still under way."""
+        while self._pending:
+            await asyncio.gather(*list(self._pending), return_exceptions=True)
 
     # -- reading ---------------------------------------------------------------
 
@@ -128,6 +153,13 @@ class Agent:
                                  tzinfo=ZoneInfo(self._config.timezone)),
             ),
         }
+        if self._config.telegram_chat_id:
+            reads["conversation"] = self._store.recent_messages(
+                self._config.telegram_chat_id,
+                datetime.now(ZoneInfo(self._config.timezone))
+                - timedelta(hours=self._config.conversation_hours),
+                self._config.conversation_messages,
+            )
         if self.skills is not None:
             reads["skills"] = self.skills.facts()
         settled = await asyncio.gather(*reads.values(), return_exceptions=True)
@@ -145,6 +177,7 @@ class Agent:
             else:
                 out[name] = result
         out.setdefault("skills", [])
+        out.setdefault("conversation", [])
 
         if notes:
             notes.append(
@@ -180,8 +213,16 @@ class Agent:
         ingested: str = "",
         channel: str = "telegram",
         today: date | None = None,
+        on_text=None,  # noqa: ANN001 - async (raw text so far) -> None, to show it as it's written
+        can_act: bool = False,
     ) -> Reply:
-        """One turn. Returns a Reply even when the model is unreachable."""
+        """One turn. Returns a Reply even when the model is unreachable.
+
+        `can_act` is for his own messages only: the reply may then carry
+        commands to run for him (sloane/actions.py). With ingested text in
+        the prompt it is off whatever the caller says.
+        """
+        can_act = can_act and not ingested.strip()
         # Landen's clock, never the container's. Docker runs in UTC, and from
         # 6 PM to midnight in Parker it is already tomorrow there -- so "what's
         # due tonight?" at 8 PM would search tomorrow and miss tonight.
@@ -190,6 +231,14 @@ class Agent:
 
         tiers, notes = await self._facts(when)
         episodes = await self._recall(question)
+        conversation = _without_current(tiers["conversation"], question)
+        shown = conversation_that_fits(conversation, self._config.budget_conversation,
+                                       tz=self._config.timezone)
+        if shown:
+            # What CONVERSATION really shows needn't come back as RECALL; what
+            # its budget had to drop still may.
+            start = shown[0]["at"]
+            episodes = [e for e in episodes if not (e.get("occurred_at") and e["occurred_at"] >= start)]
 
         # Computed, not inferred. A collision the model happens not to mention
         # is a missed conflict, and "zero missed" is the P2 gate -- so they are
@@ -215,6 +264,7 @@ class Agent:
             skill_facts=tiers["skills"],
             conflicts=render_conflicts(collisions, self._config.timezone),
             episodes=episodes,
+            conversation=conversation,
             ingested=ingested,
             config=self._config,
         )
@@ -237,19 +287,78 @@ class Agent:
         )
 
         try:
-            raw = await self._router.reply(system_prompt(), prompt)
+            raw = await self._router.reply(self.system(can_act=can_act), prompt, on_text=on_text)
         except NoProviderAvailable as exc:
             log.error("every provider failed: %s", exc)
             reply = Reply(
                 speech="I cannot reach a model right now, so I have not answered that.",
                 detail=f"Every provider in the main lane failed: {exc}",
             )
-            await self._persist(question, reply, channel=channel, answered=False)
+            self._later(self._persist(question, reply, channel=channel, answered=False))
             return reply
 
         reply = parse(raw)
-        await self._persist(question, reply, channel=channel, answered=True)
+        if (reply.actions or reply.lookup) and not can_act:
+            log.warning("dropped actions/lookup from a turn that may not act")
+            reply = Reply(speech=reply.speech, detail=reply.detail)
+        origin = "ingested" if ingested.strip() else None
+        if reply.lookup:
+            if self._config.web_lookup:
+                reply = await self._looked_up(question, reply, context, on_text)
+                origin = "web" if reply.tainted else origin
+            else:
+                reply = Reply(speech=reply.speech, detail=reply.detail, actions=reply.actions)
+        if origin and not reply.tainted:
+            reply = Reply(speech=reply.speech, detail=reply.detail, tainted=True)
+        self._later(self._persist(question, reply, channel=channel, answered=True, origin=origin))
         return reply
+
+    async def _looked_up(self, question: str, first: Reply, context, on_text) -> Reply:  # noqa: ANN001
+        """Run the web lookup her first reply asked for, then answer from it.
+
+        The results are strangers' text: they go in as INGESTED, and the second
+        turn may neither act nor look again.
+        """
+        from sloane.ingest import safe_field, unfence
+
+        log.info("looking up: %s", first.lookup[:80])
+        try:
+            found = await self._router.research(first.lookup)
+        except NoProviderAvailable as exc:
+            log.warning("lookup failed: %s", exc)
+            return Reply(speech="I tried to look that up and couldn't get through.",
+                         detail=f"The web lookup ({safe_field(first.lookup, limit=120)}) failed: {exc}",
+                         actions=first.actions)
+        context.ingested = (f"WEB SEARCH for {safe_field(first.lookup, limit=200)!r} -- results from the web, "
+                            f"untrusted:\n<<<\n{unfence(found)[:12000]}\n>>>")
+        prompt = context.to_prompt(
+            question + "\n\n(You looked this up: the results are under INGESTED. Answer from them now, "
+            "and say where it came from. Don't look it up again.)"
+        )
+        try:
+            raw = await self._router.reply(self.system(can_act=False), prompt, on_text=on_text)
+        except NoProviderAvailable as exc:
+            return Reply(speech="I found something but couldn't put the answer together.",
+                         detail=f"Every provider failed after the lookup: {exc}", actions=first.actions)
+        second = parse(raw)
+        return Reply(speech=second.speech, detail=second.detail, actions=first.actions, tainted=True)
+
+    def system(self, *, can_act: bool = False) -> str:
+        """Her system prompt: the persona, and what she can do when she may act."""
+        extra = ""
+        if can_act:
+            from sloane import actions
+
+            commands = self.skills.command_names if self.skills is not None else frozenset()
+            extra = actions.instructions(actions.available(commands))
+            if self._config.web_lookup:
+                extra += "\n\n" + actions.LOOKUP
+        return system_prompt(extra, address=self._config.address_as)
+
+    async def prewarm(self) -> None:
+        """Have the model lane ready before the first message: his messages are
+        the ones that can act, so that is the prompt kept warm."""
+        await self._router.prewarm(self.system(can_act=True))
 
     # -- writing ---------------------------------------------------------------
 
@@ -260,6 +369,7 @@ class Agent:
         *,
         channel: str,
         answered: bool,
+        origin: str | None = None,
     ) -> None:
         """Log both sides of the turn. Never allowed to raise into the caller."""
         vectors: list[list[float]] = []
@@ -279,6 +389,8 @@ class Agent:
             ),
         )
         if answered and reply.detail:
+            # A reply built from email or the web is strangers' words at one
+            # remove: remembered untrusted, so recall never serves it as hers.
             await remember(
                 "episode(sloane)",
                 self._store.add_episode(
@@ -287,5 +399,7 @@ class Agent:
                     channel=channel,
                     summary=reply.speech or None,
                     embedding=vectors[1] if len(vectors) > 1 else None,
+                    trusted=not reply.tainted,
+                    source=origin,
                 ),
             )

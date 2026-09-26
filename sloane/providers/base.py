@@ -52,6 +52,29 @@ class Provider(abc.ABC):
     ) -> Completion:
         """Return one completion, or raise ProviderError."""
 
+    async def stream(
+        self,
+        system: str,
+        prompt: str,
+        *,
+        max_tokens: int = 1024,
+        on_text=None,  # noqa: ANN001 - async (text so far) -> None
+    ) -> Completion:
+        """Like complete(), calling `on_text` with the text so far as it grows.
+
+        Providers that can't stream just complete; the caller sees one final
+        answer instead of a growing one, which is the same answer.
+        """
+        return await self.complete(system, prompt, max_tokens=max_tokens)
+
+    async def research(self, query: str) -> str:
+        """Search the web and summarise, with sources. Most providers can't."""
+        raise ProviderError(self.name, "no web lookup on this provider")
+
+    async def prewarm(self, system: str) -> None:
+        """Get ready to answer with this system prompt. Most providers need nothing."""
+        return None
+
     async def healthy(self) -> bool:
         """Cheap liveness check. Used by doctor.py and /health."""
         try:

@@ -19,6 +19,7 @@ from collections.abc import Awaitable, Sequence
 from datetime import date, datetime
 from typing import Any, TypeVar
 
+from psycopg.errors import ForeignKeyViolation
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
@@ -166,7 +167,7 @@ class Store:
     async def get_working_set(self, limit: int = 25) -> list[Row]:
         return await self._fetch(
             """
-            select kind, summary, salience, opened_at
+            select kind, summary, salience, opened_at, due_on
             from working_set
             where closed_at is null
             order by salience desc, opened_at desc
@@ -213,6 +214,17 @@ class Store:
                and opened_at < now() - make_interval(days => %s)
             """,
             (days,),
+        )
+        # A follow-up he never mentioned again fades after two weeks, or two
+        # days past the day it was for (sql/024).
+        await self._exec(
+            """
+            update working_set
+               set closed_at = now()
+             where closed_at is null and kind = 'follow_up'
+               and (opened_at < now() - interval '14 days'
+                    or (due_on is not null and due_on < current_date - 2))
+            """
         )
         await self._exec(
             """
@@ -1299,8 +1311,12 @@ class Store:
         )
 
     # Only what cannot be rebuilt from upstream. Canvas, the calendar and shifts
-    # re-sync; these were typed, promised, earned or decided by Landen.
-    BACKUP_TABLES = ("state", "commitments", "people", "courses", "trust", "reminders", "jobs")
+    # re-sync; these were typed, promised, earned or decided by Landen. In
+    # restore order: a table comes after every table its rows point at.
+    BACKUP_TABLES = ("state", "people", "commitments", "courses", "trust", "reminders", "jobs",
+                     "list_items", "countdowns", "cards", "habits", "habit_log",
+                     "clients", "client_notes", "focus_sessions", "expenses", "skill_settings",
+                     "colleges", "college_tasks", "roleplays")
 
     async def restore_rows(self, table: str, rows: Sequence[Row]) -> int:
         """Merge backed-up rows back in. Existing rows win; returns rows inserted.
@@ -1328,12 +1344,26 @@ class Store:
             names = ", ".join(f'"{c}"' for c in cols)
             marks = ", ".join(["%s"] * len(cols))
             # Identifiers are checked against information_schema above.
-            done = await self._one(
-                f"insert into {table} ({names}) values ({marks}) "  # noqa: S608
-                "on conflict do nothing returning 1 as ok",
-                [row[c] for c in cols],
-            )
+            try:
+                done = await self._one(
+                    f"insert into {table} ({names}) values ({marks}) "  # noqa: S608
+                    "on conflict do nothing returning 1 as ok",
+                    [row[c] for c in cols],
+                )
+            except ForeignKeyViolation:
+                # Its parent wasn't restored (a newer row by the same name won):
+                # skip this one rather than stop every table after it.
+                done = None
             inserted += 1 if done else 0
+        # A restored serial id must move its sequence on, or the next insert
+        # hands out an id that was just restored and fails.
+        serial = (await self._one("select pg_get_serial_sequence(%s, 'id') as seq", (table,))
+                  if "id" in real else None)
+        if serial and serial["seq"]:
+            await self._exec(
+                f"select setval(%s, greatest((select coalesce(max(id), 0) from {table}), 1))",  # noqa: S608
+                (serial["seq"],),
+            )
         return inserted
 
     async def export(self) -> dict[str, list[Row]]:
@@ -1399,6 +1429,28 @@ class Store:
             """,
             (limit,),
         )
+
+    # -- capture retries (sql/028) ------------------------------------------------
+
+    async def claim_capture(self, client_id: str) -> bool:
+        """True if this capture id is new (and now claimed); False if seen before."""
+        await self._exec("delete from capture_refs where at < now() - interval '30 days'")
+        row = await self._one(
+            "insert into capture_refs (client_id) values (%s) on conflict do nothing returning client_id",
+            (client_id,),
+        )
+        return row is not None
+
+    async def capture_response(self, client_id: str) -> Row | None:
+        """What was answered the first time; `body` is null while that is still under way."""
+        return await self._one("select body from capture_refs where client_id = %s", (client_id,))
+
+    async def finish_capture(self, client_id: str, body: dict) -> None:
+        await self._exec("update capture_refs set body = %s where client_id = %s", (Jsonb(body), client_id))
+
+    async def release_capture(self, client_id: str) -> None:
+        """A capture that failed part-way: its retry must be let in."""
+        await self._exec("delete from capture_refs where client_id = %s and body is null", (client_id,))
 
     # -- ops ------------------------------------------------------------------
 
@@ -1482,19 +1534,45 @@ class Store:
         body: str | None = None,
         file_id: str | None = None,
         episode_id: str | None = None,
+        trusted: bool = True,
     ) -> bool:
-        """Record one transport event. False if this update_id was already seen."""
+        """Record one transport event. False if this update_id was already seen.
+
+        `trusted` is False for a reply built from outside text (sql/025).
+        """
         row = await self._one(
             """
             insert into messages
-              (update_id, chat_id, direction, kind, body, file_id, episode_id)
-            values (%s, %s, %s, %s, %s, %s, %s)
+              (update_id, chat_id, direction, kind, body, file_id, episode_id, trusted)
+            values (%s, %s, %s, %s, %s, %s, %s, %s)
             on conflict (update_id) do nothing
             returning id
             """,
-            (update_id, chat_id, direction, kind, body, file_id, episode_id),
+            (update_id, chat_id, direction, kind, body, file_id, episode_id, trusted),
         )
         return row is not None
+
+    async def set_message_body(self, update_id: int, body: str) -> None:
+        """A voice note's transcript, once there is one, so the log reads as said."""
+        await self._exec("update messages set body = %s where update_id = %s", (body, update_id))
+
+    async def recent_messages(self, chat_id: int, since: datetime, limit: int = 20) -> list[Row]:
+        """The recent exchange with him, oldest first: his words and hers.
+
+        Text and voice only (a button press is not something said), and only
+        what has a body.
+        """
+        rows = await self._fetch(
+            """
+            select direction, kind, body, at, trusted from messages
+             where chat_id = %s and at >= %s and kind in ('text', 'voice')
+               and body is not null and body <> ''
+             order by at desc, id desc
+             limit %s
+            """,
+            (chat_id, since, limit),
+        )
+        return list(reversed(rows))
 
     async def jobs(self) -> list[Row]:
         return await self._fetch(
@@ -1564,6 +1642,664 @@ class Store:
         return await self._one(
             "update skill_sessions set ended_at = now() where id = %s and ended_at is null returning *",
             (session_id,),
+        )
+
+    # -- heartbeat (sql/014) -----------------------------------------------------
+
+    async def claim_nudges(self, keys: Sequence[str]) -> list[str]:
+        """Record these nudge keys as offered now; return the ones never said.
+
+        The returned keys are marked said in the same statement, so a nudge is
+        said once however many ticks keep offering it. Every offered key has
+        its `offered_at` refreshed, which is what keeps it from being pruned.
+        """
+        unique = list(dict.fromkeys(keys))  # one statement may not touch a row twice
+        if not unique:
+            return []
+        rows = await self._fetch(
+            """
+            insert into nudges_said (key) select unnest(%s::text[])
+            on conflict (key) do update set offered_at = now()
+            returning key, (xmax = 0) as fresh
+            """,
+            (unique,),
+        )
+        return [r["key"] for r in rows if r["fresh"]]
+
+    async def nudge_prefix_said(self, prefix: str) -> bool:
+        """Has any nudge whose key starts with `prefix` been said (and not pruned)?"""
+        row = await self._one(
+            "select 1 as said from nudges_said where key like %s limit 1",
+            (prefix.replace("%", r"\%").replace("_", r"\_") + "%",),
+        )
+        return row is not None
+
+    async def unclaim_nudges(self, keys: Sequence[str]) -> None:
+        """A nudge that could not be delivered is offered again next tick."""
+        await self._exec("delete from nudges_said where key = any(%s)", (list(keys),))
+
+    async def prune_nudges(self, days: int = 30) -> int:
+        """Forget keys no skill has offered for `days`. Returns how many.
+
+        Not the hello keys (sloane/hello.py): those record which versions have
+        said they're up, and forgetting one re-sends a first-install hello on a
+        plain reboot a month later. One short row per upgrade."""
+        rows = await self._fetch(
+            "delete from nudges_said where offered_at < now() - make_interval(days => %s) "
+            "and key not like 'hello:%%' returning key",
+            (days,),
+        )
+        return len(rows)
+
+    # -- lists (sql/015) -----------------------------------------------------------
+
+    async def add_list_items(self, name: str, items: Sequence[str]) -> list[Row]:
+        """Add items to a list; one already open there (any case) is not doubled.
+
+        Returns the rows actually added.
+        """
+        added: list[Row] = []
+        for item in items:
+            row = await self._one(
+                """
+                insert into list_items (list, item)
+                select %(list)s, %(item)s
+                 where not exists (
+                   select 1 from list_items
+                    where list = %(list)s and lower(item) = lower(%(item)s) and done_at is null
+                 )
+                returning *
+                """,
+                {"list": name, "item": item},
+            )
+            if row is not None:
+                added.append(row)
+        return added
+
+    async def open_list_items(self, name: str | None = None) -> list[Row]:
+        """Open items, oldest first, in one list or every list."""
+        return await self._fetch(
+            """
+            select id, list, item, added_at from list_items
+             where done_at is null and (%(list)s::text is null or list = %(list)s)
+             order by list, added_at, id
+            """,
+            {"list": name},
+        )
+
+    async def list_names(self) -> list[Row]:
+        """Every list that has ever had an item, with how many are open."""
+        return await self._fetch(
+            """
+            select list, count(*) filter (where done_at is null) as open,
+                   max(added_at) as last_added
+              from list_items group by list order by list
+            """
+        )
+
+    async def check_off_items(self, ids: Sequence[str]) -> list[Row]:
+        """Mark items done (never deleted). Returns the ones that were open."""
+        return await self._fetch(
+            """
+            update list_items set done_at = now()
+             where id = any(%s::uuid[]) and done_at is null
+            returning id, list, item
+            """,
+            (list(ids),),
+        )
+
+    async def clear_list(self, name: str) -> int:
+        """Check off everything open on a list. Returns how many."""
+        rows = await self._fetch(
+            "update list_items set done_at = now() where list = %s and done_at is null returning id",
+            (name,),
+        )
+        return len(rows)
+
+    # -- countdowns (sql/016) ------------------------------------------------------
+
+    async def add_countdown(self, name: str, on_date: date) -> Row:
+        row = await self._one(
+            "insert into countdowns (name, on_date) values (%s, %s) returning *", (name, on_date)
+        )
+        assert row is not None
+        return row
+
+    async def upcoming_countdowns(self, today: date) -> list[Row]:
+        """Every countdown that has not passed, soonest first."""
+        return await self._fetch(
+            """
+            select id, name, on_date from countdowns
+             where archived_at is null and on_date >= %s
+             order by on_date, created_at
+            """,
+            (today,),
+        )
+
+    async def archive_countdown(self, countdown_id: str) -> Row | None:
+        return await self._one(
+            "update countdowns set archived_at = now() where id = %s and archived_at is null returning *",
+            (countdown_id,),
+        )
+
+    # -- cards (sql/017) -------------------------------------------------------------
+
+    async def add_cards(self, deck: str, pairs: Sequence[tuple[str, str]], due_on: date) -> list[Row]:
+        """Add (front, back) cards; a front already in the deck is skipped. Returns the added."""
+        added: list[Row] = []
+        for front, back in pairs:
+            row = await self._one(
+                """
+                insert into cards (deck, front, back, due_on) values (%s, %s, %s, %s)
+                on conflict (deck, lower(front)) where archived_at is null do nothing
+                returning *
+                """,
+                (deck, front, back, due_on),
+            )
+            if row is not None:
+                added.append(row)
+        return added
+
+    async def due_cards(self, today: date, deck: str | None = None, limit: int = 20) -> list[Row]:
+        """Cards due on or before today, lowest box first within the oldest due."""
+        return await self._fetch(
+            """
+            select * from cards
+             where archived_at is null and due_on <= %(today)s
+               and (%(deck)s::text is null or deck = %(deck)s)
+             order by due_on, box, created_at
+             limit %(limit)s
+            """,
+            {"today": today, "deck": deck, "limit": limit},
+        )
+
+    async def deck_cards(self, deck: str) -> list[Row]:
+        return await self._fetch(
+            "select * from cards where archived_at is null and deck = %s order by created_at, id",
+            (deck,),
+        )
+
+    async def card_decks(self, today: date) -> list[Row]:
+        """Each deck with its size, how many are due, and when the next one is."""
+        return await self._fetch(
+            """
+            select deck, count(*) as total,
+                   count(*) filter (where due_on <= %(today)s) as due,
+                   min(due_on) filter (where due_on > %(today)s) as next_due
+              from cards where archived_at is null
+             group by deck order by deck
+            """,
+            {"today": today},
+        )
+
+    async def get_card(self, card_id: str) -> Row | None:
+        return await self._one("select * from cards where id = %s", (card_id,))
+
+    async def record_review(self, card_id: str, *, correct: bool, box: int, due_on: date) -> Row | None:
+        """Move a card to its new box and due date, and log the review."""
+        row = await self._one(
+            """
+            update cards set box = %s, due_on = %s, reviews = reviews + 1,
+                   lapses = lapses + (case when %s then 0 else 1 end), reviewed_at = now()
+             where id = %s and archived_at is null
+            returning *
+            """,
+            (box, due_on, correct, card_id),
+        )
+        if row is not None:
+            await self._exec("insert into card_reviews (card_id, correct) values (%s, %s)", (card_id, correct))
+        return row
+
+    async def archive_cards(self, ids: Sequence[str]) -> int:
+        rows = await self._fetch(
+            "update cards set archived_at = now() where id = any(%s::uuid[]) and archived_at is null returning id",
+            (list(ids),),
+        )
+        return len(rows)
+
+    async def reviews_since(self, since: datetime) -> Row:
+        row = await self._one(
+            """
+            select count(*) as reviews, count(*) filter (where correct) as correct
+              from card_reviews where at >= %s
+            """,
+            (since,),
+        )
+        return row or {"reviews": 0, "correct": 0}
+
+    async def next_card_due(self, after: date, deck: str | None = None) -> Row | None:
+        """The next day with cards due after `after`, and how many."""
+        return await self._one(
+            """
+            select due_on, count(*) as n from cards
+             where archived_at is null and due_on > %(after)s
+               and (%(deck)s::text is null or deck = %(deck)s)
+             group by due_on order by due_on limit 1
+            """,
+            {"after": after, "deck": deck},
+        )
+
+    # -- habits (sql/018) ------------------------------------------------------------
+
+    async def add_habit(self, name: str) -> Row | None:
+        """A new habit, or None if one by that name (any case) is active."""
+        return await self._one(
+            """
+            insert into habits (name) values (%s)
+            on conflict (lower(name)) where archived_at is null do nothing
+            returning *
+            """,
+            (name,),
+        )
+
+    async def active_habits(self) -> list[Row]:
+        return await self._fetch(
+            "select id, name, created_at from habits where archived_at is null order by created_at, id"
+        )
+
+    async def archive_habit(self, habit_id: str) -> Row | None:
+        return await self._one(
+            "update habits set archived_at = now() where id = %s and archived_at is null returning *",
+            (habit_id,),
+        )
+
+    async def log_habit(self, habit_id: str, on_date: date) -> bool:
+        """Mark a habit done on a day. False if it already was."""
+        row = await self._one(
+            """
+            insert into habit_log (habit_id, on_date) values (%s, %s)
+            on conflict do nothing returning habit_id
+            """,
+            (habit_id, on_date),
+        )
+        return row is not None
+
+    async def unlog_habit(self, habit_id: str, on_date: date) -> bool:
+        """Take back a mark made by mistake. Only his own log row, only that day."""
+        rows = await self._fetch(
+            "delete from habit_log where habit_id = %s and on_date = %s returning habit_id",
+            (habit_id, on_date),
+        )
+        return bool(rows)
+
+    async def habit_days(self, since: date) -> list[Row]:
+        """(habit_id, on_date) for every active habit's days since `since`."""
+        return await self._fetch(
+            """
+            select l.habit_id, l.on_date from habit_log l
+              join habits h on h.id = l.habit_id and h.archived_at is null
+             where l.on_date >= %s
+             order by l.on_date
+            """,
+            (since,),
+        )
+
+    # -- clients (sql/019) -------------------------------------------------------------
+
+    CLIENT_OPEN_STAGES = ("lead", "talking", "proposal", "building", "live")
+
+    async def add_client(self, name: str, *, value_cents: int | None = None,
+                         follow_up_on: date | None = None, next_step: str | None = None) -> Row | None:
+        """A new client, or None if one by that name (any case) is already active."""
+        return await self._one(
+            """
+            insert into clients (name, value_cents, follow_up_on, next_step) values (%s, %s, %s, %s)
+            on conflict (lower(name)) where archived_at is null do nothing
+            returning *
+            """,
+            (name, value_cents, follow_up_on, next_step),
+        )
+
+    async def open_clients(self) -> list[Row]:
+        """The live pipeline, in the order /clients numbers it: follow-ups first."""
+        return await self._fetch(
+            """
+            select * from clients
+             where archived_at is null and stage = any(%s)
+             order by follow_up_on nulls last, created_at, id
+            """,
+            (list(self.CLIENT_OPEN_STAGES),),
+        )
+
+    async def all_clients(self) -> list[Row]:
+        return await self._fetch(
+            "select * from clients where archived_at is null order by created_at, id"
+        )
+
+    async def update_client(self, client_id: str, **fields: Any) -> Row | None:
+        """Set stage, value_cents, follow_up_on and/or next_step on one client."""
+        allowed = {"stage", "value_cents", "follow_up_on", "next_step"}
+        if not fields or set(fields) - allowed:
+            raise ValueError(f"cannot set {sorted(set(fields) - allowed) or 'nothing'}")
+        # Column names come from the fixed set above, never from input.
+        sets = ", ".join(f"{name} = %s" for name in fields)
+        stage_stamp = ", stage_changed_at = now()" if "stage" in fields else ""
+        return await self._one(
+            f"update clients set {sets}, updated_at = now(){stage_stamp} "  # noqa: S608
+            "where id = %s and archived_at is null returning *",
+            [*fields.values(), client_id],
+        )
+
+    async def archive_client(self, client_id: str) -> Row | None:
+        return await self._one(
+            "update clients set archived_at = now() where id = %s and archived_at is null returning *",
+            (client_id,),
+        )
+
+    async def add_client_note(self, client_id: str, note: str) -> None:
+        await self._exec("insert into client_notes (client_id, note) values (%s, %s)", (client_id, note))
+        await self._exec("update clients set updated_at = now() where id = %s", (client_id,))
+
+    async def client_notes(self, client_id: str, limit: int = 5) -> list[Row]:
+        return await self._fetch(
+            "select at, note from client_notes where client_id = %s order by at desc, id desc limit %s",
+            (client_id, limit),
+        )
+
+    async def clients_paid_since(self, since: datetime) -> list[Row]:
+        return await self._fetch(
+            """
+            select name, value_cents, stage_changed_at from clients
+             where archived_at is null and stage = 'paid' and stage_changed_at >= %s
+             order by stage_changed_at
+            """,
+            (since,),
+        )
+
+    # -- plan (sql/020) ------------------------------------------------------------------
+
+    async def plannable_assignments(self, until: date) -> list[Row]:
+        """Open or missing work due by the end of `until` (local), overdue included."""
+        return await self._fetch(
+            """
+            select a.id, a.title, a.due_at, a.all_day, a.status, a.points_possible,
+                   a.estimate_minutes, c.name as course
+              from assignments a
+              left join courses c on c.id = a.course_id
+             where a.status in ('open', 'missing') and not a.done_locally
+               and a.due_at is not null
+               and (a.due_at at time zone %(tz)s)::date <= %(until)s
+             order by a.due_at, c.period nulls last
+            """,
+            {"tz": self._config.timezone, "until": until},
+        )
+
+    async def set_estimate(self, assignment_id: str, minutes: int | None) -> Row | None:
+        return await self._one(
+            "update assignments set estimate_minutes = %s where id = %s returning id, title, estimate_minutes",
+            (minutes, assignment_id),
+        )
+
+    # -- focus (sql/021) -------------------------------------------------------------------
+
+    async def start_focus(self, *, what: str, minutes: int, started_at: datetime, ends_at: datetime,
+                          reminder_id: str | None) -> Row:
+        row = await self._one(
+            """
+            insert into focus_sessions (what, minutes, started_at, ends_at, reminder_id)
+            values (%s, %s, %s, %s, %s) returning *
+            """,
+            (what, minutes, started_at, ends_at, reminder_id),
+        )
+        assert row is not None
+        return row
+
+    async def running_focus(self, now: datetime) -> Row | None:
+        return await self._one(
+            """
+            select * from focus_sessions
+             where stopped_at is null and ends_at > %s and started_at <= %s
+             order by started_at desc limit 1
+            """,
+            (now, now),
+        )
+
+    async def stop_focus(self, session_id: str, now: datetime) -> Row | None:
+        return await self._one(
+            "update focus_sessions set stopped_at = %s where id = %s and stopped_at is null returning *",
+            (now, session_id),
+        )
+
+    async def focus_since(self, since: datetime) -> list[Row]:
+        return await self._fetch(
+            "select * from focus_sessions where started_at >= %s order by started_at", (since,)
+        )
+
+    # -- birthdays (sql/022) -------------------------------------------------------------
+
+    async def set_birthday(self, person_id: str, month: int | None, day: int | None) -> Row | None:
+        return await self._one(
+            "update people set birth_month = %s, birth_day = %s where id = %s returning id, name, birth_month, birth_day",
+            (month, day, person_id),
+        )
+
+    async def birthdays(self) -> list[Row]:
+        return await self._fetch(
+            """
+            select id, name, birth_month, birth_day from people
+             where birth_month is not null and birth_day is not null
+             order by birth_month, birth_day, name
+            """
+        )
+
+    async def find_people(self, name: str) -> list[Row]:
+        """People whose name is this, or starts with it (case-insensitive)."""
+        return await self._fetch(
+            """
+            select id, name, birth_month, birth_day from people
+             where lower(name) = lower(%(n)s) or lower(name) like lower(%(n)s) || ' %%'
+             order by (lower(name) = lower(%(n)s)) desc, created_at
+            """,
+            {"n": name},
+        )
+
+    # -- money, and skill settings (sql/023) ------------------------------------------------
+
+    async def get_skill_setting(self, skill: str, key: str) -> str | None:
+        row = await self._one("select value from skill_settings where skill = %s and key = %s", (skill, key))
+        return None if row is None else str(row["value"])
+
+    async def set_skill_setting(self, skill: str, key: str, value: str | None) -> None:
+        """Set a setting, or clear it with None."""
+        if value is None:
+            await self._exec("delete from skill_settings where skill = %s and key = %s", (skill, key))
+            return
+        await self._exec(
+            """
+            insert into skill_settings (skill, key, value) values (%s, %s, %s)
+            on conflict (skill, key) do update set value = excluded.value, updated_at = now()
+            """,
+            (skill, key, value),
+        )
+
+    async def add_expense(self, *, cents: int, what: str, category: str, spent_on: date) -> Row:
+        row = await self._one(
+            "insert into expenses (cents, what, category, spent_on) values (%s, %s, %s, %s) returning *",
+            (cents, what, category, spent_on),
+        )
+        assert row is not None
+        return row
+
+    async def expenses_between(self, start: date, end: date) -> list[Row]:
+        return await self._fetch(
+            """
+            select * from expenses
+             where archived_at is null and spent_on between %s and %s
+             order by spent_on, created_at
+            """,
+            (start, end),
+        )
+
+    async def archive_last_expense(self) -> Row | None:
+        return await self._one(
+            """
+            update expenses set archived_at = now()
+             where id = (select id from expenses where archived_at is null order by created_at desc limit 1)
+            returning *
+            """
+        )
+
+    # -- memory (sql/024) -------------------------------------------------------------------
+
+    async def his_messages(self, chat_id: int, since: datetime, until: datetime) -> list[Row]:
+        """What he said (not what she said) in a window, oldest first."""
+        return await self._fetch(
+            """
+            select body, at from messages
+             where chat_id = %s and direction = 'in' and kind in ('text', 'voice')
+               and body is not null and body <> '' and body not like '/%%'
+               and at >= %s and at < %s
+             order by at
+            """,
+            (chat_id, since, until),
+        )
+
+    async def open_follow_ups(self) -> list[Row]:
+        return await self._fetch(
+            """
+            select id, summary, due_on, opened_at from working_set
+             where kind = 'follow_up' and closed_at is null
+             order by due_on nulls last, opened_at, id
+            """
+        )
+
+    async def add_follow_up(self, summary: str, due_on: date | None) -> Row:
+        row = await self._one(
+            """
+            insert into working_set (kind, summary, salience, due_on)
+            values ('follow_up', %s, 0.7, %s) returning id, summary, due_on
+            """,
+            (summary, due_on),
+        )
+        assert row is not None
+        return row
+
+    async def close_follow_up(self, item_id: str) -> Row | None:
+        return await self._one(
+            """
+            update working_set set closed_at = now()
+             where id = %s and kind = 'follow_up' and closed_at is null
+            returning id, summary
+            """,
+            (item_id,),
+        )
+
+    async def learned_facts(self) -> list[Row]:
+        return await self._fetch(
+            "select key, value, source, updated_at from state where pinned and category = 'learned' order by key"
+        )
+
+    async def unpin_state(self, key: str) -> Row | None:
+        """Take a fact out of every prompt. Kept in the table, never deleted."""
+        return await self._one(
+            "update state set pinned = false, updated_at = now() where key = %s and pinned returning key, value",
+            (key,),
+        )
+
+    # -- colleges (sql/026) -----------------------------------------------------------------
+
+    async def add_college(self, name: str, *, nickname: str | None = None, plan: str | None = None,
+                          deadline: date | None = None, tasks: Sequence[str] = ()) -> Row | None:
+        """A new application with its checklist, in one statement; None if one
+        by that name (any case) is already active."""
+        return await self._one(
+            """
+            with c as (
+              insert into colleges (name, nickname, plan, deadline) values (%s, %s, %s, %s)
+              on conflict (lower(name)) where archived_at is null do nothing
+              returning *
+            ), t as (
+              insert into college_tasks (college_id, task, position)
+              select c.id, x.task, x.ord from c, unnest(%s::text[]) with ordinality as x(task, ord)
+            )
+            select * from c
+            """,
+            (name, nickname, plan, deadline, list(tasks)),
+        )
+
+    async def active_colleges(self) -> list[Row]:
+        """Every application not dropped, in the order /colleges numbers them:
+        the ones still being worked on by deadline, then the rest."""
+        return await self._fetch(
+            """
+            select * from colleges
+             where archived_at is null
+             order by (status <> 'applying'), deadline nulls last, created_at, id
+            """
+        )
+
+    async def active_college_tasks(self) -> list[Row]:
+        """The checklists of every active application, in checklist order."""
+        return await self._fetch(
+            """
+            select t.* from college_tasks t join colleges c on c.id = t.college_id
+             where c.archived_at is null
+             order by t.position, t.id
+            """
+        )
+
+    async def update_college(self, college_id: str, **fields: Any) -> Row | None:
+        """Set plan, deadline, status, submitted_on and/or nickname on one application."""
+        allowed = {"plan", "deadline", "status", "submitted_on", "nickname"}
+        if not fields or set(fields) - allowed:
+            raise ValueError(f"cannot set {sorted(set(fields) - allowed) or 'nothing'}")
+        # Column names come from the fixed set above, never from input.
+        sets = ", ".join(f"{name} = %s" for name in fields)
+        return await self._one(
+            f"update colleges set {sets}, updated_at = now() "  # noqa: S608
+            "where id = %s and archived_at is null returning *",
+            [*fields.values(), college_id],
+        )
+
+    async def archive_college(self, college_id: str) -> Row | None:
+        return await self._one(
+            "update colleges set archived_at = now() where id = %s and archived_at is null returning *",
+            (college_id,),
+        )
+
+    async def add_college_task(self, college_id: str, task: str, due_on: date | None = None) -> Row | None:
+        """One more checklist item, at the end of that application's list."""
+        return await self._one(
+            """
+            insert into college_tasks (college_id, task, position, due_on)
+            select c.id, %s, coalesce((select max(position) from college_tasks where college_id = c.id), 0) + 1, %s
+              from colleges c where c.id = %s and c.archived_at is null
+            returning *
+            """,
+            (task, due_on, college_id),
+        )
+
+    async def set_college_task(self, task_id: int, state: str) -> Row | None:
+        """Mark a checklist item open, done or skipped (not needed)."""
+        if state not in {"open", "done", "skipped"}:
+            raise ValueError(f"not a checklist state: {state}")
+        return await self._one(
+            """
+            update college_tasks set state = %s,
+                   closed_at = case when %s = 'open' then null else now() end
+             where id = %s returning *
+            """,
+            (state, state, task_id),
+        )
+
+    # -- deca (sql/027) ------------------------------------------------------------------------
+
+    async def save_roleplay(self, *, area: str, event: str, situation: str, score: int, scores: dict,
+                            strengths: str | None, improve: str | None) -> Row:
+        row = await self._one(
+            """
+            insert into roleplays (area, event, situation, score, scores, strengths, improve)
+            values (%s, %s, %s, %s, %s, %s, %s) returning *
+            """,
+            (area, event, situation, score, Jsonb(scores), strengths, improve),
+        )
+        assert row is not None
+        return row
+
+    async def recent_roleplays(self, limit: int = 5) -> list[Row]:
+        return await self._fetch(
+            "select * from roleplays order by finished_at desc, id limit %s",
+            (limit,),
         )
 
 

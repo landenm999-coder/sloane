@@ -22,6 +22,7 @@ EXTERNAL: dict[str, object] = {
     "anthropic_effort": "",
     "canvas_base_url": "",
     "canvas_token": "",
+    "canvas_feed_url": "",
     "calendar_ics_url": "",
     "telegram_bot_token": "",
     "telegram_chat_id": 0,
@@ -32,6 +33,7 @@ EXTERNAL: dict[str, object] = {
     "gmail_token_url": "",
     "gmail_api_base": "",
     "capture_token": "",
+    "weather_location": "",
 }
 
 

@@ -1,6 +1,6 @@
 """The skills registry: commands, rule matches, sessions, FACTS, panels, nudges.
 
-DESTRUCTIVE: truncates skill_sessions.
+DESTRUCTIVE: truncates skill_sessions; clears update ids 1001-1100 from messages.
 
 The unit half runs against an in-memory store; the integration half runs the
 same flows through the real session table and the real bot.
@@ -120,6 +120,12 @@ async def unit() -> None:
     check("and says why", "boom" in failed.detail, True)
 
     check("a crashing match falls through to the next skill", (await reg.route("count for me")).speech, "counting")
+    check("her name in front doesn't hide the request",
+          [(await reg.route(t)).speech for t in ("Sloane, count for me", "hey Sloane count for me", "sloane: count for me")],
+          ["counting", "counting", "counting"])
+    from sloane.skills import unaddressed
+    check("only her name is set aside", [unaddressed("Sloane"), unaddressed("Sloanes idea"), unaddressed("ask Sloane")],
+          ["Sloane", "Sloanes idea", "ask Sloane"])
     check("nothing matches: the agent answers", await reg.route("what's due?"), None)
 
     check("a command can open a session", (await reg.command("count", "")).speech, "Say anything.")
@@ -209,6 +215,9 @@ async def integration() -> None:
                       telegram_chat_id=42, telegram_bot_token="x")
     async with Store(config) as store:
         await store._exec("truncate skill_sessions")
+        # The bot dedupes on update_id: clear the ids this test sends so a
+        # second run against the same database is not silently skipped.
+        await store._exec("delete from messages where update_id between 1001 and 1100")
         check("no session to start with", await store.active_session(30), None)
         first = await store.start_session("counter", {"n": 0})
         second = await store.start_session("counter", {"n": 5})
