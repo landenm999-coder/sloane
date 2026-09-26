@@ -83,7 +83,12 @@ Send these to her on Telegram. Each should do what it says.
 4. `remind me in 2 minutes to test this` → a reminder, with Snooze buttons.
 5. `put batteries on the grocery list and remind me at 7 to charge the car` → both done.
 6. `who won the Broncos game?` → "Checking.", then the answer.
-7. `/college add CU Boulder EA nov 1` → add each school you're applying to, one message each.
+7. Add every school you're applying to in one message, one per line:
+   ```
+   /college add CU Boulder EA nov 1
+   Colorado State University (CSU) RD feb 1
+   Colorado School of Mines EA nov 1
+   ```
    Then `just finished my Boulder essays` and `what's left for Boulder?`
 8. `/roleplay` → a DECA scenario. Present (typing or voice), say "I'm done", answer two
    questions, get a score.

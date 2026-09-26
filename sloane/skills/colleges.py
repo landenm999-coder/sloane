@@ -2,6 +2,7 @@
 
     /college add CU Boulder EA nov 1                 a school, its plan and deadline, the usual checklist
     /college add Colorado State University (CSU) RD feb 1    a nickname in brackets
+    /college add CU Boulder EA nov 1; Mines EA nov 1         several at once (or one per line)
     /colleges                                        every application, the next deadline first
     /college boulder                                 one school, its checklist numbered
     /college boulder done essays  ·  done 2          tick an item, by its words or its number
@@ -38,6 +39,7 @@ MAX_NAME = 80
 MAX_NICKNAME = 20
 MAX_TASK = 120
 FACTS_COLLEGES = 8
+MAX_AT_ONCE = 15
 
 # What nearly every application needs. He skips what a school doesn't want.
 DEFAULT_TASKS = ("Application form", "Essays", "Recommendations", "Transcript", "Test scores", "Fee or waiver")
@@ -312,6 +314,24 @@ class Colleges(Skill):
 
     # -- commands ------------------------------------------------------------------------
 
+    async def add_many(self, rest: str) -> Answer:
+        """Several schools at once, one per line or split by semicolons."""
+        parts = [p.strip() for p in re.split(r"[;\n]+", rest) if p.strip()]
+        if len(parts) <= 1:
+            return await self.add(rest)
+        answers = [await self.add(part) for part in parts[:MAX_AT_ONCE]]
+        added = sum(a.speech.startswith("Added ") for a in answers)
+        if added == len(answers):
+            speech = f"Added all {added}."
+        elif added == 0:
+            speech = "None of those went on; the reasons are below."
+        else:
+            speech = f"Added {added} of {len(answers)}; the others need a look."
+        if len(parts) > MAX_AT_ONCE:
+            speech += f" I took the first {MAX_AT_ONCE}."
+        lines = [f"• {a.speech}" for a in answers]
+        return Answer(speech, "\n".join(lines + ["", "`/colleges` shows them all."]))
+
     async def add(self, rest: str) -> Answer:
         today = self.ctx.today()
         text = safe_field(rest, limit=300)
@@ -402,9 +422,9 @@ class Colleges(Skill):
         rest = rest.strip()
         if name == "colleges" or not rest:
             return await self.listing()
-        verb, _, tail = rest.partition(" ")
+        verb, tail = (re.split(r"\s+", rest, maxsplit=1) + [""])[:2]
         if verb.lower() in {"add", "new"}:
-            return await self.add(tail)
+            return await self.add_many(tail)
         row, action, ambiguous = await self._resolve(rest)
         if row is None:
             if ambiguous:

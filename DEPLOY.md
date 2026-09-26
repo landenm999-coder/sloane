@@ -390,7 +390,8 @@ for DECA practice (she plays the judge; answer by voice note for the real thing)
 stops a quiz or a role-play.
 
 **College applications, first.** It's application season, so add every school you're
-applying to now: `/college add <school> <EA|ED|RD> <deadline>`, a nickname in brackets
+applying to now: `/college add <school> <EA|ED|RD> <deadline>` (several at once, one per
+line or split by `;`), a nickname in brackets
 if you use one (`/college add Colorado State University (CSU) RD feb 1`). Each gets
 the usual checklist; `/college csu skip scores` for a test-optional school,
 `/college csu add portfolio by oct 20` for anything extra. She reminds you two

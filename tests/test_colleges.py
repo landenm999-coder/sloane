@@ -218,8 +218,16 @@ async def integration() -> None:
         # -- said in words: recorded by rules, every time, and only for his schools -----------
         await store._exec("truncate colleges, college_tasks cascade")
         now["at"] = datetime(2026, 9, 24, 9, 0, tzinfo=DEN)
-        await cmd("add CU Boulder EA nov 1")
-        await cmd("add University of Denver RD jan 15")
+        several = await cmd("add CU Boulder EA nov 1; University of Denver RD jan 15\nReed College EA nov 1")
+        check("several at once, split by ; or new lines", (several.speech, several.detail.splitlines()[:3]), (
+            "Added all 3.", ["• Added CU Boulder, Early Action, due Sun Nov 1, in 38 days.",
+                             "• Added University of Denver, Regular Decision, due Fri Jan 15, 2027, in 113 days.",
+                             "• Added Reed College, Early Action, due Sun Nov 1, in 38 days."]))
+        mixed = await cmd("add Tulane EA 2026-09-01; Reed College")
+        check("ones that can't be added say why", (mixed.speech, mixed.detail.splitlines()[:2]), (
+            "None of those went on; the reasons are below.",
+            ["• Tue Sep 1 has already passed.", "• Reed College is already on your list."]))
+        await cmd("reed drop")
         route = reg.route
         check("finished an item", (await route("just finished my Boulder essays")).speech,
               "Essays done for CU Boulder; left: application form, recommendations, transcript, test scores and "
