@@ -50,3 +50,21 @@ jobs:
           run sh -c 'ffmpeg -hide_banner -encoders | grep -q libopus && echo "ffmpeg can make voice notes"'
           # The local (British) voice: piper-tts and its bundled espeak load on arm64.
           run python -c "from piper import PiperVoice; from piper.download_voices import download_voice; print('piper ok')"
+          # The British voice end to end, as the box first uses it: fetched by
+          # name, loaded, spoken, and made into an OGG/Opus voice note.
+          run sh -c 'python - <<"PY"
+          import asyncio
+          from sloane.config import Settings
+          from sloane.providers.tts import PiperTTS
+
+          async def main():
+              tts = PiperTTS(Settings(piper_voice="en_GB-cori-medium", embed_cache_dir="/tmp/voices"))
+              tts._timeout = 600  # emulated arm64 is slow; the box is not
+              assert await tts.warm(), "the voice did not fetch or load"
+              audio = await tts.synthesize("Good morning. Two things are due today.")
+              open("/tmp/voice.wav", "wb").write(audio.wav)
+              print(f"piper spoke {len(audio.wav)} bytes in {audio.usage.latency_ms} ms (emulated)")
+
+          asyncio.run(main())
+          PY
+          ffmpeg -loglevel error -i /tmp/voice.wav -c:a libopus /tmp/voice.ogg && test -s /tmp/voice.ogg && echo "voice note made"'
