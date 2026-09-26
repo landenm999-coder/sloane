@@ -183,10 +183,13 @@ def _line(raw: str, judge: str) -> str:
 
 
 def _area(words: str) -> str:
-    key = words.strip().lower()
+    """A known area by its short name; anything else is his own words, which
+    the scenario writer understands ("principles of marketing", "sports
+    and entertainment marketing"). Never guessed from the first word."""
+    key = " ".join(words.lower().split())
     if not key:
         return ""
-    return AREAS.get(key) or AREAS.get(key.split()[0]) or safe_field(words, limit=60)
+    return AREAS.get(key) or safe_field(words.strip(), limit=60)
 
 
 class Deca(Skill):

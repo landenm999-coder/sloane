@@ -73,6 +73,11 @@ check("a speaker label is never read aloud",
       [_line(t, "Dana Park, owner of Summit Coffee") for t in (
           "JUDGE: Go on.", "Dana Park: Go on.", "Dana: Go on.", "**Dana Park:** Go on.", "Go on: who buys it?")],
       ["Go on.", "Go on.", "Go on.", "Go on.", "Go on: who buys it?"])
+from sloane.skills.deca import _area  # noqa: E402
+
+check("areas: short names map, anything else is his words", [
+    _area("finance"), _area("  Personal   Finance "), _area("principles of marketing"), _area("business law"), _area("")],
+    ["Finance", "Personal Financial Literacy", "principles of marketing", "business law", ""])
 check("finished presenting", [finished(t) for t in ("I'm done", "That concludes my presentation. Any questions?",
                                                     "I'm done with pricing, now promotion", "first, the market")],
       [True, True, False, False])
