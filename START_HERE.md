@@ -113,7 +113,7 @@ Send these to her on Telegram. Each should do what it says.
 11. `/plan` → your free time tonight, filled with what's due soonest.
 12. `/today`, `/week`, `/grades`, `/status`.
 
-`/help` lists everything. The full table is in [DEPLOY.md](DEPLOY.md), *The first day: try
+Type `/` in her chat for the menu of commands; `/help` lists everything. The full table is in [DEPLOY.md](DEPLOY.md), *The first day: try
 everything*.
 
 ---

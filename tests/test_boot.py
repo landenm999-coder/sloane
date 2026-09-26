@@ -166,6 +166,12 @@ def main() -> None:
     with TestClient(create_app()) as client:
         check("she says hello once she's up", wait_for(lambda: any(
             p.get("text") == FIRST for p in telegram.texts())), True)
+        check("the command menu is set, for his chat only", wait_for(lambda: any(
+            m == "setMyCommands" for m, _ in telegram.calls)), True)
+        menu_call = next((p for m, p in telegram.calls if m == "setMyCommands"), {})
+        check("the menu has the core and the skills", (menu_call.get("scope"),
+              {"today", "college", "roleplay", "status"} <= {c["command"] for c in menu_call.get("commands", [])}),
+              ({"type": "chat", "chat_id": CHAT}, True))
         health = client.get("/health").json()
         check("/health", (health["ok"], health["database"], health["bot"], {"colleges", "deca"} <= set(health["skills"])),
               (True, "up", "polling", True))

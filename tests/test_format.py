@@ -106,6 +106,22 @@ async def bot_half() -> None:
 
 asyncio.run(bot_half())
 
+
+# -- the command menu Telegram shows on "/", from the same lines /help shows ---------
+from sloane.telegram import BEHIND_HELP, EVERYDAY_HELP, menu
+
+got = menu(["`/today` · `/week` — the **schedule**, no AI", "`/college <school>` its checklist · `done <item>`",
+            "`/today` — said twice, first one wins", "`/Bad-Name` — not a command Telegram takes",
+            "`/plan` — " + "x" * 300])
+check("menu: every command before the dash, described by what follows",
+      [(c["command"], c["description"][:20]) for c in got],
+      [("today", "the schedule, no AI"), ("week", "the schedule, no AI"), ("plan", "x" * 20)])
+check("menu: descriptions fit Telegram's 256", max(len(c["description"]) for c in got), 256)
+full = menu([*EVERYDAY_HELP, *BEHIND_HELP])
+check("menu: the everyday commands lead", [c["command"] for c in full][:3], ["today", "week", "grades"])
+check("menu: names are Telegram's shape", all(__import__("re").fullmatch(r"[a-z0-9_]{1,32}", c["command"])
+                                              for c in full), True)
+
 if FAILURES:
     print(f"FAIL ({len(FAILURES)})")
     for f in FAILURES:

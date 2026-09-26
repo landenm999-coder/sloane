@@ -97,6 +97,7 @@ def create_app() -> FastAPI:
                 from sloane.hello import announce
 
                 asyncio.create_task(announce(store, bot.say))
+                asyncio.create_task(bot.set_menu())
         else:
             log.warning("TELEGRAM_BOT_TOKEN is unset; running without the bot")
 

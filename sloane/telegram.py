@@ -70,6 +70,44 @@ def split_message(text: str, limit: int = TELEGRAM_LIMIT) -> list[str]:
 
 API = "https://api.telegram.org"
 
+# /help's sections, and the source of the command menu Telegram shows on "/".
+EVERYDAY_HELP = (
+    "`/today` · `/week` — the schedule straight from the database, no AI",
+    "`/grades` — current course grades from Canvas",
+    "`/brief` — the morning brief, right now",
+    "`/remind 5pm call Keegan` — a reminder at a time; `/reminders`, `/unremind <n>`",
+    "`/promise <what> by <when>` — track a promise; `/promises`, `/kept <n>`",
+    "`/done <assignment>` — handed it in; stop counting it as due",
+)
+BEHIND_HELP = (
+    "`/status` — is anything broken? (no AI)",
+    "`/jobs` — what ran, and whether it worked",
+    "`/sync` — pull Canvas, the calendar and shifts now",
+    "`/inbox` — triage new email now",
+    "`/usage` — model calls in the last 24h",
+    "`/state` — the durable facts I hold",
+    "`/trust` — what I may do without asking; `/revoke <action> <target>` makes me ask again",
+)
+_MENU_COMMAND = re.compile(r"`/([a-z0-9_]{1,32})\b")
+
+
+def menu(lines: list[str] | tuple[str, ...]) -> list[dict]:
+    """Telegram's command menu from help lines: each command before a line's
+    dash, described by what follows it. First mention wins; Telegram's limits
+    (32-character names, 256-character descriptions, 100 commands) hold."""
+    out: list[dict] = []
+    seen: set[str] = set()
+    for line in lines:
+        head, dash, tail = line.partition(" — ")
+        if not dash:
+            continue
+        description = re.sub(r"\s+", " ", tail.replace("`", "").replace("**", "")).strip()[:256]
+        for name in _MENU_COMMAND.findall(head):
+            if name not in seen and description:
+                seen.add(name)
+                out.append({"command": name, "description": description})
+    return out[:100]
+
 # "typing…" lasts about five seconds on his screen; renew it a little sooner.
 # Calls whose text may carry her Markdown, shown as Telegram HTML.
 FORMATTED_METHODS = frozenset({"sendMessage", "editMessageText"})
@@ -254,6 +292,22 @@ class Bot:
                 trusted=not reply.tainted,
             ),
         )
+
+    async def set_menu(self) -> bool:
+        """The commands Telegram lists when he types "/", in his chat only.
+        Set at every start (it's one call), so a new skill shows up on its own."""
+        if not self._owner:
+            return False
+        skill_help = self.skills.help_lines() if self.skills is not None else []
+        commands = menu([*EVERYDAY_HELP, *skill_help, "`/help` — everything I can do", *BEHIND_HELP])
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                await self._call(client, "setMyCommands", commands=commands,
+                                 scope={"type": "chat", "chat_id": self._owner})
+        except (httpx.HTTPError, RuntimeError) as exc:
+            log.warning("could not set the command menu: %s", exc)
+            return False
+        return True
 
     async def say(self, text: str) -> None:
         """A plain line to Landen's chat. Nothing if there is no owner."""
@@ -758,24 +812,13 @@ class Bot:
                     "\"put milk on the grocery list\" · \"who won the game?\" · \"help me plan tonight\"",
                     "",
                     "**Every day**",
-                    "`/today` · `/week` — the schedule straight from the database, no AI",
-                    "`/grades` — current course grades from Canvas",
-                    "`/brief` — the morning brief, right now",
-                    "`/remind 5pm call Keegan` — a reminder at a time; `/reminders`, `/unremind <n>`",
-                    "`/promise <what> by <when>` — track a promise; `/promises`, `/kept <n>`",
-                    "`/done <assignment>` — handed it in; stop counting it as due",
+                    *EVERYDAY_HELP,
                     "",
                     "**Skills**",
                     *skill_help,
                     "",
                     "**Behind the scenes**",
-                    "`/status` — is anything broken? (no AI)",
-                    "`/jobs` — what ran, and whether it worked",
-                    "`/sync` — pull Canvas, the calendar and shifts now",
-                    "`/inbox` — triage new email now",
-                    "`/usage` — model calls in the last 24h",
-                    "`/state` — the durable facts I hold",
-                    "`/trust` — what I may do without asking; `/revoke <action> <target>` makes me ask again",
+                    *BEHIND_HELP,
                 ]),
             )
         if self.skills is not None:
