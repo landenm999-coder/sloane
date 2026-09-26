@@ -66,6 +66,7 @@ Skip this if you already have one.
    normal), then two more:
    - **What should she call you?** Press Enter for "Landen", or type `sir`.
    - **A British voice?** Type `y` for the full JARVIS feel.
+   - **Morning brief as a voice note?** `y` and your 6:35 AM brief arrives spoken.
 4. It asks you to **log in to Claude once**. Choose your Claude account (not an API key), open
    the link it prints, approve, paste the code back if it asks, then type `/exit`.
 5. It finishes with **"Done."** Within a minute she messages you on Telegram: *"Sloane here, up

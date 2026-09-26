@@ -98,6 +98,10 @@ main() {
       [yY]*) set_env "$draft" SPEAK_PROVIDER piper
              set_env "$draft" PIPER_VOICE en_GB-cori-medium ;;
     esac
+    v=$(ask 'Morning brief as a voice note, not text? [y/N]: ')
+    case "$v" in
+      [yY]*) set_env "$draft" VOICE_BRIEFS morning_brief ;;
+    esac
     mv "$draft" .env
     echo "Saved .env (chmod 600). Edit it later with: nano $DIR/.env"
   else
