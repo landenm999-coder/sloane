@@ -105,7 +105,7 @@ Supabase. Everything external is tested against local stubs, and the real-model 
 | Reminders | "remind me at 5 to call Keegan", typed or spoken, or `/remind tomorrow 7am …`. The time comes from a rule-based parser (number words included) and never touches a model. Delivered by an every-minute job; held through quiet hours and marked late; claimed once; retried if the send fails. `/reminders`, `/unremind <n>` | `sloane/reminders.py`, `jobs/briefs.py` `reminders`, `sql/006_reminders.sql` |
 | Canvas alerts | entity_sync compares each assignment before/after (`school/changes.py` `classify`); new-and-future, graded (+score), newly missing, due moved → `school_changes` rows → one rule-rendered message (no model), held through quiet hours, claimed once, retried on send failure; first sync is a silent baseline; `/sync` announces immediately | `sloane/school/changes.py`, `sql/007_school_changes.sql` |
 | Watchdog | `watchdog` job every 30 min: failed/partial jobs, a lane provider failing every call for 3h (Claude-login hint), dead Gmail grant; told after 60 min grace, repeated every 24h, "working again" on recovery; `alerts` table; jobs can now record `partial` | `sloane/jobs/watchdog.py`, `sql/008_watchdog.sql` |
-| Capture intake | `POST /capture` (bearer `CAPTURE_TOKEN` ≥32 chars, constant-time compare; off otherwise; 64 KB body cap; text never logged) → trusted `user` episode `source=capture` dated `captured_at`; "remind me …" → reminder. Reach via `tailscale serve` (DEPLOY §7d). The Capture app side is not built yet | `sloane/capture.py`, `tests/test_capture.py` |
+| Capture intake | `POST /capture` (bearer `CAPTURE_TOKEN` ≥32 chars, constant-time compare; off otherwise; 64 KB body cap; text never logged) → trusted `user` episode `source=capture` dated `captured_at`; "remind me …" → reminder. Reach via `tailscale serve` (DEPLOY §7d). The Capture app side is landenm999-coder/capture#2 | `sloane/capture.py`, `tests/test_capture.py` |
 | Promises | `/promise <what> [to Name] [by when]` → commitments row (person via `person_id`, due via the reminder parser, "by <day>" = 8 PM that day); `/promises`, `/kept <n>`. Upcoming reminders are now in FACTS too, so briefs and answers mention them | `sloane/promises.py`, `tests/test_promises.py` |
 | Weekly review + backup | `weekly_review` Sunday 19:00 (agent turn with this week's graded/missing/kept record); `backup` 00:30 → JSON of `Store.BACKUP_TABLES` to BACKUP_DIR or `<EMBED_CACHE_DIR>/backups`, atomic write, 14 kept; `scripts/restore_backup.py FILE [--tables] [--apply]` merges rows back (existing rows win, column names checked against the schema) | `jobs/briefs.py`, `sql/009_weekly.sql`, `tests/test_weekly.py` |
 | Voice briefs | `VOICE_BRIEFS` (comma job names) → those briefs go via `JobContext.speak` (= `bot.reply(as_voice=True)`, text fallback) | `jobs/briefs.py` `_brief`, `main.py` |
@@ -149,16 +149,19 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
 
 ## In flight
 
-- **PR landenm999-coder/sloane#12 (draft)**: the skills build-out plus the partner upgrade. It's complete and
-  green (44/44 suites, eval 58/58), waiting on review and merge to main. After merging, the box needs
-  `git pull`, a rebuild and the migrations (`sql/014`–`028`, all idempotent). `install.sh` does all of that.
-  Then add every school with `/college add <school> <EA|ED|RD> <deadline>` (DEPLOY, "College applications").
+- **PR landenm999-coder/sloane#12**: the skills build-out, the partner upgrade, colleges, DECA, the British
+  voice and capture contract v2. Complete and green (45/45 suites, eval 58/58); waiting on Landen to merge it
+  to main. After merging, `install.sh` (the upgrade command) pulls, rebuilds and applies `sql/014`–`028`.
+  Then work down DEPLOY's "The first day: try everything" table, and add every school with
+  `/college add <school> <EA|ED|RD> <deadline>`.
+- **PR landenm999-coder/capture#2**: the Capture → Sloane client (Settings → Sloane, an IndexedDB outbox,
+  memory-only by default). Tested in Chromium against a real Sloane server; not yet on a phone. Merging it
+  deploys it (Vercel); then DEPLOY §7d on the box (`CAPTURE_TOKEN`, `CORS_ORIGINS`, `tailscale serve`).
 
 ## Backlog (ideas, in priority order)
 
-1. **Capture → Sloane client** (in the capture repo): settings for URL + token, a POST after each transcription,
-   and an offline retry queue. Sloane's side (`POST /capture`) is done. The exact contract is in
-   **`CAPTURE_API.md`**, with the setup in DEPLOY §7d.
+1. Whatever the first real week turns up. She has never run against real Telegram, Canvas, the calendar or
+   Groq; expect small fixes (DEPLOY's "try everything" table is the checklist).
 2. Infinite Campus (grades), deliberately out of v1. Needs district credentials, and repeated automated logins can
    lock the account.
 3. P5 phone calls, beyond v1.
@@ -168,6 +171,7 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
 
 ## Only Landen can do (the whole list; see DEPLOY.md)
 
+0. Merge landenm999-coder/sloane#12 and landenm999-coder/capture#2 (the installer deploys `main`).
 1. Create the Oracle Cloud ARM instance (DEPLOY §1).
 2. SSH in and run the one-command installer (DEPLOY "The fast way"):
    `curl -fsSL https://raw.githubusercontent.com/landenm999-coder/sloane/main/scripts/install.sh | bash`.
@@ -175,7 +179,10 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
    command. (The manual steps are DEPLOY §2–8.)
 3. Optional Gmail (DEPLOY §7c): a Google Cloud Desktop OAuth client, **published In production** (Testing tokens
    die after 7 days), then `python3 scripts/gmail_auth.py` on the box.
-4. Open decision, not set up: a nightly cloud routine that keeps improving the repo. It would spend his Claude limits.
+4. Optional British voice: `SPEAK_PROVIDER=piper` and `PIPER_VOICE=en_GB-cori-medium` in `.env` (DEPLOY §7b).
+5. Capture on the phone: Tailscale on the phone, `CAPTURE_TOKEN` + `CORS_ORIGINS` on the box, then
+   Capture → Settings → Sloane (DEPLOY §7d).
+6. Open decision, not set up: a nightly cloud routine that keeps improving the repo. It would spend his Claude limits.
 
 Security rules he follows: never paste tokens or credentials into chat. Credentials live only in `.env`
 (gitignored, chmod 600). The ICS URL and the Canvas token are passwords.

@@ -256,20 +256,9 @@ checks a password, and it stays off until you set one.
    your own devices. **Never use `tailscale funnel`**: that would put her on the
    public internet.
 
-3. In Capture's settings, enter that URL and the token (the full request/response contract is in `CAPTURE_API.md`). Test it from any
-   device on your tailnet:
-
-   ```bash
-   curl -s -X POST https://<box>.<tailnet>.ts.net/capture \
-     -H "Authorization: Bearer $CAPTURE_TOKEN" -H "Content-Type: application/json" \
-     -d '{"text": "remind me in 10 minutes to test capture"}'
-   ```
-
-   Whatever you capture is stored in your own voice, so she can recall it later. A captured
-   "remind me …" becomes a real reminder.
-
-4. Capture is a web page, so its POST to Sloane is cross-origin and the browser checks with
-   Sloane first. Allow Capture's address (the one in your phone's address bar) in `.env`, then restart:
+3. Capture is a web page, so its call to Sloane is cross-origin and the browser checks
+   with Sloane first. Allow Capture's address (the one in your phone's address bar), then
+   restart:
 
    ```bash
    echo 'CORS_ORIGINS=https://<your-capture-app>.vercel.app' >> .env
@@ -277,6 +266,25 @@ checks a password, and it stays off until you set one.
    ```
 
    Only `/capture` answers cross-origin; `/facts`, `/state` and the rest never do.
+   `doctor.py` warns if this is missing.
+
+4. In Capture, go to **Settings → Sloane**. Enter `https://<box>.<tailnet>.ts.net` and the
+   token, then press **Connect**. The test stores nothing. If Chrome asks whether the site may
+   reach devices on your local network, allow it. From then on, every capture is also
+   remembered by Sloane ("what was that idea about the bakery site?"). If the phone is off the
+   tailnet, captures wait on the phone and go when it's back.
+
+   By default she only *remembers* captures, because Capture already sets your reminders and
+   logs expenses. Tick **Let Sloane act on captures too** if you'd rather she also set
+   "remind me …" reminders (on Telegram) and ran her list and habit rules. You'd then hear
+   some things twice. The full contract is `CAPTURE_API.md`. To test from any device on
+   your tailnet:
+
+   ```bash
+   curl -s -X POST https://<box>.<tailnet>.ts.net/capture \
+     -H "Authorization: Bearer $CAPTURE_TOKEN" -H "Content-Type: application/json" \
+     -d '{"check": true}'          # {"ok": true}: connected, nothing stored
+   ```
 
 ## 7e. Optional: the TV dashboard (2 minutes)
 
@@ -316,6 +324,29 @@ Then message the bot on Telegram. She should answer.
 docker compose run --rm sloane python -c "print('ok')"   # sanity
 curl -s localhost:8000/health                            # loopback only
 ```
+
+### The first day: try everything
+
+Each of these should work on day one. If one doesn't, `/status` and
+`docker compose run --rm sloane python scripts/doctor.py` say why.
+
+| Say or type on Telegram | What should happen |
+|---|---|
+| `hey, how's it going?` | a line back in her voice, not a briefing; "typing…" at once and the reply written in place |
+| `what's due tomorrow?`, then `and friday?` | the exact rows from Canvas; the follow-up understood without repeating yourself |
+| a voice note: "what's on today?" | a voice note back (British, if you set `PIPER_VOICE=en_GB-cori-medium`) |
+| `remind me in 2 minutes to test this` | a reminder in 2 minutes, with Snooze buttons |
+| `put batteries on the grocery list and remind me at 7 to charge the car` | both done in one go, each result shown under her reply |
+| `who won the Broncos game?` | "Checking.", then the answer with a source |
+| `/college add CU Boulder EA nov 1`, then `just finished my Boulder essays`, then `what's left for Boulder?` | the school, the checklist ticked, and what's left with the deadline |
+| `/roleplay` | a DECA scenario; present by text or voice, say "I'm done", answer 2 questions, get a score |
+| `/countdown DECA districts dec 3`, `/habit add reading`, `did reading` | a countdown and a streak (the heartbeat nudges you later) |
+| `spent 12 on lunch`, `/budget 60` | the week's spending against the budget |
+| `/plan` | tonight's free time filled with what's due soonest |
+| `my manager at work is Dana`, then the next morning `/memory` | the nightly learn job kept it |
+| `/today`, `/week`, `/grades`, `/status` | straight from the database, even if every model is down |
+| `https://<box>.<tailnet>.ts.net/tv` on a tablet | the wall dashboard |
+| a capture in the Capture app, then ask Sloane about it | she remembers it |
 
 ---
 

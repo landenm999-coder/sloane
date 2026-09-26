@@ -410,6 +410,11 @@ def check_extras(config: Settings) -> None:
         record("capture", FAIL, f"CAPTURE_TOKEN is under {MIN_TOKEN} characters, so capture stays off")
     else:
         record("capture", PASS, "POST /capture is on (reach it over Tailscale, never a public port)")
+        if not config.cors_origins.strip():
+            record("capture: cors", WARN, "CORS_ORIGINS is empty, so the Capture app (a web page) can't reach "
+                   "/capture; add its address, e.g. CORS_ORIGINS=https://<your-capture-app>.vercel.app (DEPLOY §7d)")
+        else:
+            record("capture: cors", PASS, f"/capture answers {config.cors_origins.strip()}")
 
     folder = config.backup_dir or (str(Path(config.embed_cache_dir) / "backups")
                                    if config.embed_cache_dir else "")
