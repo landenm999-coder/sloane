@@ -70,6 +70,17 @@ async def check_database(config: Settings) -> None:
         else:
             record("schema", PASS, f"{len(EXPECTED_TABLES)} tables present")
 
+        exposed = await store._fetch(
+            "select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace "
+            "where n.nspname = 'public' and c.relkind in ('r', 'p') and not c.relrowsecurity"
+        )
+        if exposed:
+            names = ", ".join(sorted(r["relname"] for r in exposed)[:5])
+            record("api lockdown", WARN, f"{len(exposed)} tables without row-level security ({names}), so "
+                   "Supabase's web API can reach them. Re-apply the migrations (sql/999_lock_public.sql).")
+        else:
+            record("api lockdown", PASS, "row-level security on every table; Supabase's web API sees nothing")
+
         ext = await store._fetch("select extversion from pg_extension where extname = 'vector'")
         if not ext:
             record("pgvector", FAIL, "the vector extension is not installed. Enable it in Supabase → Database → Extensions.")

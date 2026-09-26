@@ -425,6 +425,7 @@ it's working.
 
 | Symptom | Cause |
 |---|---|
+| Supabase emails "table publicly accessible" / RLS disabled | The migrations weren't all applied (the last one, `999_lock_public.sql`, turns row-level security on everywhere). Run the installer again. |
 | `health` says `database: down` | Wrong `DATABASE_URL`, or you took the **transaction** pooler (6543). Use **session** (5432). `doctor.py`'s `settings` line names which. |
 | `prepared statement already exists` | Same thing — transaction-mode pooler. The code disables prepared statements, so if you see this, an old image is running: rebuild. |
 | Bot silent, no errors | `TELEGRAM_CHAT_ID` does not match the account messaging her. She drops unknown chats on purpose. |

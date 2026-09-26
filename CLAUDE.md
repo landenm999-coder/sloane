@@ -56,7 +56,8 @@ Dates from his words go through `sloane/dates.py`, times through `sloane/reminde
 - Real-model check: `python scripts/eval.py 'postgresql://postgres@/sloane_eval?host=/tmp&port=5433'`
   (about 24 `claude -p` calls; must stay 58/58).
 - Every bug fix gets a regression test that fails on the old code. Confirm that by stashing the fix and rerunning.
-- New migrations are `sql/00N_*.sql` and must be idempotent (CI applies them twice). If a migration adds a
+- New migrations are `sql/00N_*.sql` and must be idempotent (CI applies them twice). `sql/999_lock_public.sql`
+  sorts last on purpose (row-level security on every table, Supabase's API roles revoked); leave it last. If a migration adds a
   table, add it to `EXPECTED_TABLES` in `scripts/doctor.py`. If it adds a job, add the handler to
   `jobs/briefs.py` `HANDLERS` and the name to `tests/test_jobs.py`.
 - Keep README, DEPLOY, `.env.example` and HANDOFF in step with the code in the same commit.
