@@ -9,7 +9,9 @@ A skill may offer any of these:
     match      plain messages it answers without a model ("add milk to my
                grocery list"), tried after the built-in rules and before the agent
     session    an ongoing mode (a quiz) that claims his next plain messages until
-               it ends, he sends /end, or it sits idle for SESSION_IDLE_MINUTES
+               it ends, he sends /end, or it sits idle for SESSION_IDLE_MINUTES.
+               A rule that opens one from plain words sets match_opens_session,
+               so a Capture note never starts one
     facts      lines for FACTS, the exact tier 4 block every answer and brief reads
     panel      a JSON-able dict for the TV dashboard: {"title": ..., "lines": [...]}
                is what /tv renders; anything else rides along in /panels
@@ -133,6 +135,9 @@ class Skill:
     help: tuple[str, ...] = ()
     # Slash command names (without the slash) routed to `command()`.
     commands: frozenset[str] = frozenset()
+    # True if `match()` can open a session ("let's do a roleplay"). Such rules
+    # are skipped for a Capture note, which is never a conversation.
+    match_opens_session: bool = False
 
     def __init__(self, ctx: SkillContext) -> None:
         self.ctx = ctx
@@ -260,6 +265,8 @@ class Registry:
 
         plain = unaddressed(text)
         for skill in self.skills:
+            if not sessions and skill.match_opens_session:
+                continue
             try:
                 answer = await skill.match(plain)
             except Exception:  # noqa: BLE001 - a broken rule falls through to the agent

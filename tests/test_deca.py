@@ -78,6 +78,14 @@ from sloane.skills.deca import _area  # noqa: E402
 check("areas: short names map, anything else is his words", [
     _area("finance"), _area("  Personal   Finance "), _area("principles of marketing"), _area("business law"), _area("")],
     ["Finance", "Personal Financial Literacy", "principles of marketing", "business law", ""])
+from sloane.skills.deca import asked_to_start  # noqa: E402
+
+check("asked in words", [asked_to_start(t) for t in (
+    "let's do a DECA roleplay", "let's do a marketing roleplay!", "can we practice a role-play for finance?",
+    "let's practice DECA", "start a roleplay", "do another role play")], ["", "marketing", "finance", "", "", ""])
+check("not a request to start", [asked_to_start(t) for t in (
+    "I did a roleplay yesterday", "how do roleplays work?", "the roleplay went badly", "practice makes perfect")],
+      [None, None, None, None])
 check("finished presenting", [finished(t) for t in ("I'm done", "That concludes my presentation. Any questions?",
                                                     "I'm done with pricing, now promotion", "first, the market")],
       [True, True, False, False])
@@ -173,6 +181,15 @@ async def integration() -> None:
         facts = await deca.facts()
         check("FACTS: recent scores and what to work on", facts[0].startswith("- DECA PRACTICE recent role-plays: ")
               and "Marketing 71/100" in facts[0] and "work on: Close by asking Dana" in facts[0], True)
+
+        # -- asked in words ----------------------------------------------------------------------
+        worded = await reg.route("let's do a finance roleplay")
+        check("'let's do a finance roleplay' starts one", (worded.speech, "Area: Finance" in script.calls[-1][0]),
+              (SCENARIO["opening"], True))
+        await reg.command("end", "")
+        check("a Capture note never opens a role-play in the chat",
+              (await reg.route("let's do a finance roleplay", sessions=False), await store.active_session(30)),
+              (None, None))
 
         # -- an area by name; /end stops without a score ---------------------------------------
         await reg.command("roleplay", "finance")

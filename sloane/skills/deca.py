@@ -4,6 +4,7 @@
     /roleplay finance         ... in an area: marketing, finance, hospitality, management,
                               entrepreneurship, personal finance, or any event he names
     /roleplays                his recent scores and what to work on
+    "let's do a marketing roleplay", "let's practice DECA"   the same, in words
     /end                      stop one early (nothing is scored)
 
 A role-play is a session, so his next messages -- typed or spoken -- go to the
@@ -112,6 +113,30 @@ sentence", "improve": "one sentence: the single most useful thing to do \
 differently next time"}"""
 
 
+# "let's do a marketing roleplay", "can we practice a roleplay for finance",
+# "let's practice DECA": a request to start one, said in words.
+_START = re.compile(
+    r"^(?:(?:let'?s|can we|could we|i want to|i wanna|wanna|time to|help me)\s+)?"
+    r"(?:do|practice|run|start|try|prep)\s+(?:a\s+|an\s+|some\s+|another\s+)?"
+    r"(?:(?P<pre>[a-z][a-z &]{1,40}?)\s+)?(?:role[\s-]?plays?)"
+    r"(?:\s+(?:for|in|on)\s+(?P<post>[a-z][a-z &]{1,40}))?\s*[.!?]*$",
+    re.I,
+)
+_PRACTICE = re.compile(r"^(?:let'?s\s+|can we\s+|time to\s+)?(?:practice|prep)\s+(?:for\s+)?deca\s*[.!?]*$", re.I)
+
+
+def asked_to_start(text: str) -> str | None:
+    """The area if he asked to start a role-play ("" for the usual one), else None."""
+    text = " ".join(text.replace("’", "'").split())
+    if _PRACTICE.match(text):
+        return ""
+    found = _START.match(text)
+    if not found:
+        return None
+    area = " ".join(w for w in (found["pre"] or found["post"] or "").split() if w.lower() != "deca")
+    return area
+
+
 def finished(said: str) -> bool:
     """Has he said he's done presenting?"""
     return bool(_DONE.search(said.replace("’", "'")))
@@ -196,6 +221,7 @@ class Deca(Skill):
     name = "deca"
     help = ("`/roleplay [area]` — DECA role-play practice, she plays the judge; `/roleplays` your scores",)
     commands = frozenset({"roleplay", "roleplays"})
+    match_opens_session = True
 
     async def _model(self, system: str, prompt: str, max_tokens: int = 700) -> str | None:
         if self.ctx.router is None:
@@ -234,6 +260,10 @@ class Deca(Skill):
                   "Present as you would at competition, typed or as voice notes. Say \"I'm done\" when you've "
                   f"finished and you'll get {QUESTIONS} questions, then your score. `/end` stops without one.")
         return Answer(_spoken(scenario["opening"]), detail)
+
+    async def match(self, text: str) -> Answer | None:
+        area = asked_to_start(text)
+        return None if area is None else await self.start(area)
 
     async def history(self) -> Answer:
         rows = await self.ctx.store.recent_roleplays(8)
