@@ -251,6 +251,15 @@ async def integration() -> None:
               "CU Boulder deferred you. That isn't a no; it goes to the next round.")
         check("got rejected from", (await route("got rejected from Denver")).speech,
               "University of Denver said no. I'm sorry.")
+        # How news actually arrives: a greeting, emoji, an emoticon.
+        await store._exec("update colleges set status = 'applying'")
+        check("with emoji and a greeting", (await route("Sloane, I got into Denver!!! 🎉")).speech,
+              "Admitted to University of Denver. Congratulations.")
+        check("with an emoticon", (await route("omg Boulder deferred me :(")).speech,
+              "CU Boulder deferred you. That isn't a no; it goes to the next round.")
+        check("'Sloane, I just sent my Boulder app'",
+              (await route("Sloane, I just sent my Boulder app")).speech.split(".")[0], "CU Boulder is in, submitted today")
+        check("but still only his schools", await route("guess what, I got into the honors program!"), None)
         await store._exec("truncate colleges, college_tasks cascade")
 
 

@@ -113,6 +113,18 @@ _GOT_DECISION = re.compile(
     r"(?:from|by|at)\s+(?P<rest>.+?)\s*[.!]*\s*$",
     re.I,
 )
+# Around the news, not part of it: a greeting or her name before, emoji,
+# emoticons and punctuation after.
+_LEADING = re.compile(r"^\s*(?:(?:hey|yo|ok|okay|so|omg|guess what|well)\b[\s,!.]*)*(?:sloane\b[\s,:!.-]*)?", re.I)
+
+
+def _trim(text: str) -> str:
+    """Drop what trails the words: emoji, emoticons, "!!!". Linear, so no
+    message can make it slow."""
+    end = len(text)
+    while end and not text[end - 1].isalnum():
+        end -= 1
+    return text[:end]
 _APP_WORDS = frozenset({"app", "apps", "application", "applications", "whole", "entire"})
 _ALL_APPS = re.compile(r"^(?:college|colleges|college\s+apps?|college\s+applications?|apps|applications)$", re.I)
 _APP_SUFFIX = re.compile(r"\s+(?:app|apps|application|applications)$", re.I)
@@ -603,6 +615,8 @@ class Colleges(Skill):
     async def _did(self, text: str) -> Answer | None:
         """He says he did something the tracker records: rules, not a model, so
         it is recorded every time. Only when a school of his is named."""
+        # How news actually arrives: "Sloane, I got into Boulder!!! 🎉".
+        text = _trim(_LEADING.sub("", text, count=1))
         found = _FINISHED.match(text)
         if found:
             row, rest = await self._find(found["rest"])
