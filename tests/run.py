@@ -36,6 +36,7 @@ UNIT = [
     "test_piper.py",
     "test_format.py",
     "test_env_check.py",
+    "test_canvas_feed.py",  # its integration half runs when DATABASE_URL is set
 ]
 INTEGRATION = [
     "test_store.py", "test_school.py", "test_jobs.py", "test_agency.py", "test_mail.py",

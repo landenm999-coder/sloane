@@ -38,6 +38,8 @@ GOOD = [
     ("CANVAS_TOKEN", "1234~" + "x" * 64),
     ("CALENDAR_ICS_URL", ICS),
     ("CALENDAR_ICS_URL", ""),
+    ("CANVAS_FEED_URL", "https://dcsd.instructure.com/feeds/calendars/user_AbC123xyz.ics"),
+    ("CANVAS_FEED_URL", ""),
 ]
 for key, value in GOOD:
     check(f"{key} passes: {value[:40]}", problem(key, clean(key, value)), None)
@@ -65,6 +67,8 @@ BAD = [
     ("a Canvas page, not the address (a hand edit)", "CANVAS_BASE_URL",
      "https://dcsd.instructure.com/courses/123", "nothing after"),
     ("a truncated Canvas token", "CANVAS_TOKEN", "1234~abc", "too short"),
+    ("the Canvas calendar page, not its feed", "CANVAS_FEED_URL",
+     "https://dcsd.instructure.com/calendar", "Calendar Feed"),
     ("the calendar's web page", "CALENDAR_ICS_URL",
      "https://calendar.google.com/calendar/u/0/r", "Secret address"),
     ("the public iCal address", "CALENDAR_ICS_URL",
@@ -83,6 +87,9 @@ check("Canvas: the page he was on is cut to the address",
       clean("CANVAS_BASE_URL", "https://dcsd.instructure.com/courses/123?x=1"), "https://dcsd.instructure.com")
 check("Canvas: the scheme is added", clean("CANVAS_BASE_URL", "dcsd.instructure.com"), "https://dcsd.instructure.com")
 check("webcal is https", clean("CALENDAR_ICS_URL", ICS.replace("https://", "webcal://")), ICS)
+check("webcal is https for the Canvas feed too",
+      clean("CANVAS_FEED_URL", "webcal://dcsd.instructure.com/feeds/calendars/user_x.ics"),
+      "https://dcsd.instructure.com/feeds/calendars/user_x.ics")
 
 # The CLI the installer calls: the value in through the environment, out on stdout.
 def cli(key: str, value: str) -> tuple[int, str, str]:

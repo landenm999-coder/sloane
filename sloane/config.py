@@ -82,6 +82,9 @@ class Settings(BaseSettings):
     # coursework; it is never logged and never echoed into a reply.
     canvas_base_url: str = ""
     canvas_token: str = ""
+    # Canvas → Calendar → Calendar Feed. Used only without a token: due dates,
+    # no grades or turned-in state. A credential, like the calendar's.
+    canvas_feed_url: str = ""
 
     # The calendar's secret .ics URL is itself the credential -- anyone holding
     # it can read the whole calendar -- so it is treated like a password.

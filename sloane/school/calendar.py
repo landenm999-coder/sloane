@@ -37,22 +37,22 @@ MAX_BYTES = 8 * 1024 * 1024
 MAX_OCCURRENCES = 500
 
 
-async def fetch(url: str, *, timeout: float = 30.0) -> bytes:
+async def fetch(url: str, *, timeout: float = 30.0, what: str = "calendar feed") -> bytes:
     """Download the feed. The URL is a credential and never reaches a log."""
     if not url:
-        raise SchoolError("CALENDAR_ICS_URL is not set")
+        raise SchoolError(f"the {what} address is not set")
     try:
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
             response = await client.get(url)
     except httpx.HTTPError as exc:
         # Deliberately not interpolating the URL: it is a secret.
-        raise SchoolError(f"calendar feed unreachable: {type(exc).__name__}") from exc
+        raise SchoolError(f"{what} unreachable: {type(exc).__name__}") from exc
 
     if response.status_code >= 400:
-        raise SchoolError(f"calendar feed returned {response.status_code}")
+        raise SchoolError(f"{what} returned {response.status_code}")
     body = response.content
     if len(body) > MAX_BYTES:
-        raise SchoolError(f"calendar feed is {len(body)} bytes; refusing to parse")
+        raise SchoolError(f"{what} is {len(body)} bytes; refusing to parse")
     if b"BEGIN:VCALENDAR" not in body[:2048]:
         raise SchoolError("that URL did not return an iCalendar feed")
     return body

@@ -306,6 +306,7 @@ providers and the Telegram token, and names the remedy for each failure.
 | [@BotFather](https://t.me/botfather) | `TELEGRAM_BOT_TOKEN` | Also set `TELEGRAM_CHAT_ID`. Until you do, she answers every message with its chat id and nothing else. |
 | [Groq](https://console.groq.com/keys) | `GROQ_API_KEY` | Free: 1K req/day, 200K tok/day; Whisper 2K/day. |
 | Canvas | `CANVAS_TOKEN` | Account → Settings → New Access Token. Reads all coursework; treat as a password. |
+| Canvas, no token | `CANVAS_FEED_URL` | Only if the district hides New Access Token: Calendar → Calendar Feed. Due dates only (no grades, no turned-in state). Also a password. |
 | Google Calendar | `CALENDAR_ICS_URL` | Settings → Integrate calendar → **Secret address in iCal format**. The URL *is* the credential. |
 | [Google Cloud](https://console.cloud.google.com) | `GMAIL_CLIENT_ID/SECRET`, then `scripts/gmail_auth.py` | Optional. Desktop OAuth client; publish the app **In production** or the token dies in 7 days. DEPLOY.md §7c. |
 | Claude Code CLI | `MAIN_PROVIDER=claude_code` | Draws on the Pro subscription, not API credits. |

@@ -28,7 +28,7 @@ Put them in a note on your computer, not in a chat.
 | 3 | **Bot token** | Telegram → message **@BotFather** → `/newbot` → pick a name → copy the token |
 | 4 | **Your chat ID** | Telegram → message **@userinfobot** → copy the number |
 | 5 | **Canvas address** | Probably `https://dcsd.instructure.com` (the address you use for Canvas) |
-| 6 | **Canvas token** | Canvas → Account → Settings → **+ New Access Token** |
+| 6 | **Canvas token** | Canvas (on a computer) → Account → Settings → **+ New Access Token**. No such button? Your district turned it off: instead copy Canvas → **Calendar** → **Calendar Feed** (bottom right). The installer asks for it if you leave the token blank |
 | 7 | **Calendar link** | Google Calendar (on a computer) → Settings → your calendar → *Integrate calendar* → **Secret address in iCal format** |
 
 ---

@@ -103,7 +103,11 @@ main() {
     field secret TELEGRAM_BOT_TOKEN 'TELEGRAM_BOT_TOKEN: '
     field ask TELEGRAM_CHAT_ID 'TELEGRAM_CHAT_ID (a number): '
     field ask CANVAS_BASE_URL 'CANVAS_BASE_URL (e.g. https://dcsd.instructure.com): '
-    field secret CANVAS_TOKEN 'CANVAS_TOKEN: '
+    field secret CANVAS_TOKEN 'CANVAS_TOKEN (Enter if Canvas has no New Access Token button): '
+    if grep -q '^CANVAS_TOKEN=$' "$draft"; then
+      # No token: the Calendar Feed still gives every due date.
+      field secret CANVAS_FEED_URL 'CANVAS_FEED_URL (Canvas → Calendar → Calendar Feed link): '
+    fi
     field secret CALENDAR_ICS_URL 'CALENDAR_ICS_URL (the secret iCal address): '
     local v
     # Two about her, not credentials. Enter keeps the default.

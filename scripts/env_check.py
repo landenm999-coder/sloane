@@ -20,7 +20,7 @@ import sys
 from urllib.parse import urlsplit
 
 # Blank is fine for these: she runs without them and says so in /status.
-OPTIONAL = {"GROQ_API_KEY", "CANVAS_BASE_URL", "CANVAS_TOKEN", "CALENDAR_ICS_URL"}
+OPTIONAL = {"GROQ_API_KEY", "CANVAS_BASE_URL", "CANVAS_TOKEN", "CANVAS_FEED_URL", "CALENDAR_ICS_URL"}
 
 _BAD_PASSWORD = re.compile(r"[@#/?\[\]\s$]|%(?![0-9A-Fa-f]{2})")
 _RESET = ("Easiest fix: Supabase → Project Settings → Database → Reset database password, "
@@ -39,7 +39,7 @@ def clean(key: str, value: str) -> str:
             value = "https://" + value
         parts = urlsplit(value)
         value = f"{parts.scheme}://{parts.netloc}" if parts.netloc else value
-    if key == "CALENDAR_ICS_URL" and value.startswith("webcal://"):
+    if key in ("CALENDAR_ICS_URL", "CANVAS_FEED_URL") and value.startswith("webcal://"):
         value = "https://" + value.removeprefix("webcal://")
     return value
 
@@ -105,6 +105,8 @@ def problem(key: str, value: str) -> str | None:
             return "Just the address, like https://dcsd.instructure.com, with nothing after it."
     if key == "CANVAS_TOKEN" and (len(value) < 20 or re.search(r"\s", value)):
         return "That's too short for a Canvas token. Canvas → Account → Settings → + New Access Token, copy all of it."
+    if key == "CANVAS_FEED_URL" and (not value.startswith("https://") or "/feeds/calendars/" not in value):
+        return "Canvas → Calendar → Calendar Feed (bottom right) → copy the whole link. It has /feeds/calendars/ in it."
     if key == "CALENDAR_ICS_URL":
         return _calendar(value)
     return None

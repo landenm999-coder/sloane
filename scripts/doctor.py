@@ -163,12 +163,29 @@ async def check_school(config: Settings) -> None:
     """Canvas and the calendar feed. Both read-only, both credentials."""
     from sloane.school import SchoolError
 
-    if not config.canvas_token or not config.canvas_base_url:
+    if (not config.canvas_token or not config.canvas_base_url) and config.canvas_feed_url:
+        from datetime import datetime, timedelta, timezone
+
+        from sloane.school.calendar import fetch as fetch_ics
+        from sloane.school.canvas_feed import parse_feed
+
+        try:
+            now = datetime.now(timezone.utc)
+            items = parse_feed(await fetch_ics(config.canvas_feed_url, what="Canvas feed"),
+                               window_start=now - timedelta(days=config.sync_past_days),
+                               window_end=now + timedelta(days=config.sync_future_days), tz=config.timezone)
+        except SchoolError as exc:
+            record("canvas", FAIL, str(exc))
+        else:
+            record("canvas", PASS, f"{len(items)} assignments from the Calendar Feed "
+                   "(due dates only: a token adds grades and turned-in state)")
+    elif not config.canvas_token or not config.canvas_base_url:
         record(
             "canvas",
             WARN,
             "CANVAS_BASE_URL/CANVAS_TOKEN unset, so assignments will not sync. "
-            "Canvas → Account → Settings → New Access Token.",
+            "Canvas → Account → Settings → New Access Token, or, if that button isn't there, "
+            "CANVAS_FEED_URL from Canvas → Calendar → Calendar Feed.",
         )
     else:
         from sloane.school.canvas import CanvasClient
@@ -394,7 +411,7 @@ def check_values(config: Settings) -> None:
 
     wrong = []
     for key in ("DATABASE_URL", "GROQ_API_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
-                "CANVAS_BASE_URL", "CANVAS_TOKEN", "CALENDAR_ICS_URL"):
+                "CANVAS_BASE_URL", "CANVAS_TOKEN", "CANVAS_FEED_URL", "CALENDAR_ICS_URL"):
         value = getattr(config, key.lower())
         if not value:
             continue  # unset is each check's own business below

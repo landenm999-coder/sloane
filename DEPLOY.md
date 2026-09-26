@@ -430,6 +430,7 @@ it's working.
 | Bot silent, no errors | `TELEGRAM_CHAT_ID` does not match the account messaging her. She drops unknown chats on purpose. |
 | `claude_code` failing, everything else fine | The CLI login expired. Redo step 6. |
 | Canvas 401 | Token revoked or expired. Regenerate; district tokens sometimes have a lifetime. |
+| No **New Access Token** button in Canvas | The district turned student tokens off. Leave `CANVAS_TOKEN` blank and set `CANVAS_FEED_URL` to Canvas → Calendar → **Calendar Feed**. She gets every due date; not grades or whether it's turned in, so past-due work shows as unknown, never overdue. Say "finished X" to clear one. |
 | Recall empty, FACTS fine | The embedder never downloaded. `doctor.py --warm`. She still answers from FACTS, and full-text recall still works. |
 | No morning brief | `/jobs` — `deferred` means quiet hours or the budget held it (reason shown); `failed` shows the error; `never` means the scheduler didn't start — check the logs. |
 | `gmail` FAIL: access revoked or expired | The OAuth app is still in **Testing** (7-day tokens), or you removed its access. Publish it (7c step 4) and rerun `scripts/gmail_auth.py`. |
