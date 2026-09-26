@@ -1,5 +1,7 @@
 # Sloane
 
+> **Setting her up? Read [START_HERE.md](START_HERE.md)**, the whole setup step by step.
+
 Always-on personal assistant for Landen. Reached by Telegram text and voice
 notes. She runs the day: what's due, what shift, what slipped, what's next.
 

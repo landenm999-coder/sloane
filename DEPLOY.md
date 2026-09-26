@@ -1,5 +1,7 @@
 # Deploying Sloane
 
+> The short version is [START_HERE.md](START_HERE.md). This file is the detail behind it.
+
 Target: an **Oracle Cloud Always Free** ARM instance. Free forever, 2 Ampere
 cores and 12 GB, which is more than she needs. Total running cost stays $0/mo.
 
@@ -318,7 +320,9 @@ sudo systemctl enable --now sloane
 systemctl status sloane
 ```
 
-Then message the bot on Telegram. She should answer.
+Within a minute she messages you on Telegram ("Sloane here, up and running"). She
+says that once per version, so an upgrade gets "Updated and back up" and a plain
+restart gets nothing. Then say hi.
 
 ```bash
 docker compose run --rm sloane python -c "print('ok')"   # sanity

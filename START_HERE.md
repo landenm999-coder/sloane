@@ -1,0 +1,145 @@
+# Start here: Sloane, from zero to talking to her
+
+About an hour, most of it waiting. Do the steps in order. Never paste a
+password or token into a chat, including one with Claude; they only ever go into the
+installer, where they're hidden as you type.
+
+---
+
+## 1. Merge the code (2 minutes)
+
+On GitHub, open each pull request, press **Merge pull request**, then **Confirm merge**:
+
+- [Sloane #12](https://github.com/landenm999-coder/sloane/pull/12)
+- [Capture #2](https://github.com/landenm999-coder/capture/pull/2) (Vercel updates the app on its own)
+
+The installer uses `main`, so this comes first.
+
+---
+
+## 2. Collect seven things (15 minutes)
+
+Put them in a note on your computer, not in a chat.
+
+| # | What | Where |
+|---|---|---|
+| 1 | **Database URL** | [supabase.com](https://supabase.com): New project → **Connect** → *Session pooler* string (port **5432**). Put your database password into it |
+| 2 | **Groq key** | [console.groq.com/keys](https://console.groq.com/keys) → Create API key |
+| 3 | **Bot token** | Telegram → message **@BotFather** → `/newbot` → pick a name → copy the token |
+| 4 | **Your chat ID** | Telegram → message **@userinfobot** → copy the number |
+| 5 | **Canvas address** | Probably `https://dcsd.instructure.com` (the address you use for Canvas) |
+| 6 | **Canvas token** | Canvas → Account → Settings → **+ New Access Token** |
+| 7 | **Calendar link** | Google Calendar (on a computer) → Settings → your calendar → *Integrate calendar* → **Secret address in iCal format** |
+
+---
+
+## 3. Get a server (10 minutes, if Oracle has room)
+
+Skip this if you already have one.
+
+1. [Oracle Cloud](https://cloud.oracle.com) → **Compute → Instances → Create instance**.
+2. Image: **Ubuntu 24.04**. Shape: **Ampere A1** (ARM), **2 OCPUs, 12 GB**.
+3. Download the SSH key it offers and **keep it**.
+4. Create. If it says **"Out of host capacity"**, that's Oracle, not you: try again later or pick
+   another availability domain.
+5. Note the instance's **public IP**. Don't open any ports; she doesn't need any.
+
+---
+
+## 4. Install (15 minutes)
+
+1. Connect to the server from a terminal (on Windows, PowerShell works):
+
+   ```
+   ssh -i path/to/the-key.key ubuntu@YOUR.SERVER.IP
+   ```
+
+   If Windows says the key is "unprotected", move the key into `C:\Users\lande\.ssh\` and try again.
+
+2. Paste this and press Enter:
+
+   ```
+   curl -fsSL https://raw.githubusercontent.com/landenm999-coder/sloane/main/scripts/install.sh | bash
+   ```
+
+3. It asks for the seven things from step 2 (the secret ones don't show as you type; that's
+   normal), then two more:
+   - **What should she call you?** Press Enter for "Landen", or type `sir`.
+   - **A British voice?** Type `y` for the full JARVIS feel.
+4. It asks you to **log in to Claude once**. Choose your Claude account (not an API key), open
+   the link it prints, approve, paste the code back if it asks, then type `/exit`.
+5. It finishes with **"Done."** Within a minute she messages you on Telegram: *"Sloane here, up
+   and running."* That's how you know it worked.
+
+---
+
+## 5. Try everything (as you go)
+
+Send these to her on Telegram. Each should do what it says.
+
+1. `hey, how's it going?` → a line back, in her voice. "Typing…" shows at once.
+2. `what's due tomorrow?` then `and friday?` → real Canvas rows; she follows the thread.
+3. A **voice note**: "what's on today?" → a voice note back.
+4. `remind me in 2 minutes to test this` → a reminder, with Snooze buttons.
+5. `put batteries on the grocery list and remind me at 7 to charge the car` → both done.
+6. `who won the Broncos game?` → "Checking.", then the answer.
+7. `/college add CU Boulder EA nov 1` → add each school you're applying to, one message each.
+   Then `just finished my Boulder essays` and `what's left for Boulder?`
+8. `/roleplay` → a DECA scenario. Present (typing or voice), say "I'm done", answer two
+   questions, get a score.
+9. `/countdown DECA districts dec 3`, `/habit add reading`, then `did reading`.
+10. `spent 12 on lunch`, then `/budget 60`.
+11. `/plan` → your free time tonight, filled with what's due soonest.
+12. `/today`, `/week`, `/grades`, `/status`.
+
+`/help` lists everything. The full table is in [DEPLOY.md](DEPLOY.md), *The first day: try
+everything*.
+
+---
+
+## 6. Optional: Capture on your phone (10 minutes)
+
+This lets every Capture note also go to Sloane, so she remembers it.
+
+1. On the server:
+
+   ```
+   curl -fsSL https://tailscale.com/install.sh | sh && sudo tailscale up
+   sudo tailscale serve --bg 8000
+   ```
+
+   The first command prints a link to sign in to Tailscale; the second shows her address,
+   `https://….ts.net`. Write it down.
+2. Install **Tailscale** on your phone and sign in to the same account.
+3. On the server, make the Capture password and allow the app (use the address in your phone's
+   address bar when Capture is open):
+
+   ```
+   cd /opt/sloane
+   python3 -c "import secrets; print('CAPTURE_TOKEN=' + secrets.token_urlsafe(32))" >> .env
+   echo 'CORS_ORIGINS=https://YOUR-CAPTURE-ADDRESS' >> .env
+   sudo systemctl restart sloane
+   grep CAPTURE_TOKEN .env
+   ```
+
+4. In Capture: **Settings → Sloane**. Paste the `https://….ts.net` address and the token, then
+   press **Connect**. If Chrome asks about devices on your local network, allow it.
+
+---
+
+## If something's wrong
+
+- On Telegram: `/status`.
+- On the server:
+
+  ```
+  cd /opt/sloane && sudo docker compose run --rm sloane python scripts/doctor.py
+  ```
+
+  It checks every connection and says how to fix each one.
+- Logs: `journalctl -u sloane -f` (Ctrl-C to stop).
+- **She never messaged in step 4.5?** Check the bot token and chat ID with `nano /opt/sloane/.env`,
+  then `sudo systemctl restart sloane`.
+- **To change a setting later** (her voice, what she calls you): `nano /opt/sloane/.env`, save,
+  then `sudo systemctl restart sloane`.
+- **To upgrade** after new code is merged: run the step 4 command again.

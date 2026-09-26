@@ -1666,6 +1666,14 @@ class Store:
         )
         return [r["key"] for r in rows if r["fresh"]]
 
+    async def nudge_prefix_said(self, prefix: str) -> bool:
+        """Has any nudge whose key starts with `prefix` been said (and not pruned)?"""
+        row = await self._one(
+            "select 1 as said from nudges_said where key like %s limit 1",
+            (prefix.replace("%", r"\%").replace("_", r"\_") + "%",),
+        )
+        return row is not None
+
     async def unclaim_nudges(self, keys: Sequence[str]) -> None:
         """A nudge that could not be delivered is offered again next tick."""
         await self._exec("delete from nudges_said where key = any(%s)", (list(keys),))

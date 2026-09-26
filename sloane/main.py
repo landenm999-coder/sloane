@@ -92,6 +92,11 @@ def create_app() -> FastAPI:
                 skill_ctx.say = bot.say
             task = asyncio.create_task(bot.poll_forever())
             log.info("telegram poller started")
+            if config.telegram_chat_id:
+                # "I'm up", once per version: the sign an install or upgrade worked.
+                from sloane.hello import announce
+
+                asyncio.create_task(announce(store, bot.say))
         else:
             log.warning("TELEGRAM_BOT_TOKEN is unset; running without the bot")
 
