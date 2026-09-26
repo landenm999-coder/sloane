@@ -32,6 +32,7 @@ from sloane.providers.base import ProviderError
 from sloane.providers.groq import GroqProvider
 from sloane.agency import Agency, callback_data, parse_callback
 from sloane.skills import Answer, Registry
+from sloane.tgformat import formatted, to_html
 from sloane.voice import Voice
 
 log = logging.getLogger(__name__)
@@ -70,6 +71,8 @@ def split_message(text: str, limit: int = TELEGRAM_LIMIT) -> list[str]:
 API = "https://api.telegram.org"
 
 # "typing…" lasts about five seconds on his screen; renew it a little sooner.
+# Calls whose text may carry her Markdown, shown as Telegram HTML.
+FORMATTED_METHODS = frozenset({"sendMessage", "editMessageText"})
 TYPING_EVERY = 4.5
 # A command or skill still working after this long shows "typing…".
 SLOW_SKILL_SECONDS = 0.6
@@ -214,6 +217,19 @@ class Bot:
         return f"{API}/bot{self._token}/{method}"
 
     async def _call(self, client: httpx.AsyncClient, method: str, **payload) -> dict:
+        """One Bot API call. Message text is sent as HTML when it has formatting
+        (her detail is Markdown), and as the plain text if Telegram won't parse it."""
+        text = payload.get("text")
+        if method in FORMATTED_METHODS and isinstance(text, str) and "parse_mode" not in payload and formatted(text):
+            try:
+                return await self._post(client, method, **{**payload, "text": to_html(text), "parse_mode": "HTML"})
+            except RuntimeError as exc:
+                if "parse" not in str(exc).lower():
+                    raise
+                log.warning("telegram refused the formatting, sending plain text: %s", str(exc)[:200])
+        return await self._post(client, method, **payload)
+
+    async def _post(self, client: httpx.AsyncClient, method: str, **payload) -> dict:
         response = await client.post(self._url(method), json=payload)
         if response.status_code >= 400:
             raise RuntimeError(f"telegram {method} -> {response.status_code}: {response.text[:200]}")
@@ -733,25 +749,33 @@ class Bot:
             return await self._inbox()
         if name in {"start", "help"}:
             skill_help = self.skills.help_lines() if self.skills is not None else []
+            # Talking first, the everyday next, the machinery last: most of
+            # what he needs is a sentence, not a command.
             return Reply(
-                speech="I am here. Text me or send a voice note.",
+                speech="Mostly, just talk to me, typed or as a voice note. The commands are below if you want them.",
                 detail="\n".join([
-                    "`/usage` — model calls in the last 24h",
-                    "`/state` — the durable facts I hold",
-                    "`/sync` — pull Canvas, the calendar and shifts now",
+                    "**Just talk**: \"what's due tomorrow?\" · \"remind me at 5 to call Keegan\" · "
+                    "\"put milk on the grocery list\" · \"who won the game?\" · \"help me plan tonight\"",
+                    "",
+                    "**Every day**",
                     "`/today` · `/week` — the schedule straight from the database, no AI",
                     "`/grades` — current course grades from Canvas",
-                    "`/done <assignment>` — handed it in; stop counting it as due",
-                    "`/status` — is anything broken? (no AI)",
                     "`/brief` — the morning brief, right now",
-                    "`/jobs` — what ran, and whether it worked",
-                    "`/inbox` — triage new email now",
-                    "`/remind 5pm call Keegan` — a reminder at a time (or just say \"remind me…\")",
-                    "`/reminders` — what's set; `/unremind <n>` cancels one",
+                    "`/remind 5pm call Keegan` — a reminder at a time; `/reminders`, `/unremind <n>`",
                     "`/promise <what> by <when>` — track a promise; `/promises`, `/kept <n>`",
-                    "`/trust` — what I may do without asking",
-                    "`/revoke <action> <target>` — make me ask again",
+                    "`/done <assignment>` — handed it in; stop counting it as due",
+                    "",
+                    "**Skills**",
                     *skill_help,
+                    "",
+                    "**Behind the scenes**",
+                    "`/status` — is anything broken? (no AI)",
+                    "`/jobs` — what ran, and whether it worked",
+                    "`/sync` — pull Canvas, the calendar and shifts now",
+                    "`/inbox` — triage new email now",
+                    "`/usage` — model calls in the last 24h",
+                    "`/state` — the durable facts I hold",
+                    "`/trust` — what I may do without asking; `/revoke <action> <target>` makes me ask again",
                 ]),
             )
         if self.skills is not None:
