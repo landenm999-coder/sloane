@@ -25,7 +25,7 @@ Put them in a note on your computer, not in a chat.
 |---|---|---|
 | 1 | **Database URL** | [supabase.com](https://supabase.com): New project (give it a database password of **letters and numbers only**; symbols break the address) → **Connect** → *Session pooler* string (port **5432**). Replace `[YOUR-PASSWORD]`, brackets and all, with that password |
 | 2 | **Groq key** | [console.groq.com/keys](https://console.groq.com/keys) → Create API key |
-| 3 | **Bot token** | Telegram → message **@BotFather** → `/newbot` → pick a name → copy the token |
+| 3 | **Bot token** | Telegram → message **@BotFather** → `/newbot` → pick a name → copy the token. Then open the `t.me/…` link it gives you and press **Start** (a bot can't message you until you do) |
 | 4 | **Your chat ID** | Telegram → message **@userinfobot** → copy the number |
 | 5 | **Canvas address** | Probably `https://dcsd.instructure.com` (the address you use for Canvas) |
 | 6 | **Canvas token** | Canvas (on a computer) → Account → Settings → **+ New Access Token**. No such button? Your district turned it off: instead copy Canvas → **Calendar** → **Calendar Feed** (bottom right). The installer asks for it if you leave the token blank |
@@ -159,8 +159,9 @@ This lets every Capture note also go to Sloane, so she remembers it.
 
   It checks every connection and says how to fix each one.
 - Logs: `journalctl -u sloane -f` (Ctrl-C to stop).
-- **She never messaged in step 4.5?** Check the bot token and chat ID with `nano /opt/sloane/.env`,
-  then `sudo systemctl restart sloane`.
+- **She never messaged in step 4.5?** Open her chat and press **Start** (or send her anything); she
+  keeps trying for half an hour. Still nothing? Check the bot token and chat ID with
+  `nano /opt/sloane/.env`, then `sudo systemctl restart sloane`.
 - **To change a setting later** (her voice, what she calls you): `nano /opt/sloane/.env`, save,
   then `sudo systemctl restart sloane`.
 - **To upgrade** after new code is merged: run the step 4 command again.

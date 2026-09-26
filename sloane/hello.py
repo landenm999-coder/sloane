@@ -2,12 +2,14 @@
 
 Said once per version of her code (a fingerprint of the package's source), so a
 restart doesn't repeat it but an upgrade does -- which is exactly when he is at
-the terminal wondering whether it worked. No model is involved, and a send that
-fails is tried again on the next start.
+the terminal wondering whether it worked. No model is involved. A send that
+fails is tried again for a while (a bot can't message him until he has pressed
+Start in its chat, which a new install often hasn't), then on the next start.
 """
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 from collections.abc import Awaitable, Callable
@@ -22,6 +24,8 @@ FIRST = ("Sloane here, up and running. I'll brief you at 6:35 each morning, chec
          "shifts, and nudge you ahead of deadlines. Say hi, or try \"what's due tomorrow?\", "
          "/college add CU Boulder EA nov 1, or /roleplay. /help lists everything.")
 UPDATED = "Updated and back up. /help lists everything; /status says if anything needs you."
+# Seconds between tries after a failed send: about half an hour in all.
+RETRIES = (30, 60, 120, 300, 600, 900)
 
 
 def fingerprint(root: Path = PACKAGE) -> str:
@@ -35,17 +39,25 @@ def fingerprint(root: Path = PACKAGE) -> str:
     return digest.hexdigest()[:12]
 
 
-async def announce(store, say: Callable[[str], Awaitable[None]], *, root: Path = PACKAGE) -> str | None:  # noqa: ANN001
+async def announce(store, say: Callable[[str], Awaitable[None]], *, root: Path = PACKAGE,  # noqa: ANN001
+                   retries: tuple[float, ...] = RETRIES) -> str | None:
     """Tell him she's up, once per version. Returns what was said, or None."""
     key = PREFIX + fingerprint(root)
-    seen_before = await store.nudge_prefix_said(PREFIX)
-    if not await store.claim_nudges([key]):
+    if await store.nudge_prefix_said(key):
         return None  # this version already said hello
-    text = UPDATED if seen_before else FIRST
-    try:
-        await say(text)
-    except Exception as exc:  # noqa: BLE001 - try again on the next start
-        log.warning("could not say hello, will try on the next start: %s", exc)
-        await store.unclaim_nudges([key])
-        return None
-    return text
+    text = UPDATED if await store.nudge_prefix_said(PREFIX) else FIRST
+    for wait in (*retries, None):
+        try:
+            await say(text)
+        except Exception as exc:  # noqa: BLE001 - tried again below, then next start
+            if wait is None:
+                log.warning("could not say hello, will try on the next start: %s", exc)
+                return None
+            log.warning("could not say hello (has he pressed Start in the bot's chat?), "
+                        "trying again in %.0fs: %s", wait, exc)
+            await asyncio.sleep(wait)
+            continue
+        # Recorded only once it's said: a restart mid-retry just tries again.
+        await store.claim_nudges([key])
+        return text
+    return None

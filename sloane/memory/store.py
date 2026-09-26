@@ -1679,9 +1679,14 @@ class Store:
         await self._exec("delete from nudges_said where key = any(%s)", (list(keys),))
 
     async def prune_nudges(self, days: int = 30) -> int:
-        """Forget keys no skill has offered for `days`. Returns how many."""
+        """Forget keys no skill has offered for `days`. Returns how many.
+
+        Not the hello keys (sloane/hello.py): those record which versions have
+        said they're up, and forgetting one re-sends a first-install hello on a
+        plain reboot a month later. One short row per upgrade."""
         rows = await self._fetch(
-            "delete from nudges_said where offered_at < now() - make_interval(days => %s) returning key",
+            "delete from nudges_said where offered_at < now() - make_interval(days => %s) "
+            "and key not like 'hello:%%' returning key",
             (days,),
         )
         return len(rows)

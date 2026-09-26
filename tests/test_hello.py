@@ -61,9 +61,30 @@ async def integration() -> None:
             async def down(text):
                 raise RuntimeError("telegram is down")
 
-            check("an upgrade whose hello can't be sent", await announce(store, down, root=root), None)
+            check("an upgrade whose hello can't be sent", await announce(store, down, root=root, retries=(0, 0)),
+                  None)
             check("is said on the next start", await announce(store, say, root=root), UPDATED)
             check("and only once", (await announce(store, say, root=root), said), (None, [FIRST, UPDATED]))
+
+            # Before he presses Start, Telegram refuses; once he does, the retry lands.
+            (root / "a.py").write_text("version = 3\n")
+            tries: list[str] = []
+
+            async def not_started_yet(text):
+                tries.append(text)
+                if len(tries) < 3:
+                    raise RuntimeError("telegram sendMessage -> 403: bot can't initiate conversation with a user")
+                said.append(text)
+
+            check("a refused hello is tried again until it lands",
+                  (await announce(store, not_started_yet, root=root, retries=(0, 0, 0)), len(tries)), (UPDATED, 3))
+            check("and not again after", await announce(store, say, root=root), None)
+
+            # A month on, the nightly prune must not make a reboot say its first hello again.
+            await store._exec("update nudges_said set offered_at = now() - interval '90 days' "
+                              "where key like 'hello:%%'")
+            await store.prune_nudges(30)
+            check("the prune keeps which versions said hello", await announce(store, say, root=root), None)
         await store._exec("delete from nudges_said where key like 'hello:%%'")
 
 

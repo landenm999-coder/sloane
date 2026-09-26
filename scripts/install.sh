@@ -179,6 +179,7 @@ main() {
   touch .installed
 
   say "Done. She'll message you on Telegram in a minute to say she's up."
+  echo "Nothing? Open her chat in Telegram and press Start; she keeps trying for half an hour."
   echo "Then:     say hi, and work down START_HERE.md (step 5: try everything)"
   echo "Logs:     journalctl -u sloane -f"
   echo "Health:   curl -s localhost:8000/health"
