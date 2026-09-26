@@ -2,7 +2,7 @@
 
 **Read this first if you are a new Claude Code session picking up Sloane.**
 This file records what exists, what's verified, what's in flight and what's left.
-It's kept up to date at the end of every work session. Last updated: 2026-09-24.
+It's kept up to date at the end of every work session. Last updated: 2026-09-26.
 
 - Repo: `github.com/landenm999-coder/sloane`, branch `main` (commit straight to main; CI runs on push).
 - **The skills build-out (2026-09-24) is on branch `claude/cloud-credits-build-nh2vtj`, draft PR
@@ -92,7 +92,17 @@ isn't enough, because marking an application submitted silences its deadline.
 - Plain-words rules now see through "Sloane," in front and emoji or emoticons after, and "let's do a
   marketing roleplay" starts one.
 - A full boot test against a fresh database and a fake Telegram: hello, sync, `/help`, colleges and a real
-  streamed reply all worked end to end.
+  streamed reply all worked end to end. It's now automated (`tests/test_boot.py`).
+- The installer checks each pasted value and asks again with the reason (`scripts/env_check.py`; doctor
+  runs the same checks). `.env.example` had shown the transaction pooler; fixed.
+- Canvas without a token: `CANVAS_FEED_URL`, for districts that turn student tokens off.
+- Running her on his PC under WSL when Oracle has no capacity; the installer stops early, with the fix,
+  when systemd is off.
+- Telegram's "/" command menu, built from `/help`'s own lines.
+- The arm64 image test now fetches the British voice, speaks and makes a voice note (75 s emulated; passes).
+- `sql/999_lock_public.sql`: row-level security everywhere, so Supabase's auto API sees nothing.
+- The hello retries until he presses Start in the bot's chat, and the nightly prune no longer forgets it
+  (that bug would have re-sent the first-install hello a month later).
 
 Suites: 50/50. Real-model eval: 58/58 (the one soft check, "small talk isn't a briefing", varies between runs).
 It now includes a follow-up that needs the conversation, small talk, an action, a non-action, a college
@@ -100,7 +110,7 @@ FACTS question and a college action.
 
 **She has never run against the real services.** This sandbox can't reach Telegram, Groq, Canvas, Google or
 Supabase. Everything external is tested against local stubs, and the real-model eval (via `claude -p`) scores
-30/30. The next real milestone is Landen deploying it.
+58/58. The next real milestone is Landen deploying it.
 
 ---
 
@@ -173,7 +183,8 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
 
 - **PR landenm999-coder/sloane#12**: the skills build-out, the partner upgrade, colleges, DECA, the British
   voice and capture contract v2. Complete and green (50/50 suites, eval 58/58); waiting on Landen to merge it
-  to main. After merging, `install.sh` (the upgrade command) pulls, rebuilds and applies `sql/014`–`028`.
+  to main. After merging, `install.sh` (the upgrade command) pulls, rebuilds and applies `sql/014`–`028`
+  and `999`.
   Then follow START_HERE.md (step 5 is the try-everything list), and add every school with
   `/college add <school> <EA|ED|RD> <deadline>`.
 - **PR landenm999-coder/capture#2**: the Capture → Sloane client (Settings → Sloane, an IndexedDB outbox,
