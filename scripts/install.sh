@@ -60,6 +60,15 @@ field() {
 # the script *is* bash's stdin; wrapping it means bash has read all of it
 # before the first command runs, so nothing below can swallow the rest.
 main() {
+  # She runs as a systemd service. WSL can have systemd off; say how to turn it on
+  # now, not after ten minutes of building.
+  if [ ! -d /run/systemd/system ]; then
+    echo "systemd isn't running here, and Sloane runs as a systemd service." >&2
+    printf '%s\n' "On Windows (WSL): printf '[boot]\nsystemd=true\n' | sudo tee /etc/wsl.conf" >&2
+    echo "then in PowerShell: wsl --shutdown   and open Ubuntu again and rerun this." >&2
+    exit 1
+  fi
+
   # -- 1. Docker ------------------------------------------------------------------
   if ! command -v docker >/dev/null 2>&1; then
     say "Installing Docker"
@@ -69,6 +78,11 @@ main() {
     sudo usermod -aG docker "$USER" || true
   fi
   command -v git >/dev/null 2>&1 || sudo apt-get install -y -qq git >/dev/null
+  if ! systemctl cat docker.service >/dev/null 2>&1; then
+    echo "Docker here isn't a system service (Docker Desktop's WSL integration?), and her" >&2
+    echo "service needs one. Turn that integration off for this distro, then run this again." >&2
+    exit 1
+  fi
 
   # -- 2. The code ----------------------------------------------------------------
   if [ -d "$DIR/.git" ]; then

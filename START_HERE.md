@@ -41,8 +41,19 @@ Skip this if you already have one.
 2. Image: **Ubuntu 24.04**. Shape: **Ampere A1** (ARM), **2 OCPUs, 12 GB**.
 3. Download the SSH key it offers and **keep it**.
 4. Create. If it says **"Out of host capacity"**, that's Oracle, not you: try again later or pick
-   another availability domain.
+   another availability domain. Or use your PC for now (below).
 5. Note the instance's **public IP**. Don't open any ports; she doesn't need any.
+
+**No server yet? Run her on your PC for now.** She works the same while the PC is on and awake,
+and her memory lives in Supabase, so moving to a server later loses nothing.
+
+1. PowerShell as administrator: `wsl --install -d Ubuntu-24.04`, then restart the PC.
+2. Open **Ubuntu** from the Start menu and pick a username and password.
+3. In that Ubuntu window, do step 4 from its item 2 (the `curl` command). If it says systemd
+   isn't running, it prints the two commands that fix it.
+4. Leave the Ubuntu window open (minimize it): closing it stops her.
+5. When you move to a server later, stop her on the PC first (`sudo systemctl disable --now sloane`
+   in Ubuntu). Two copies on one bot token fight over your messages.
 
 ---
 
@@ -54,7 +65,11 @@ Skip this if you already have one.
    ssh -i path/to/the-key.key ubuntu@YOUR.SERVER.IP
    ```
 
-   If Windows says the key is "unprotected", move the key into `C:\Users\lande\.ssh\` and try again.
+   If Windows says the key is "unprotected" or "too open", run this once in PowerShell, then try again:
+
+   ```
+   icacls path\to\the-key.key /inheritance:r /grant:r "$($env:USERNAME):(R)"
+   ```
 
 2. Paste this and press Enter:
 
