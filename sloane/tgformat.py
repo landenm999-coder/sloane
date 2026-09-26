@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import html
 import re
+from urllib.parse import urlsplit
 
 _FENCE = re.compile(r"```[^\n]*\n(.*?)```", re.S)
 _CODE = re.compile(r"`([^`\n]+)`")
@@ -61,6 +62,16 @@ def _tables(text: str) -> str:
     return "\n".join(out)
 
 
+def _link(label: str, url: str) -> str:
+    """A link that can't hide where it goes: the real domain rides beside it.
+    Email previews and web results pass through here too, and "Verify your
+    account" pointing somewhere else is the oldest trick there is."""
+    domain = urlsplit(url).hostname or url
+    domain = domain.removeprefix("www.")
+    return (f'<a href="{html.escape(url, quote=True)}">{html.escape(label, quote=False)}</a>'
+            f" ({html.escape(domain, quote=False)})")
+
+
 def to_html(text: str) -> str:
     """Markdown-ish text as Telegram HTML (parse_mode=HTML)."""
     slots: list[str] = []
@@ -73,8 +84,7 @@ def to_html(text: str) -> str:
     text = _FENCE.sub(lambda m: keep(f"<pre>{html.escape(m.group(1).rstrip(), quote=False)}</pre>"), text)
     text = _tables(text)
     text = _CODE.sub(lambda m: keep(f"<code>{html.escape(m.group(1), quote=False)}</code>"), text)
-    text = _LINK.sub(lambda m: keep(f'<a href="{html.escape(m.group(2), quote=True)}">'
-                                    f"{html.escape(m.group(1), quote=False)}</a>"), text)
+    text = _LINK.sub(lambda m: keep(_link(m.group(1), m.group(2))), text)
     lines = []
     for line in html.escape(text, quote=False).split("\n"):
         heading = _HEADING.match(line)
