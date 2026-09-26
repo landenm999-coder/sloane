@@ -29,7 +29,7 @@ Put them in a note on your computer, not in a chat.
 | 4 | **Your chat ID** | Telegram → message **@userinfobot** → copy the number |
 | 5 | **Canvas address** | Probably `https://dcsd.instructure.com` (the address you use for Canvas) |
 | 6 | **Canvas token** | Canvas (on a computer) → Account → Settings → **+ New Access Token**. No such button? Your district turned it off: instead copy Canvas → **Calendar** → **Calendar Feed** (bottom right). The installer asks for it if you leave the token blank |
-| 7 | **Calendar link** | Google Calendar (on a computer) → Settings → your calendar → *Integrate calendar* → **Secret address in iCal format** |
+| 7 | **Calendar link** | Google Calendar (on a computer) → Settings → your calendar → *Integrate calendar* → **Secret address in iCal format**. Use your personal Google account: school accounts usually hide this |
 
 ---
 
@@ -113,8 +113,8 @@ Send these to her on Telegram. Each should do what it says.
 11. `/plan` → your free time tonight, filled with what's due soonest.
 12. `/today`, `/week`, `/grades`, `/status`.
 
-Type `/` in her chat for the menu of commands; `/help` lists everything. The full table is in [DEPLOY.md](DEPLOY.md), *The first day: try
-everything*.
+Type `/` in her chat for the menu of commands; `/help` lists everything. The full table is in
+[DEPLOY.md](DEPLOY.md), *The first day: try everything*.
 
 ---
 
