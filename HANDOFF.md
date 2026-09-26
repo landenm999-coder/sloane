@@ -81,7 +81,20 @@ if a deadline passes unsubmitted. "I sent my Boulder app" gets recorded through 
 `grounded()` now requires him to have *said* the status ("sent", "got in", "deferred"). Naming the school
 isn't enough, because marking an application submitted silences its deadline.
 
-Suites: 44/44. Real-model eval: 58/58 (the one soft check, "small talk isn't a briefing", varies between runs).
+**Overnight before first deploy (2026-09-26).** Readiness work, all tested:
+- `START_HERE.md`, the whole setup step by step. The installer now also asks what she should call him, whether
+  she's British, and whether the morning brief should be spoken.
+- A hello once per version, so he knows the install worked.
+- Canvas and the calendar sync at startup when stale, not at the next 4-hour slot.
+- Her Markdown reaches Telegram as HTML (it was showing raw `**`), links show their real domain, and tables
+  become bullets. `/help` is regrouped.
+- `/college add` takes several schools at once.
+- Plain-words rules now see through "Sloane," in front and emoji or emoticons after, and "let's do a
+  marketing roleplay" starts one.
+- A full boot test against a fresh database and a fake Telegram: hello, sync, `/help`, colleges and a real
+  streamed reply all worked end to end.
+
+Suites: 47/47. Real-model eval: 58/58 (the one soft check, "small talk isn't a briefing", varies between runs).
 It now includes a follow-up that needs the conversation, small talk, an action, a non-action, a college
 FACTS question and a college action.
 
@@ -153,9 +166,9 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
 ## In flight
 
 - **PR landenm999-coder/sloane#12**: the skills build-out, the partner upgrade, colleges, DECA, the British
-  voice and capture contract v2. Complete and green (45/45 suites, eval 58/58); waiting on Landen to merge it
+  voice and capture contract v2. Complete and green (47/47 suites, eval 58/58); waiting on Landen to merge it
   to main. After merging, `install.sh` (the upgrade command) pulls, rebuilds and applies `sql/014`–`028`.
-  Then work down DEPLOY's "The first day: try everything" table, and add every school with
+  Then follow START_HERE.md (step 5 is the try-everything list), and add every school with
   `/college add <school> <EA|ED|RD> <deadline>`.
 - **PR landenm999-coder/capture#2**: the Capture → Sloane client (Settings → Sloane, an IndexedDB outbox,
   memory-only by default). Tested in Chromium against a real Sloane server; not yet on a phone. Merging it
