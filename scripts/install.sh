@@ -42,6 +42,20 @@ p.write_text("\n".join(out) + "\n")
 PY
 }
 
+# field ASK KEY PROMPT: ask (with `ask` or `secret`) until the answer passes
+# scripts/env_check.py, then write it to $draft. The reason for a retry goes to
+# the terminal; the value is never shown.
+field() {
+  local how=$1 key=$2 prompt=$3 v out
+  while :; do
+    v=$("$how" "$prompt")
+    if out=$(SLOANE_VALUE="$v" python3 "$DIR/scripts/env_check.py" "$key" 2>"$TTY"); then
+      set_env "$draft" "$key" "$out"
+      return
+    fi
+  done
+}
+
 # Everything runs inside main(), called on the last line. Under `curl | bash`
 # the script *is* bash's stdin; wrapping it means bash has read all of it
 # before the first command runs, so nothing below can swallow the rest.
@@ -82,14 +96,16 @@ main() {
     # shellcheck disable=SC2064  # expand $draft now: the trap must remove this file
     trap "rm -f '$draft'" EXIT
     cp .env.example "$draft"
+    # Each answer is checked as it's given (scripts/env_check.py): a bad paste
+    # gets the reason and the question again, not a broken .env.
+    field secret DATABASE_URL 'DATABASE_URL (Supabase session pooler, port 5432): '
+    field secret GROQ_API_KEY 'GROQ_API_KEY: '
+    field secret TELEGRAM_BOT_TOKEN 'TELEGRAM_BOT_TOKEN: '
+    field ask TELEGRAM_CHAT_ID 'TELEGRAM_CHAT_ID (a number): '
+    field ask CANVAS_BASE_URL 'CANVAS_BASE_URL (e.g. https://dcsd.instructure.com): '
+    field secret CANVAS_TOKEN 'CANVAS_TOKEN: '
+    field secret CALENDAR_ICS_URL 'CALENDAR_ICS_URL (the secret iCal address): '
     local v
-    v=$(secret 'DATABASE_URL (Supabase session pooler, port 5432): ');        set_env "$draft" DATABASE_URL "$v"
-    v=$(secret 'GROQ_API_KEY: ');                                              set_env "$draft" GROQ_API_KEY "$v"
-    v=$(secret 'TELEGRAM_BOT_TOKEN: ');                                        set_env "$draft" TELEGRAM_BOT_TOKEN "$v"
-    v=$(ask 'TELEGRAM_CHAT_ID (a number): ');                                  set_env "$draft" TELEGRAM_CHAT_ID "$v"
-    v=$(ask 'CANVAS_BASE_URL (e.g. https://dcsd.instructure.com): ');          set_env "$draft" CANVAS_BASE_URL "$v"
-    v=$(secret 'CANVAS_TOKEN: ');                                              set_env "$draft" CANVAS_TOKEN "$v"
-    v=$(secret 'CALENDAR_ICS_URL (the secret iCal address): ');                set_env "$draft" CALENDAR_ICS_URL "$v"
     # Two about her, not credentials. Enter keeps the default.
     v=$(ask 'What should she call you? (Enter for Landen, or e.g. sir): ')
     [ -n "$v" ] && set_env "$draft" ADDRESS_AS "$v"

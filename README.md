@@ -302,7 +302,7 @@ providers and the Telegram token, and names the remedy for each failure.
 
 | Service | Needed for | Note |
 |---|---|---|
-| [Supabase](https://supabase.com) | `DATABASE_URL` | Free tier, 500 MB, pgvector. Use the **pooled** connection string. |
+| [Supabase](https://supabase.com) | `DATABASE_URL` | Free tier, 500 MB, pgvector. Use the **Session pooler** string (port 5432). |
 | [@BotFather](https://t.me/botfather) | `TELEGRAM_BOT_TOKEN` | Also set `TELEGRAM_CHAT_ID`. Until you do, she answers every message with its chat id and nothing else. |
 | [Groq](https://console.groq.com/keys) | `GROQ_API_KEY` | Free: 1K req/day, 200K tok/day; Whisper 2K/day. |
 | Canvas | `CANVAS_TOKEN` | Account → Settings → New Access Token. Reads all coursework; treat as a password. |

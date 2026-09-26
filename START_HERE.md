@@ -23,7 +23,7 @@ Put them in a note on your computer, not in a chat.
 
 | # | What | Where |
 |---|---|---|
-| 1 | **Database URL** | [supabase.com](https://supabase.com): New project → **Connect** → *Session pooler* string (port **5432**). Put your database password into it |
+| 1 | **Database URL** | [supabase.com](https://supabase.com): New project (give it a database password of **letters and numbers only**; symbols break the address) → **Connect** → *Session pooler* string (port **5432**). Replace `[YOUR-PASSWORD]`, brackets and all, with that password |
 | 2 | **Groq key** | [console.groq.com/keys](https://console.groq.com/keys) → Create API key |
 | 3 | **Bot token** | Telegram → message **@BotFather** → `/newbot` → pick a name → copy the token |
 | 4 | **Your chat ID** | Telegram → message **@userinfobot** → copy the number |
@@ -63,7 +63,7 @@ Skip this if you already have one.
    ```
 
 3. It asks for the seven things from step 2 (the secret ones don't show as you type; that's
-   normal), then two more:
+   normal). If one looks wrong it says why and asks again. Then three more:
    - **What should she call you?** Press Enter for "Landen", or type `sir`.
    - **A British voice?** Type `y` for the full JARVIS feel.
    - **Morning brief as a voice note?** `y` and your 6:35 AM brief arrives spoken.

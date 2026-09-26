@@ -385,6 +385,29 @@ def check_embedder(config: Settings, *, warm: bool) -> None:
     )
 
 
+def check_values(config: Settings) -> None:
+    """The installer's paste checks, over whatever .env holds now (hand edits
+    included): the precise fix for a value that can't work, before the
+    connection checks below fail on it less helpfully."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from env_check import problem
+
+    wrong = []
+    for key in ("DATABASE_URL", "GROQ_API_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
+                "CANVAS_BASE_URL", "CANVAS_TOKEN", "CALENDAR_ICS_URL"):
+        value = getattr(config, key.lower())
+        if not value:
+            continue  # unset is each check's own business below
+        # As the app will use it: the installer's cleaning never ran on a hand edit.
+        issue = problem(key, str(value).strip())
+        if issue:
+            wrong.append(f"{key}: {issue}")
+    if wrong:
+        record("settings", FAIL, " | ".join(wrong) + " (nano .env, then restart)")
+    else:
+        record("settings", PASS, "every value is the right shape")
+
+
 def check_timezone(config: Settings) -> None:
     try:
         from zoneinfo import ZoneInfo
@@ -483,6 +506,7 @@ async def main(warm: bool = False) -> int:
 
     print(f"Sloane doctor — main={config.main_provider} bulk={config.bulk_provider}\n")
 
+    check_values(config)
     check_timezone(config)
     await check_database(config)
     check_embedder(config, warm=warm)

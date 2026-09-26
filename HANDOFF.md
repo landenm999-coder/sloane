@@ -94,7 +94,7 @@ isn't enough, because marking an application submitted silences its deadline.
 - A full boot test against a fresh database and a fake Telegram: hello, sync, `/help`, colleges and a real
   streamed reply all worked end to end.
 
-Suites: 48/48. Real-model eval: 58/58 (the one soft check, "small talk isn't a briefing", varies between runs).
+Suites: 49/49. Real-model eval: 58/58 (the one soft check, "small talk isn't a briefing", varies between runs).
 It now includes a follow-up that needs the conversation, small talk, an action, a non-action, a college
 FACTS question and a college action.
 
@@ -139,6 +139,7 @@ Supabase. Everything external is tested against local stubs, and the real-model 
 | Sync at startup (PR #12) | `Scheduler.catch_up`: at startup, `entity_sync` runs at once if it never ran, last failed, or is over 4 h old. Before, a fresh install knew nothing from Canvas or the calendar until the next 4-hourly slot, so "what's due tomorrow?" had nothing to go on. Also: Markdown tables in her detail become one bullet per row on Telegram | `jobs/scheduler.py`, `main.py`, `tgformat.py`; `test_jobs`, `test_format` |
 | Hello (PR #12) | at startup, once per version of her code (a hash of `sloane/**/*.py`): "Sloane here, up and running…" after an install, "Updated and back up…" after an upgrade, nothing after a plain restart; a failed send is retried next start. The sign an install worked. Also `START_HERE.md`, the step-by-step setup, and the installer now asks what she should call him and whether she's British | `sloane/hello.py`, `main.py`, `tests/test_hello.py`, `scripts/install.sh` |
 | Boot test (PR #12) | the whole app started as the box starts it, against a fake Telegram: hello once (not again on restart), every job's cron loads, the stale sync catches up, /help and /status answered and logged, /help sent as HTML, /health ok. No model call | `tests/test_boot.py` |
+| Paste checks (PR #12) | the installer checks each value as it's pasted and asks again with the reason: `[YOUR-PASSWORD]` left in, transaction pooler, direct (IPv6) connection, a password symbol that breaks the URL or compose's `$`, half a bot token, a username for the chat id, a Canvas page, the calendar's public or web link. Cleans quotes, spaces, `bot` prefixes, `webcal://`. Doctor's `settings` line runs the same checks on a hand-edited `.env`. `.env.example` now shows the session pooler (it showed 6543) | `scripts/env_check.py`, `install.sh`, `doctor.py`, `tests/test_env_check.py` |
 | Planted entries (PR #12) | `ingest.planted()` (narrow: an override phrase *addressed to her*, or an unmistakable marker); the heartbeat tells him once per calendar entry in the next 14 days (`planted:event:<id>`, skills or none); the entry's FACTS line is marked so she neither obeys it nor repeats the warning. Before this she flagged the eval's planted invite in almost every answer | `ingest.py`, `jobs/briefs.py` `planted_nudges`, `memory/tiers.py`; tests in `test_tiers`, `test_heartbeat` |
 | DECA (PR #12) | `/roleplay [area]`: a model-written scenario (event, role, judge, situation, five PIs), then a session where the judge stays in character (typed or voice), two follow-up questions after "I'm done", and a score on the DECA form (PIs 0–14, four 21st Century Skills 0–6, overall 0–6) **totalled in code**; `roleplays` table (sql/027), FACTS line with recent scores + "work on", TV panel, an evening nudge when a DECA countdown is ≤14 days out and no practice in 3 days; `/roleplay` on the actions allowlist. Live-checked against the real CLI: a presentation that missed the brief was pushed back on in character and scored 19/100 with specific notes | `sloane/skills/deca.py`, `sql/027`, `tests/test_deca.py` |
 | Slow skills (PR #12) | a command or skill still working after 0.6 s shows "typing…" (a role-play's judge, `/cards make`); instant ones never flash it. The actions instructions now also say recording what he reports isn't initiative, and that only the "do" list does anything (she once said "marking that off" with no command) | `telegram.py` `SLOW_SKILL_SECONDS`, `actions.instructions`; `test_live` |
@@ -167,7 +168,7 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
 ## In flight
 
 - **PR landenm999-coder/sloane#12**: the skills build-out, the partner upgrade, colleges, DECA, the British
-  voice and capture contract v2. Complete and green (48/48 suites, eval 58/58); waiting on Landen to merge it
+  voice and capture contract v2. Complete and green (49/49 suites, eval 58/58); waiting on Landen to merge it
   to main. After merging, `install.sh` (the upgrade command) pulls, rebuilds and applies `sql/014`–`028`.
   Then follow START_HERE.md (step 5 is the try-everything list), and add every school with
   `/college add <school> <EA|ED|RD> <deadline>`.

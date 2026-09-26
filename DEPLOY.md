@@ -87,6 +87,12 @@ CANVAS_BASE_URL  CANVAS_TOKEN  CALENDAR_ICS_URL
 ```
 
 Everything else already has a working default. `.env` is gitignored.
+The installer checks each value as you paste it (`scripts/env_check.py`) and
+`doctor.py` runs the same checks on a hand-edited `.env`: the `[YOUR-PASSWORD]`
+placeholder left in, the transaction pooler, the IPv6-only direct connection,
+a password with `@ # / ? $` in it (use letters and numbers), a username for
+the chat id, a Canvas page instead of its address, the calendar's public or
+web-page link instead of the secret iCal one.
 
 ```bash
 chmod 600 .env         # it holds four credentials
@@ -419,7 +425,7 @@ it's working.
 
 | Symptom | Cause |
 |---|---|
-| `health` says `database: down` | Wrong `DATABASE_URL`, or you took the **transaction** pooler (6543). Use **session** (5432). |
+| `health` says `database: down` | Wrong `DATABASE_URL`, or you took the **transaction** pooler (6543). Use **session** (5432). `doctor.py`'s `settings` line names which. |
 | `prepared statement already exists` | Same thing — transaction-mode pooler. The code disables prepared statements, so if you see this, an old image is running: rebuild. |
 | Bot silent, no errors | `TELEGRAM_CHAT_ID` does not match the account messaging her. She drops unknown chats on purpose. |
 | `claude_code` failing, everything else fine | The CLI login expired. Redo step 6. |
