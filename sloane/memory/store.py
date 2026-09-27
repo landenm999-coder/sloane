@@ -966,7 +966,7 @@ class Store:
     async def reminders_between(self, start: datetime, end: datetime) -> list[Row]:
         return await self._fetch(
             """
-            select id, text, due_at from reminders
+            select id, text, due_at, repeat from reminders
              where sent_at is null and cancelled_at is null and due_at between %s and %s
              order by due_at
             """,
@@ -1189,13 +1189,31 @@ class Store:
 
     # -- reminders ----------------------------------------------------------------
 
-    async def add_reminder(self, *, text: str, due_at: datetime, source: str = "telegram") -> Row:
+    async def add_reminder(self, *, text: str, due_at: datetime, source: str = "telegram",
+                           repeat: str | None = None) -> Row:
+        """One reminder; with `repeat`, the first of a series (sql/029)."""
         row = await self._one(
-            "insert into reminders (text, due_at, source) values (%s, %s, %s) returning *",
-            (text, due_at, source),
+            """
+            insert into reminders (text, due_at, source, repeat, series_id)
+            values (%s, %s, %s, %s, case when %s::text is null then null else gen_random_uuid() end)
+            returning *
+            """,
+            (text, due_at, source, repeat, repeat),
         )
         assert row is not None
         return row
+
+    async def add_next_reminder(self, previous: Row, due_at: datetime) -> Row | None:
+        """The next of a repeating reminder's series. None if it is already there."""
+        return await self._one(
+            """
+            insert into reminders (text, due_at, source, repeat, series_id)
+            values (%s, %s, %s, %s, %s)
+            on conflict (series_id, due_at) where series_id is not null do nothing
+            returning *
+            """,
+            (previous["text"], due_at, previous["source"], previous["repeat"], previous["series_id"]),
+        )
 
     async def claim_due_reminders(self, now: datetime, limit: int = 20) -> list[Row]:
         """Mark due reminders sent and return them, atomically: each is claimed once."""
@@ -1559,13 +1577,14 @@ class Store:
     async def recent_messages(self, chat_id: int, since: datetime, limit: int = 20) -> list[Row]:
         """The recent exchange with him, oldest first: his words and hers.
 
-        Text and voice only (a button press is not something said), and only
-        what has a body.
+        Text, voice and what he forwarded (a button press is not something
+        said), and only what has a body. A forward is someone else's words:
+        it is logged untrusted and shown only as a placeholder.
         """
         rows = await self._fetch(
             """
             select direction, kind, body, at, trusted from messages
-             where chat_id = %s and at >= %s and kind in ('text', 'voice')
+             where chat_id = %s and at >= %s and kind in ('text', 'voice', 'forward')
                and body is not null and body <> ''
              order by at desc, id desc
              limit %s

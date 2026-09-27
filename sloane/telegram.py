@@ -26,7 +26,7 @@ from sloane.agent import Agent
 from sloane.config import Settings, settings as default_settings
 from sloane.contract import Reply
 from sloane.ingest import safe_field
-from sloane.reminders import REMIND_ME
+from sloane.reminders import REMIND_ME, parse_timer
 from sloane.memory.store import Store, remember
 from sloane.providers.base import ProviderError
 from sloane.providers.groq import GroqProvider
@@ -110,6 +110,110 @@ def menu(lines: list[str] | tuple[str, ...]) -> list[dict]:
 
 # "typing…" lasts about five seconds on his screen; renew it a little sooner.
 # Calls whose text may carry her Markdown, shown as Telegram HTML.
+# -- forwards --------------------------------------------------------------------
+#
+# A forwarded message is someone else's words. It never runs a command, a
+# reminder or a skill rule; it reaches the model only as INGESTED, so that turn
+# can't act for him (Agent.answer) and her reply is stored untrusted. For a few
+# minutes the follow-ups ("tell him Saturday works") see it too.
+FORWARD_FOLLOWUP_MINUTES = 10
+# His note about it ("what do I say to this?"). Telegram sends a forward's
+# comment first, as a message of its own, so a note from him this soon before
+# the forward is the question about it.
+FORWARD_COMMENT_SECONDS = 30
+FORWARD_ASK = ("I forwarded you what's under INGESTED. In a line, who it's from and what they want; "
+               "then a reply I could send, in my voice.")
+FORWARD_CHARS = 6000
+
+
+def forwarded_from(message: dict, owner: int | None = None) -> str | None:
+    """Who wrote a forwarded message ("Keegan", "DECA Chapter"), or None if he did.
+
+    His own words forwarded back to her (a note from Saved Messages) are his.
+    """
+    origin = message.get("forward_origin")
+    if isinstance(origin, dict):
+        kind = origin.get("type")
+        if kind == "user":
+            user = origin.get("sender_user") or {}
+            if owner is not None and user.get("id") == owner:
+                return None
+            name = " ".join(str(p) for p in (user.get("first_name"), user.get("last_name")) if p)
+        elif kind == "hidden_user":
+            name = str(origin.get("sender_user_name") or "")
+        else:
+            chat = origin.get("sender_chat") or origin.get("chat") or {}
+            name = str(chat.get("title") or "")
+        return safe_field(name, limit=60) or "someone"
+    user = message.get("forward_from")
+    if isinstance(user, dict):
+        if owner is not None and user.get("id") == owner:
+            return None
+        name = " ".join(str(p) for p in (user.get("first_name"), user.get("last_name")) if p)
+        return safe_field(name, limit=60) or "someone"
+    if message.get("forward_sender_name"):
+        return safe_field(str(message["forward_sender_name"]), limit=60) or "someone"
+    chat = message.get("forward_from_chat")
+    if isinstance(chat, dict):
+        return safe_field(str(chat.get("title") or ""), limit=60) or "a channel"
+    if message.get("forward_date"):
+        return "someone"
+    return None
+
+
+def held_for_forward(batch: list[dict], owner: int | None = None) -> set[int]:
+    """Updates to log now and answer with the forward that follows them.
+
+    Each is followed, in the same batch and chat, by a forwarded message: an
+    earlier part of the same forward, or his note about it. One answer covers
+    the lot. A command or a reminder is never held; it is his own request.
+    """
+    held: set[int] = set()
+    for current, following in zip(batch, batch[1:]):
+        this, after = current.get("message") or {}, following.get("message") or {}
+        if not this or not after or (this.get("chat") or {}).get("id") != (after.get("chat") or {}).get("id"):
+            continue
+        if forwarded_from(after, owner) is None:
+            continue
+        if forwarded_from(this, owner) is not None:
+            held.add(current.get("update_id"))
+            continue
+        text = (this.get("text") or "").strip()
+        if text and not text.startswith("/") and not REMIND_ME.match(text):
+            held.add(current.get("update_id"))
+    return held
+
+
+def forwarded_block(forwards: list[dict], replies: list[dict]) -> str:
+    """What he forwarded, and what she said about it, as INGESTED text."""
+    from sloane.ingest import unfence
+
+    parts = ["FORWARDED by Landen -- someone else's words, each as 'sender: text':"]
+    for row in forwards:
+        parts.append(f"<<<\n{unfence(str(row.get('body') or ''))[:FORWARD_CHARS]}\n>>>")
+    if replies:
+        parts.append("WHAT YOU ALREADY SAID ABOUT IT (written from that text):")
+        for row in replies[-3:]:
+            parts.append(f"<<<\n{unfence(str(row.get('body') or ''))[:2000]}\n>>>")
+    return "\n".join(parts)
+
+
+# A timer this short is woken on the second rather than by the minute job.
+TIMER_WAKE_SECONDS = 30 * 60
+
+
+def _duration(seconds: float) -> str:
+    """'10 minutes', '1 hour 30 minutes', '90 seconds'."""
+    seconds = round(seconds)
+    if seconds < 120 and seconds % 60:
+        return f"{seconds} seconds"
+    minutes = round(seconds / 60)
+    hours, mins = divmod(minutes, 60)
+    parts = ([f"{hours} hour{'s' if hours != 1 else ''}"] if hours else []) + \
+        ([f"{mins} minute{'s' if mins != 1 else ''}"] if mins else [])
+    return " ".join(parts) or "1 minute"
+
+
 FORMATTED_METHODS = frozenset({"sendMessage", "editMessageText"})
 TYPING_EVERY = 4.5
 # A command or skill still working after this long shows "typing…".
@@ -248,6 +352,7 @@ class Bot:
         self._token = self._config.telegram_bot_token
         self._owner = self._config.telegram_chat_id
         self._stop = asyncio.Event()
+        self._timers: set[asyncio.Task] = set()
 
     # -- transport -------------------------------------------------------------
 
@@ -561,9 +666,10 @@ class Bot:
         nothing outside his own chat. (Anything *she* decides to do still goes
         through the agency.)
         """
-        from sloane.reminders import parse, spoken
+        from sloane.reminders import parse, repeat_spoken, spoken
 
-        how = "Try: remind me at 5 to call Keegan, or /remind tomorrow 7am bring the lab."
+        how = ("Try: remind me at 5 to call Keegan, /remind tomorrow 7am bring the lab, "
+               "or remind me every weekday at 7 to take my meds.")
         if not rest.strip():
             return Reply(speech="What should I remind you about, and when?", detail=how)
         now = self._now()
@@ -573,8 +679,38 @@ class Bot:
         if not parsed.text:
             return Reply(speech="What should the reminder say?", detail=how)
         text = safe_field(parsed.text, limit=300)
-        await self._store.add_reminder(text=text, due_at=parsed.due)
+        await self._store.add_reminder(text=text, due_at=parsed.due, repeat=parsed.repeat)
+        if parsed.repeat:
+            return Reply(speech=f"Okay, {repeat_spoken(parsed.repeat, parsed.due)}: {text}. "
+                                f"First one {spoken(parsed.due, now)}.",
+                         detail="`/reminders` lists it; `/unremind <n>` stops it.")
         return Reply(speech=f"Okay, I'll remind you {spoken(parsed.due, now)}: {text}.", detail="")
+
+    async def _timer(self, parsed) -> Reply:  # noqa: ANN001 - reminders.Parsed
+        """A timer: a reminder with the time up front, woken on the second."""
+        from sloane.reminders import spoken
+
+        now = self._now()
+        what = safe_field(parsed.text, limit=120)
+        await self._store.add_reminder(text=f"⏲️ Time's up{': ' + what if what else ''}", due_at=parsed.due,
+                                       source="timer")
+        seconds = (parsed.due - now).total_seconds()
+        if self.run_job is not None and seconds <= TIMER_WAKE_SECONDS:
+            # The reminders job runs once a minute; a short timer shouldn't be
+            # up to a minute late, so this one wakes it at the right second.
+            task = asyncio.get_running_loop().create_task(self._wake_reminders(seconds))
+            self._timers.add(task)
+            task.add_done_callback(self._timers.discard)
+        length = _duration(seconds)
+        return Reply(speech=f"Timer set: {length}{' for ' + what if what else ''}, done {spoken(parsed.due, now)}.",
+                     detail="")
+
+    async def _wake_reminders(self, seconds: float) -> None:
+        await asyncio.sleep(max(0.0, seconds) + 0.5)
+        try:
+            await self.run_job("reminders")
+        except Exception:  # noqa: BLE001 - the minute job still delivers it
+            log.exception("timer wake-up failed; the reminders job will deliver it")
 
     async def _view(self, name: str) -> Reply:
         """/today and /week, from SQL alone. Answers even with every model down."""
@@ -706,7 +842,7 @@ class Bot:
         )
 
     async def _reminders(self, command: str) -> Reply:
-        from sloane.reminders import spoken
+        from sloane.reminders import repeat_spoken, spoken
 
         rows = await self._store.upcoming_reminders(20)
         parts = command.split()
@@ -716,12 +852,15 @@ class Bot:
             row = await self._store.cancel_reminder(str(rows[int(parts[1]) - 1]["id"]))
             if row is None:
                 return Reply(speech="That one already went out.", detail="")
+            if row.get("repeat"):
+                return Reply(speech=f"Stopped: {row['text']}. It won't repeat.", detail="")
             return Reply(speech=f"Cancelled: {row['text']}.", detail="")
         if not rows:
             return Reply(speech="No reminders set.", detail="")
         now = self._now()
         zone = ZoneInfo(self._config.timezone)
         lines = [f"{i}. {spoken(r['due_at'].astimezone(zone), now)}: {r['text']}"
+                 + (f" 🔁 {repeat_spoken(r['repeat'], r['due_at'].astimezone(zone))}" if r.get("repeat") else "")
                  for i, r in enumerate(rows, 1)]
         return Reply(
             speech=f"{len(rows)} reminder{'s' if len(rows) != 1 else ''} set.",
@@ -882,7 +1021,62 @@ class Bot:
 
     # -- the loop --------------------------------------------------------------
 
-    async def _handle(self, update: dict) -> None:
+    async def _forwarded(self, chat_id: int) -> tuple[list[dict], list[dict], list[dict], list[dict]]:
+        """What he forwarded in the follow-up window, read back from the log.
+
+        (latest, notes, every, replies): the last run of forwards; his own
+        messages sent just before or among them (the question about them);
+        every forward in the window; her replies built from them (untrusted).
+        """
+        from datetime import timedelta
+
+        rows = await self._store.recent_messages(
+            chat_id, self._now() - timedelta(minutes=FORWARD_FOLLOWUP_MINUTES), 40)
+        at = [i for i, r in enumerate(rows) if r.get("kind") == "forward"]
+        if not at:
+            return [], [], [], []
+        first = last = at[-1]
+        while first > 0 and rows[first - 1].get("kind") == "forward":
+            first -= 1
+        start = rows[first]["at"] - timedelta(seconds=FORWARD_COMMENT_SECONDS)
+        notes = [r for r in rows[:last] if r.get("direction") == "in" and r.get("kind") != "forward"
+                 and r.get("trusted") is not False and r["at"] >= start]
+        replies = [r for r in rows[at[0]:] if r.get("direction") == "out" and r.get("trusted") is False]
+        return rows[first:last + 1], notes, [rows[i] for i in at], replies
+
+    async def _forward_context(self, chat_id: int) -> str:
+        """INGESTED text for a follow-up to something he forwarded, or ''."""
+        try:
+            _, _, forwards, replies = await self._forwarded(chat_id)
+        except Exception:  # noqa: BLE001 - no context is a plainer answer, never a lost one
+            log.exception("could not read recent forwards")
+            return ""
+        return forwarded_block(forwards, replies) if forwards else ""
+
+    async def _answer_forwards(self, chat_id: int) -> None:
+        """Answer what he just forwarded: his note about it is the question."""
+        try:
+            forwards, notes, _, _ = await self._forwarded(chat_id)
+        except Exception:  # noqa: BLE001
+            log.exception("could not read the forward back")
+            forwards, notes = [], []
+        if not forwards:
+            await self.send(chat_id, Reply(speech="There's nothing in that I can read.", detail=""))
+            return
+        question = "\n".join(str(r.get("body") or "") for r in notes).strip() or FORWARD_ASK
+        live = _Live(self, chat_id)
+        await live.start_typing()
+        try:
+            reply = await self._agent.answer(question, ingested=forwarded_block(forwards, []), channel="text",
+                                             on_text=live.update)
+        finally:
+            live.stop_typing()
+        if not await live.finish(reply):
+            await self.reply(chat_id, reply, as_voice=False)
+
+    async def _handle(self, update: dict, *, hold: bool = False) -> None:
+        """One update. `hold`: log it, and let the forward after it answer (see
+        held_for_forward)."""
         if "callback_query" in update:
             await self._handle_callback(update)
             return
@@ -912,6 +1106,8 @@ class Bot:
         voice = message.get("voice") or message.get("audio")
         kind = "voice" if voice else "text"
         body = (message.get("text") or message.get("caption") or "").strip()
+        # Someone else's words: logged untrusted, as "sender: text".
+        source = forwarded_from(message, self._owner)
 
         # The cursor doubles as the dedupe check: a replayed update_id is a
         # no-op, so a crash between receiving and answering cannot double-answer.
@@ -919,9 +1115,10 @@ class Bot:
             update_id=update_id,
             chat_id=chat_id,
             direction="in",
-            kind=kind,
-            body=body or None,
+            kind="forward" if source else kind,
+            body=(f"{source}: {body}" if source else body) if body else None,
             file_id=voice.get("file_id") if voice else None,
+            trusted=source is None,
         )
         if not fresh:
             log.info("update %s already handled, skipping", update_id)
@@ -949,9 +1146,14 @@ class Bot:
                 )
                 return
             # The log is the conversation she reads back: it should say what he said.
-            await remember("voice transcript", self._store.set_message_body(update_id, body[:4000]))
+            logged = f"{source}: {body}" if source else body
+            await remember("voice transcript", self._store.set_message_body(update_id, logged[:4000]))
 
-        if not body:
+        if source is not None:
+            if not hold:
+                await self._answer_forwards(chat_id)
+            return
+        if not body or hold:
             return
 
         # While a proposal is being edited, his next plain message is the
@@ -967,6 +1169,10 @@ class Bot:
         asked = REMIND_ME.match(body)
         if asked:
             await self.send(chat_id, await self._remind(asked.group(1)))
+            return
+        timer = parse_timer(body, self._now())
+        if timer is not None:
+            await self.send(chat_id, await self._timer(timer))
             return
 
         # Most commands and skill rules answer at once; a few think (a role-play's
@@ -997,9 +1203,12 @@ class Bot:
         # for the whole answer (it is read aloud), so it only gets the typing.
         live = _Live(self, chat_id)
         await live.start_typing()
+        # A follow-up to something he forwarded sees it, as INGESTED (and so
+        # can't act: the agent turns that off with outside text in the prompt).
+        ingested = await self._forward_context(chat_id)
         try:
             reply = await self._agent.answer(body, channel=kind, on_text=None if voice else live.update,
-                                             can_act=True)
+                                             can_act=True, ingested=ingested)
         finally:
             live.stop_typing()
         if reply.actions:
@@ -1035,10 +1244,12 @@ class Bot:
                     backoff = min(backoff * 2, 60.0)
                     continue
 
-                for update in updates if isinstance(updates, list) else []:
+                batch = updates if isinstance(updates, list) else []
+                held = held_for_forward(batch, self._owner)
+                for update in batch:
                     offset = max(offset, int(update.get("update_id", 0)) + 1)
                     try:
-                        await self._handle(update)
+                        await self._handle(update, hold=update.get("update_id") in held)
                     except Exception:  # noqa: BLE001 - one bad update must not stop the bot
                         log.exception("failed to handle update %s", update.get("update_id"))
 

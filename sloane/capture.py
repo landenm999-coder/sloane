@@ -159,6 +159,7 @@ async def _store(store: Store, text: str, kind: str, act: bool, captured_at: dat
         if parsed and parsed.text:
             await remember("capture reminder", store.add_reminder(
                 text=safe_field(parsed.text, limit=300), due_at=parsed.due, source="capture",
+                repeat=parsed.repeat,
             ))
             body["reminder"] = f"{spoken(parsed.due, when.astimezone(zone))}: {safe_field(parsed.text, limit=300)}"
         else:

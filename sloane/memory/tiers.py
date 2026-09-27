@@ -19,6 +19,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from typing import Any
 
 from sloane.config import Settings, settings as default_settings
@@ -153,7 +154,10 @@ def _conversation_line(r: Row, tz: str, name: str) -> str:
 
     who = name if r.get("direction") == "in" else "Sloane"
     text = safe_field(r.get("body"), limit=CONVERSATION_LINE)
-    if r.get("trusted") is False:
+    if r.get("trusted") is False and r.get("direction") == "in":
+        # Something he forwarded or showed her: someone else's words.
+        text = "(forwarded something from someone else -- left out here)"
+    elif r.get("trusted") is False:
         # Built from an email or web page: strangers' words don't ride here,
         # unfenced, in a turn that can act for him.
         text = "(a reply built from outside text -- email or the web -- left out here)"
@@ -223,7 +227,12 @@ def render_facts(
                     "separate heads-up about it from the system, so mention it only if he asks]")
         lines.append(f"- EVENT {when}: {e['title']}{where}{flag}")
     for r in reminders:
-        lines.append(f"- REMINDER set for {_when(r.get('due_at'), tz)}: {r['text']}")
+        again = ""
+        if r.get("repeat") and hasattr(r.get("due_at"), "astimezone"):
+            from sloane.reminders import repeat_spoken
+
+            again = f" (repeats {repeat_spoken(r['repeat'], r['due_at'].astimezone(ZoneInfo(tz)))})"
+        lines.append(f"- REMINDER set for {_when(r.get('due_at'), tz)}: {r['text']}{again}")
     for a in assignments:
         course = f" [{a['course']}]" if a.get("course") else ""
         lines.append(f"- DUE {_when(a.get('due_at'), tz)}: {a['title']}{course}")
