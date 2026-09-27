@@ -244,6 +244,21 @@ async def inbox(ctx: JobContext, now: datetime | None = None) -> JobResult:
 LATE_AFTER = timedelta(minutes=15)
 
 
+async def _schedule_next(ctx: JobContext, row: dict, moment: datetime, zone: ZoneInfo) -> None:
+    from datetime import time as clock
+
+    from sloane.reminders import next_due
+
+    quiet = (clock(ctx.config.quiet_start_hour, 0), clock(ctx.config.quiet_end_hour, ctx.config.quiet_end_minute))
+    after = row["due_at"].astimezone(zone)
+    nxt = next_due(row["repeat"], after, quiet=quiet)
+    for _ in range(1000):  # a rule always moves forward; the cap is belt and braces
+        if nxt > moment:
+            break
+        nxt = next_due(row["repeat"], nxt, quiet=quiet)
+    await ctx.store.add_next_reminder(row, nxt)
+
+
 async def reminders(ctx: JobContext, now: datetime | None = None) -> JobResult:
     """Deliver due reminders. No model call; quiet hours hold them till morning."""
     from sloane.reminders import spoken
@@ -260,6 +275,11 @@ async def reminders(ctx: JobContext, now: datetime | None = None) -> JobResult:
     due = sorted(await ctx.store.claim_due_reminders(moment), key=lambda r: r["due_at"])
     delivered = 0
     for row in due:
+        if row.get("repeat"):
+            # The next of the series, made before this one is sent: a send that
+            # fails is retried, but the series never silently stops. Several
+            # missed (the box was off) come back as one, then the next ahead.
+            await remember("next repeating reminder", _schedule_next(ctx, row, moment, zone))
         text = f"⏰ {row['text']}"
         due_at = row["due_at"].astimezone(zone)
         if moment - due_at > LATE_AFTER:
