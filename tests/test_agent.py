@@ -133,6 +133,39 @@ check(
     "NOW: Friday September 25, 2026 (Landen's local time)" in prompt, True,
 )
 
+# A capture made during the chat is not in CONVERSATION (that is Telegram
+# only), so it must survive the recall de-dup. It didn't: "what did I just
+# capture?" came back with recall=0 while the capture sat in episodes.
+from datetime import timedelta  # noqa: E402
+
+denver = ZoneInfo("America/Denver")
+now = datetime.now(denver)
+
+
+class ChatStore(EmptyStore):
+    async def recent_messages(self, chat_id, since, limit=20):
+        return [
+            {"direction": "in", "kind": "text", "body": "hey", "at": now - timedelta(minutes=10), "trusted": True},
+            {"direction": "out", "kind": "text", "body": "Evening.", "at": now - timedelta(minutes=10), "trusted": True},
+        ]
+
+    async def search_episodes(self, *a, **k):
+        return [
+            {"id": 1, "occurred_at": now - timedelta(minutes=2), "role": "user", "channel": "capture",
+             "trusted": True, "source": "capture", "text": "key time at 9 am", "rrf": 1.0, "score": 1.0},
+            {"id": 2, "occurred_at": now - timedelta(minutes=9), "role": "user", "channel": "telegram",
+             "trusted": True, "source": None, "text": "zzchatzz echo", "rrf": 0.9, "score": 0.9},
+        ]
+
+
+config = isolated(timezone="America/Denver", main_provider="claude_code", telegram_chat_id=123)
+recorder = Recorder()
+agent = Agent(ChatStore(), config, router=Router(config, factory=lambda n, c, b: recorder),
+              embedder=NoEmbedder())
+asyncio.run(agent.answer("what did I just capture?"))
+check("a capture from inside the chat window stays in RECALL", "key time at 9 am" in recorder.prompts[0], True)
+check("a chat episode CONVERSATION already shows is still dropped", "zzchatzz" in recorder.prompts[0], False)
+
 if FAILURES:
     print(f"FAIL ({len(FAILURES)})")
     for f in FAILURES:

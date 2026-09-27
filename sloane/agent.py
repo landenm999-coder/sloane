@@ -236,9 +236,19 @@ class Agent:
                                        tz=self._config.timezone)
         if shown:
             # What CONVERSATION really shows needn't come back as RECALL; what
-            # its budget had to drop still may.
+            # its budget had to drop still may. Only chat episodes are in
+            # CONVERSATION: a capture or an email from the same window is not,
+            # so it must stay in RECALL or "what did I just capture?" finds
+            # nothing.
             start = shown[0]["at"]
-            episodes = [e for e in episodes if not (e.get("occurred_at") and e["occurred_at"] >= start)]
+            episodes = [
+                e for e in episodes
+                if not (
+                    e.get("channel", "telegram") == "telegram"
+                    and e.get("occurred_at")
+                    and e["occurred_at"] >= start
+                )
+            ]
 
         # Computed, not inferred. A collision the model happens not to mention
         # is a missed conflict, and "zero missed" is the P2 gate -- so they are
