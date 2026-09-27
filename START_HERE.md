@@ -112,6 +112,10 @@ Send these to her on Telegram. Each should do what it says.
 10. `spent 12 on lunch`, then `/budget 60`.
 11. `/plan` → your free time tonight, filled with what's due soonest.
 12. `/today`, `/week`, `/grades`, `/status`.
+13. `remind me every weekday at 7am to take my meds` → one that repeats; `/reminders` shows 🔁.
+14. `set a timer for 1 minute` → "Time's up" a minute later, on the second.
+15. Forward her a text from a friend (long-press it → Forward → Sloane) → who it's from, what
+    they want, and a reply you could send. Then `make it shorter`.
 
 Type `/` in her chat for the menu of commands; `/help` lists everything. The full table is in
 [DEPLOY.md](DEPLOY.md), *The first day: try everything*.
