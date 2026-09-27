@@ -346,6 +346,9 @@ Each of these should work on day one. If one doesn't, `/status` and
 | `what's due tomorrow?`, then `and friday?` | the exact rows from Canvas; the follow-up understood without repeating yourself |
 | a voice note: "what's on today?" | a voice note back (British, if you set `PIPER_VOICE=en_GB-cori-medium`) |
 | `remind me in 2 minutes to test this` | a reminder in 2 minutes, with Snooze buttons |
+| `remind me every weekday at 7am to take my meds`, then `/reminders` | a repeating one (🔁); `/unremind <n>` stops the series |
+| `set a timer for 1 minute` | "Time's up" a minute later, on the second |
+| forward her a friend's text | who it's from, what they want, and a reply you could send; `make it shorter` still sees it |
 | `put batteries on the grocery list and remind me at 7 to charge the car` | both done in one go, each result shown under her reply |
 | `who won the Broncos game?` | "Checking.", then the answer with a source |
 | `/college add CU Boulder EA nov 1`, then `just finished my Boulder essays`, then `what's left for Boulder?` | the school, the checklist ticked, and what's left with the deadline |
@@ -374,7 +377,7 @@ docker compose build && sudo systemctl restart sloane
 docker compose run --rm sloane sh -c 'for f in sql/*.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f "$f" || exit 1; done'
 ```
 
-On Telegram: "remind me at 5 to call Keegan" (typed or as a voice note) or `/remind tomorrow 7am bring the lab` sets a reminder; `/reminders` lists them and `/unremind <n>` cancels one. `/promise send Keegan the outline by friday` tracks a promise until `/kept`.
+On Telegram: "remind me at 5 to call Keegan" (typed or as a voice note) or `/remind tomorrow 7am bring the lab` sets a reminder; "remind me every weekday at 7 to …" sets one that repeats; "set a timer for 10 minutes" is a timer; `/reminders` lists them and `/unremind <n>` cancels one (and stops a repeating one). `/promise send Keegan the outline by friday` tracks a promise until `/kept`.
 `/status` says whether anything is broken. `/grades` shows current course grades. `/today` and `/week` show the schedule straight from the database (they work even if every AI provider is down). `/trust` shows what she may do without asking. `/brief` gives the morning brief on demand. `/jobs` shows what
 ran and whether it worked. `/sync` pulls Canvas, the calendar and shifts now.
 `/usage` shows model calls in the last day. `/state` shows her durable facts.

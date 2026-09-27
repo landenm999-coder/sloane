@@ -53,7 +53,8 @@ Total running cost: **$0/mo**, every layer on a free tier.
 | Promises | `/promise send Keegan the outline by friday` tracks what he owes and to whom ("by friday" = end of that day); shown in FACTS and briefs until `/kept` |
 | Weekly review | Sunday 7 PM: the week behind (grades, missing work, promises kept — from her own records) and the week ahead from FACTS |
 | Backups | 12:30 AM, silent: state, promises, people, courses, trust, reminders and jobs as JSON on the `models` volume, 14 kept |
-| Reminders | "remind me at 5 to call Keegan" — typed or spoken, times read by rules (no model), held through quiet hours; each arrives with Snooze 10 min / 1 hour / Tomorrow 7am / Done buttons |
+| Reminders | "remind me at 5 to call Keegan" — typed or spoken, times read by rules (no model), held through quiet hours; each arrives with Snooze 10 min / 1 hour / Tomorrow 7am / Done buttons. They can repeat: "remind me every weekday at 7 to take my meds", "every Monday and Thursday at 6", "every 2 hours" (never in quiet hours), "on the 1st of every month"; `/unremind` stops a series. "Set a timer for 10 minutes" is a reminder woken on the second |
+| Forwards | forward her a text from someone and she says who it's from and what they want, and offers a reply in your voice ("what should I say back?" sent with it is the question). A forward is someone else's words: logged untrusted, read as INGESTED, it never runs a command or sets a reminder, and follow-ups for ten minutes still see it |
 | Voice briefs | `VOICE_BRIEFS=morning_brief` sends that brief as a voice note (text if voice fails) |
 | Status | `/status`: open problems, last sync, provider health, last brief, Gmail — from her own bookkeeping, no model |
 | Gmail | triage every 3h in one batched call; replies drafted in his voice, sent only on Approve |
@@ -582,6 +583,8 @@ sql/
   026_colleges.sql  applications and their checklists
   027_deca.sql     scored practice role-plays
   028_capture_refs.sql  a capture retried after a lost response is stored once
+  029_repeating_reminders.sql  a reminder's repeat rule and series
+  999_lock_public.sql  row-level security on every table; always last
 scripts/
   doctor.py      validates every credential
   seed_state.py  tier 1 from a markdown file
