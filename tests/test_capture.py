@@ -204,6 +204,7 @@ async def main() -> None:
     check("POST routes", posts, [
         "/api/chat", "/api/followups/{item_id}/close", "/api/jobs/{name}/run", "/api/memory/forget",
         "/api/proposals/{proposal_id}/{decision}", "/api/reminders/{reminder_id}/cancel", "/api/trust/revoke",
+        "/api/workshop/ideas", "/api/workshop/{item_id}/{verb}",
         "/app/login", "/app/logout", "/capture", "/jobs/{name}/run", "/sync",
     ])
 

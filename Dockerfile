@@ -14,12 +14,12 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
 # curl for the healthcheck and the Node install; ca-certificates for TLS to
-# Telegram, Groq, Canvas and Supabase. postgresql-client gives the box `psql`
+# Telegram, Groq, Canvas and Supabase; git for the workshop's clone of her repo. postgresql-client gives the box `psql`
 # so the migrations can be applied without installing anything else. ffmpeg
 # turns speech into the OGG/Opus Telegram plays as a voice note (P3).
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      curl ca-certificates postgresql-client ffmpeg \
+      curl ca-certificates postgresql-client ffmpeg git \
  && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
  && apt-get install -y --no-install-recommends nodejs \
  && npm install -g @anthropic-ai/claude-code \
@@ -30,7 +30,7 @@ RUN apt-get update \
 # Not root. The two named volumes inherit their ownership from these paths the
 # first time they mount, which is what stops the usual permission fight.
 RUN useradd --create-home --uid 10001 sloane \
- && mkdir -p /home/sloane/.claude /var/lib/sloane/models \
+ && mkdir -p /home/sloane/.claude /var/lib/sloane/models /var/lib/sloane/workshop /var/lib/sloane/deploy \
  && chown -R sloane:sloane /home/sloane /var/lib/sloane
 
 WORKDIR /app

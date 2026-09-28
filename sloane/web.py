@@ -582,3 +582,79 @@ def install(app: FastAPI, state: dict, store, config) -> None:  # noqa: ANN001, 
             said = result.reply.speech if result.reply else ""
             return (f"{name}: {result.reason}" + (f" — {said}" if said else "")), bool(result.ran)
         return await act(request, doing)
+
+    # -- the workshop (sloane/workshop.py) ---------------------------------------------------------
+
+    def shop():  # noqa: ANN202
+        return state.get("workshop")
+
+    @app.get("/api/workshop")
+    async def api_workshop(request: Request) -> Response:
+        stop = refuse(request, change=False)
+        if stop is not None:
+            return stop
+        workshop = shop()
+        zone = ZoneInfo(config.timezone)
+        today = datetime.now(zone).date()
+        rows = await store.workshop_items(limit=80)
+        items = [{
+            "id": str(r["id"]), "title": r["title"], "request": r["request"], "origin": r["origin"],
+            "kind": r["kind"], "status": r["status"], "plan": r.get("plan") or "", "summary": r.get("summary") or "",
+            "files": list(r.get("files") or []), "checks": r.get("checks") or "", "pr_url": r.get("pr_url") or "",
+            "error": r.get("error") or "", "feedback": r.get("feedback") or "",
+            "when": _when(r.get("updated_at"), zone, today),
+        } for r in rows]
+        return JSONResponse({
+            "building_on": bool(workshop is not None and workshop.ready),
+            "upgrader": bool(workshop is not None and workshop.upgrader_installed()),
+            "model": config.workshop_model, "nightly": config.workshop_nightly,
+            "items": items,
+        }, headers={"Cache-Control": "no-store"})
+
+    @app.post("/api/workshop/ideas")
+    async def workshop_idea(request: Request) -> Response:
+        async def doing():  # noqa: ANN202
+            workshop = shop()
+            if workshop is None:
+                return "The workshop isn't running.", False
+            text = str((await request.json()).get("text") or "").strip()
+            if not text or len(text) > 2000:
+                return "Say what you want her to have (under 2,000 characters).", False
+            row = await workshop.add_idea(text)
+            return f"In the workshop: {row['title']}. She's planning it.", True
+        return await act(request, doing)
+
+    @app.post("/api/workshop/{item_id}/{verb}")
+    async def workshop_verb(item_id: str, verb: str, request: Request) -> Response:
+        async def doing():  # noqa: ANN202
+            workshop = shop()
+            if workshop is None or not _UUID.match(item_id):
+                return "No such item.", False
+            try:
+                body = await request.json()
+            except ValueError:
+                body = {}
+            body = body if isinstance(body, dict) else {}
+            if verb == "plan":
+                row = await workshop.plan(item_id)
+                return ("Planned." if row is not None and row.get("plan") else "She couldn't plan it just now."), \
+                    row is not None
+            if verb == "build":
+                now = bool(body.get("now"))
+                row = await workshop.queue(item_id, now=now)
+                if row is None:
+                    return "That one can't be built from where it is.", False
+                if not workshop.ready:
+                    return "Queued. Building needs the GitHub token on the box.", True
+                return (f"Building {row['title']} now." if now else f"{row['title']} is queued for tonight."), True
+            if verb == "accept":
+                return await workshop.accept(item_id)
+            if verb == "deny":
+                return await workshop.deny(item_id, str(body.get("why") or ""))
+            if verb == "undo":
+                return await workshop.undo(item_id)
+            if verb == "drop":
+                row = await workshop.drop(item_id)
+                return ("Dropped." if row is not None else "That one's already moved on."), row is not None
+            return "No such action.", False
+        return await act(request, doing)

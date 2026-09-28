@@ -28,7 +28,7 @@ EXPECTED_TABLES = {
     "emails", "reminders", "school_changes", "alerts", "skill_sessions", "nudges_said",
     "list_items", "countdowns", "cards", "card_reviews", "habits", "habit_log",
     "clients", "client_notes", "focus_sessions", "expenses", "skill_settings",
-    "colleges", "college_tasks", "roleplays", "capture_refs",
+    "colleges", "college_tasks", "roleplays", "capture_refs", "workshop_items",
 }
 
 PASS, FAIL, SKIP, WARN = "PASS", "FAIL", "SKIP", "WARN"
@@ -428,7 +428,8 @@ def check_values(config: Settings) -> None:
 
     wrong = []
     for key in ("DATABASE_URL", "GROQ_API_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
-                "CANVAS_BASE_URL", "CANVAS_TOKEN", "CANVAS_FEED_URL", "CALENDAR_ICS_URL", "LOCAL_BASE_URL"):
+                "CANVAS_BASE_URL", "CANVAS_TOKEN", "CANVAS_FEED_URL", "CALENDAR_ICS_URL", "LOCAL_BASE_URL",
+                "GITHUB_TOKEN"):
         value = getattr(config, key.lower())
         if not value:
             continue  # unset is each check's own business below
@@ -573,6 +574,44 @@ async def check_local(config: Settings) -> None:
     record("local model", PASS, f"{config.local_model} answered in {seconds:.1f}s{note}")
 
 
+async def check_workshop(config: Settings) -> None:
+    """The workshop: a token that can push to her repo, git, and the box's upgrader."""
+    import httpx
+
+    if not config.github_token:
+        record("workshop", SKIP, "GITHUB_TOKEN unset: ideas and plans work, building doesn't (DEPLOY §7h)")
+        return
+    if shutil.which("git") is None:
+        record("workshop", FAIL, "git isn't in the image; rebuild it (rerun the installer)")
+        return
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            response = await client.get(f"{config.github_api_base.rstrip('/')}/repos/{config.github_repo}",
+                                        headers={"Authorization": f"Bearer {config.github_token}",
+                                                 "Accept": "application/vnd.github+json"})
+    except httpx.HTTPError as exc:
+        record("workshop", FAIL, f"can't reach GitHub: {exc}")
+        return
+    if response.status_code == 401:
+        record("workshop", FAIL, "GitHub refused the token (expired or mistyped?); make a new one (DEPLOY §7h)")
+        return
+    if response.status_code == 404:
+        record("workshop", FAIL, f"the token can't see {config.github_repo}: pick it under Repository access (DEPLOY §7h)")
+        return
+    if response.status_code >= 300:
+        record("workshop", FAIL, f"GitHub answered {response.status_code}")
+        return
+    if not (response.json().get("permissions") or {}).get("push"):
+        record("workshop", FAIL, "the token can read but not write: Contents and Pull requests need Read and write")
+        return
+    deploy = Path(config.deploy_dir)
+    if not (deploy / "host.json").is_file():
+        record("workshop", WARN, "builds work; accepted changes merge but go live only when you rerun the installer "
+                                 "(it installs the automatic upgrade)")
+        return
+    record("workshop", PASS, f"builds on {config.workshop_model}; accepted changes go live on their own")
+
+
 async def main(warm: bool = False) -> int:
     config = load_settings()
 
@@ -591,6 +630,7 @@ async def main(warm: bool = False) -> int:
     await check_voice(config, warm=warm)
     await check_telegram(config)
     check_extras(config)
+    await check_workshop(config)
     await check_skills(config)
 
     width = max(len(name) for name, _, _ in results)

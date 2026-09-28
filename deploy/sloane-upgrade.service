@@ -1,0 +1,10 @@
+# Installed by scripts/install.sh; started by sloane-upgrade.path, never by hand.
+[Unit]
+Description=Sloane: put an accepted workshop change live, or roll it back
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/sloane/scripts/upgrade.sh
+TimeoutStartSec=1800

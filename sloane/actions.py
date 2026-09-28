@@ -46,6 +46,7 @@ SKILLS: dict[str, str] = {
     "budget": "/budget <amount>",
     "followup": "/followup <what he'll do> [<day>]  ·  /followup done <words from it> (when he says it's done)",
     "remember": "/remember <something he told you to keep in mind, in his words> -- kept at once",
+    "idea": "/idea <something he wants you to be able to do> -- into the workshop, where you plan and build it",
     "college": ("/college add <school> <EA|ED|RD> <deadline>  ·  /college <school> done <checklist item>  ·  "
                 "/college <school> submitted | admitted | deferred | waitlisted | denied | committed"),
     "roleplay": "/roleplay [area] -- starts a DECA practice role-play (marketing, finance, hospitality ...)",
@@ -88,6 +89,7 @@ RULES: dict[str, object] = {
     "budget": _budget,
     "followup": bool,
     "remember": lambda a: len(a) >= 2,
+    "idea": lambda a: len(a) >= 2,
     # Ticking, adding and recording where an application stands. Not dropping a
     # school, skipping a checklist item or reopening one: those he types.
     "college": lambda a: bool(a) and not set(a) & {"drop", "archive", "remove", "delete", "skip", "skipped",

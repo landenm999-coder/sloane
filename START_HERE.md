@@ -10,15 +10,22 @@ installer, where they're hidden as you type.
 
 On GitHub, open each pull request, press **Merge pull request**, then **Confirm merge**:
 
-- [Sloane #14](https://github.com/landenm999-coder/sloane/pull/14) (if it's still open)
+- Sloane's open pull request, if there is one: [github.com/landenm999-coder/sloane/pulls](https://github.com/landenm999-coder/sloane/pulls)
 - [Capture #2](https://github.com/landenm999-coder/capture/pull/2) (Vercel updates the app on its own)
 
 The installer uses `main`, so this comes first.
 
-**Already running her?** Then this is all you do: connect to the box and run the step 4
-command again. It upgrades her in place, keeps your `.env`, moves any old defaults on (her
-bulk model was left on one Groq retired), makes the control room's password, and she
-messages you when she's back.
+**Already running her?** Then upgrading is all you do:
+
+1. Connect to the box: `ssh -i <your key file> ubuntu@<the server's IP>` (on your PC under
+   WSL, open **Ubuntu** instead).
+2. Paste the step 4 command and press Enter.
+3. If it asks for a **GitHub token**, paste the one from step 8 (or press Enter to skip for
+   now).
+4. Wait for **"Done."** She messages you on Telegram when she's back.
+
+It keeps your `.env`, moves any old defaults on (her bulk model was left on one Groq
+retired), makes the control room's password, and installs the workshop's upgrader.
 
 ---
 
@@ -174,6 +181,21 @@ what she remembers about you, her jobs.
 
 3. On your phone or laptop, open `https://….ts.net/app` (the address from step 6), paste it,
    and sign in. On a phone: **Share → Add to Home Screen**, and it opens like an app.
+
+---
+
+## 8. The workshop: she builds on herself (10 minutes)
+
+In the control room's **Workshop** tab you write down what you want her to have. She plans
+it, builds it on her own copy of the code, tests it, and it waits for you: **Accept** puts it
+live (with **Undo**), **Deny** drops it. At night she builds what you queued, plus one idea of
+her own, so there's something to look at in the morning.
+
+1. Make her GitHub token: [DEPLOY.md](DEPLOY.md) section 7h has the five boxes to tick. It
+   starts `github_pat_`.
+2. On the box, run the step 4 command again and paste the token when it asks.
+3. In the Workshop tab, try it: add `a /coin command that flips a coin`, press **Build now**,
+   and a few minutes later it's in **Ready for you**.
 
 ---
 

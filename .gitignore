@@ -17,3 +17,6 @@ venv/
 
 # Agent worktrees (Claude Code isolation); never part of the repo.
 .claude/worktrees/
+
+# The workshop hand-off between her and the box (scripts/upgrade.sh).
+.deploy/

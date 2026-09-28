@@ -5,9 +5,10 @@ This file records what exists, what's verified, what's in flight and what's left
 It's kept up to date at the end of every work session. Last updated: 2026-09-28.
 
 - Repo: `github.com/landenm999-coder/sloane`, branch `main` (CI runs on push).
-- landenm999-coder/sloane#12 (skills, partner, colleges, DECA) and landenm999-coder/sloane#13 (capture recall,
-  Groq model) are **merged**. **The 2026-09-28 work is on branch `claude/continue-previous-work-k8coat`,
-  draft PR landenm999-coder/sloane#14, not yet on main** (see "2026-09-28" below).
+- landenm999-coder/sloane#12 (skills, partner, colleges, DECA), landenm999-coder/sloane#13 (capture recall,
+  Groq model) and landenm999-coder/sloane#14 (memory, control room, think, local models) are **merged**.
+  **The workshop (she builds on herself) is on branch `claude/continue-previous-work-k8coat`, draft PR
+  landenm999-coder/sloane#15, not yet on main** (see "The workshop" below).
 - Separate from **Capture** (`landenm999-coder/capture`), a voice-capture PWA that will later feed Sloane
   through an API. Keep them in separate repos. The old `claude/sloane-personal-assistant-nodd15` branch on
   capture is stale and can be deleted by Landen.
@@ -133,10 +134,49 @@ everything and talk to her, local models on a Pi, and edit herself"):
   fallback in both lanes or first with `BULK_PROVIDER=local`; local Whisper optional; `LOCAL_MODELS.md`.
 - *Prose replies*: when the model skips the JSON, the lead paragraph is speech and the rest detail
   (it used to flatten everything into speech and repeat it), and prose streams live.
-- *Self-editing is NOT built*: the permission system refused the step that gives her a coding session
-  on her own repo with auto-deploy. Landen's call; see "Only Landen can do".
+- *Self-editing*: not in PR #14 (it needed Landen's explicit go-ahead). He gave it; it's "The workshop" below.
 
 Suites: 53/53. Real-model eval: 68/68 (10 new checks: memory, diary recall, talk, think).
+
+**The workshop (after PR #14, same day).** Landen: "an actual workshop where I can plan out new things I want
+her to have and she will add those herself with my approval ... at nighttime with the cheaper models she
+could be building on herself ... so that when I wake up there's a pipeline of new features and I can accept
+or deny them." Built (`sloane/workshop.py`, `sql/031`, the control room's Workshop tab, `/idea`, `/workshop`):
+- *The pipeline*: idea → planned (a short plan in her voice) → queued (Build, or Build now) → building →
+  ready for him → Accept → live (with Undo), or Deny (his reason is kept and fed to her next ideas).
+- *The build*: a Claude Code session (`Router.code`, `WORKSHOP_MODEL=sonnet`) in her own clone of the repo on
+  a volume, never the running code. File tools scoped to the clone, Bash only for the tests, pyflakes and
+  read-only git; deny rules on /proc, /etc, /home, /root, /var... except the clone itself (a deny rule
+  covering the clone blocked every write: found by a live run); no credentials in its environment.
+- *The guard, in code* (`workshop.guard`): nothing in `deploy/protected.txt` (hard lines, agency, actions,
+  ingest, school, mail, providers, the control room, CI, the installer, the Dockerfile, requirements,
+  CLAUDE.md, the safety tests); the locked definitions (`HARD_LINES`, `ensure_allowed`, `Bot._handle`,
+  `_act`, `_offer`, forwards, `Reply`, the recall fence); no deleted test, no suite dropped from run.py,
+  no monkeypatching sloane from a skill, no secret (her own values or known token shapes) in the diff;
+  migrations only add (her own tables, a column elsewhere, a job row: no delete/update/drop/truncate on
+  another table, no grants, no EXECUTE, no changing a migration already on main) and no new write to the
+  trust ledger, proposals or the workshop's own table, from a migration or `store.py`. Then
+  the unit suites and pyflakes, run by code. Then a branch `sloane/<slug>-<id>`, a PR, and GitHub CI
+  (read through the Actions runs API).
+- *Accept*: squash-merge (pinned to the tested sha), then `.deploy/request.json`. On the box a systemd path
+  unit (`deploy/sloane-upgrade.path`) runs `scripts/upgrade.sh`: pull, refuse a "Workshop:" commit that
+  touched a protected file (checked against the list as it was *before* the pull), build, migrate,
+  restart, wait for /health, roll back if she doesn't come back, write `result.json`, which she reads and
+  tells him about. Undo is a revert built and checked the same way.
+- *Nights*: the `workshop` job (01:10) builds up to `NIGHTLY_BUILDS` queued items, then imagines
+  `NIGHTLY_OWN_IDEAS` of her own from the last week of his messages and loose ends (never a denied idea
+  again), plans and builds them. Nothing of hers goes live without his Accept. The heartbeat tells him in
+  the morning what's waiting.
+- *Verified*: `tests/test_workshop.py` (guard, argv, the upgrader against stub docker/systemctl/curl for
+  live, protected refused, rollback on unhealthy and on build failure, and the whole pipeline against a
+  stub GitHub and a bare repo); and a live run with the real CLI on Sonnet in a clone: "a /coin command"
+  was planned, built in 5½ minutes into `skills/coin.py` + `tests/test_coin.py` (listed in run.py, README
+  and HANDOFF updated), passed the guard, the suite (55/55) and pyflakes, and was committed and pushed. It
+  stopped at CI only because that run's fake GitHub reported no CI; CI → ready is covered by the test.
+  The first live run found the deny-rule bug above; the second led to titles cut at the first sentence
+  and summaries without her working notes (`workshop.closing`).
+
+Suites: 54/54.
 
 **She has never run against the real services.** This sandbox can't reach Telegram, Groq, Canvas, Google or
 Supabase. Everything external is tested against local stubs, and the real-model eval (via `claude -p`) scores
@@ -197,6 +237,7 @@ Supabase. Everything external is tested against local stubs, and the real-model 
 | Memory upgrade (PR #14) | lasting recall seats; STATE priority + cut note; "remember that" at once; learner: captures, updates, retires, diary (`put_diary`); CONVERSATION 24h/40; de-dup on real chat channels; `env_migrate.py` | `memory/store.py`, `tiers.py`, `learn.py`, `skills/memory.py`, `skills/__init__.py`, `agent.py`; tests in store, tiers, learn, agent, actions, env_check |
 | Control room (PR #14) | `/app` + `/api/*`: chat (NDJSON stream through `Bot.respond` via an `Outlet`), overview (rail, needs-you, due, reminders, grades, panels, memory, diary, jobs, trust, usage, system), controls (cancel reminder, approve/deny, revoke, forget, close loose end, run job) | `web.py`, `webui/`, `telegram.py` `Outlet`, `tests/test_web.py` |
 | Think (PR #14) | `think` 10:25/12:25/16:25/20:25, not in class or on a shift, NOTHING = silent and not remembered | `jobs/briefs.py`, `sql/030`, `tests/test_jobs.py` |
+| Workshop | ideas → plan → build in a clone (Claude Code, Sonnet, scoped tools) → guard in code (`deploy/protected.txt`, locked definitions, secrets, tests kept) → tests + pyflakes → PR + CI → his Accept → merge → host upgrader (`scripts/upgrade.sh` via a systemd path unit: protected re-check, build, migrate, health, rollback) → live, Undo; nightly builds + her own ideas; `/idea`, `/workshop`, the control room's Workshop tab | `sloane/workshop.py`, `skills/workshop.py`, `sql/031`, `scripts/upgrade.sh`, `deploy/`, `web.py`, `webui/`, `tests/test_workshop.py` |
 | Local models (PR #14) | `LOCAL_BASE_URL`/`LOCAL_MODEL` (+ `LOCAL_STT_*`), `Provider.configured` so an unset fallback isn't a failure, doctor + paste checks, compose `host.docker.internal` | `providers/local.py`, `router.py`, `LOCAL_MODELS.md`, `tests/test_local.py` |
 
 Telegram commands (all listed by `/help`): `/today /week /grades /done /status /brief /jobs /sync /inbox /remind /reminders /unremind /promise /promises /kept /trust /revoke /cancel /usage /state /help`, plus plain "remind me …".
@@ -218,33 +259,26 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
 
 ## In flight
 
-- **PR landenm999-coder/sloane#14**: everything under "2026-09-28" above. Green in CI (suite + arm64);
-  waiting on Landen to merge. After merging, rerunning `install.sh` upgrades the box: applies
-  `sql/029`–`030` and `999`, moves old `.env` defaults on, makes `DASHBOARD_TOKEN`.
-- **Self-editing ("she can edit herself and add skills")**: designed, not built. The design, if Landen
-  approves it: `/build <what>` (or asked in words) → a Claude Code session in a *clone* of her repo on a
-  volume (file tools scoped to the clone, Bash only for the tests, no secrets in its env) → a guard in
-  code (her safety files untouchable: hard lines, agency, actions, ingest, school, mail, CI, installer,
-  Dockerfile, requirements; no secrets in the diff) → unit tests + pyflakes → branch + PR → GitHub CI →
-  merge → a host-side systemd path unit runs the upgrade, checks /health, rolls back on failure → "Live:
-  … [Undo]". Her own ideas would go through `Agency.propose` (and earn trust like any action). Landen
-  chose auto-deploy and "all but safety rules" as scope. It needs his explicit go-ahead in a session
-  (the auto-mode permission check blocked it), a fine-grained GitHub token, and branch protection on
-  `main` requiring the `test` check.
+- **PR landenm999-coder/sloane#15**, the workshop (branch `claude/continue-previous-work-k8coat`): everything under "The workshop" above.
+  After merging, rerunning `install.sh` on the box installs the upgrader (`.deploy/`, `host.json`,
+  `sloane-upgrade.path`), applies `sql/031` and asks for `GITHUB_TOKEN`. Until the token is there the
+  Workshop tab still takes ideas and plans; it just doesn't build.
 - **PR landenm999-coder/capture#2**: the Capture → Sloane client (Settings → Sloane, an IndexedDB outbox,
   memory-only by default). Tested in Chromium against a real Sloane server; not yet on a phone. Merging it
   deploys it (Vercel); then DEPLOY §7d on the box (`CAPTURE_TOKEN`, `CORS_ORIGINS`, `tailscale serve`).
 
 ## Backlog (ideas, in priority order)
 
-0. Self-editing, if Landen says go (design under "In flight").
 1. Whatever the first real week turns up. She has never run against real Telegram, Canvas, the calendar or
-   Groq; expect small fixes (DEPLOY's "try everything" table is the checklist).
-2. Infinite Campus (grades), deliberately out of v1. Needs district credentials, and repeated automated logins can
+   Groq; expect small fixes (DEPLOY's "try everything" table is the checklist). The workshop's first real
+   builds on the box are part of that: watch the first few (CI time, how often the guard refuses, whether
+   Sonnet's builds pass on the first go).
+2. The workshop, next: a "revise" button (his notes → a second build on the same branch, instead of Deny and
+   re-add), and showing the diff itself in the control room (today it's the file list, the checks and a
+   link to the PR).
+3. Infinite Campus (grades), deliberately out of v1. Needs district credentials, and repeated automated logins can
    lock the account.
-3. P5 phone calls, beyond v1.
-4. More skills, if he wants them: a stock watchlist (quotes only, since trading is a hard line). One module
-   plus a migration. (The college tracker and DECA role-play practice are built.)
+4. P5 phone calls, beyond v1.
 5. Streaming for the Groq and Anthropic providers (`claude_code` and `local` stream; the others answer whole).
 6. The control room: a microphone button (browser recording → Whisper → voice reply), and approvals there
    when Telegram isn't set up (today the agency needs `TELEGRAM_CHAT_ID`).
@@ -252,12 +286,11 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
 
 ## Only Landen can do (the whole list; see DEPLOY.md)
 
-0. Merge landenm999-coder/sloane#14 and landenm999-coder/capture#2 (the installer deploys `main`), then rerun
-   the installer on the box to upgrade.
-0b. Decide on self-editing (see "In flight"). If yes: say so in a session, create a fine-grained GitHub
-   token (this repo only: Contents + Pull requests read/write, Actions + Checks read), and turn on branch
-   protection for `main` requiring the `test` check.
-0c. Optional: the control room (START_HERE step 7) and a Raspberry Pi for local models (`LOCAL_MODELS.md`).
+0. Merge landenm999-coder/sloane#15 (the workshop) and landenm999-coder/capture#2 (the installer deploys `main`).
+0b. Make the workshop's GitHub token (DEPLOY §7h: fine-grained, this repo only; Contents and Pull requests
+   read and write, Actions read), then rerun the installer on the box and paste it when asked.
+0c. Optional: the control room (START_HERE step 7). Local models are optional too: he has no Raspberry Pi
+   yet, and nothing needs one (`LOCAL_MODELS.md` is there if he ever gets one).
 1. Create the Oracle Cloud ARM instance (DEPLOY §1).
 2. SSH in and run the one-command installer (DEPLOY "The fast way"):
    `curl -fsSL https://raw.githubusercontent.com/landenm999-coder/sloane/main/scripts/install.sh | bash`.
@@ -268,11 +301,9 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
 4. Optional British voice: `SPEAK_PROVIDER=piper` and `PIPER_VOICE=en_GB-cori-medium` in `.env` (DEPLOY §7b).
 5. Capture on the phone: Tailscale on the phone, `CAPTURE_TOKEN` + `CORS_ORIGINS` on the box, then
    Capture → Settings → Sloane (DEPLOY §7d).
-6. Open decision, not set up: a nightly cloud routine that keeps improving the repo. It would spend his Claude
-   limits. (Superseded by self-editing on the box, if he approves that.)
 
 Security rules he follows: never paste tokens or credentials into chat. Credentials live only in `.env`
-(gitignored, chmod 600). The ICS URL and the Canvas token are passwords.
+(gitignored, chmod 600). The ICS URL, the Canvas token and the GitHub token are passwords.
 
 ---
 

@@ -129,6 +129,23 @@ class Router:
         await self._record(Usage(provider=name), "lookup", ok=True, error=None, degraded_from=None)
         return text
 
+    async def code(self, workdir: str, request: str, *, timeout: int, model: str = "") -> str:
+        """A coding session in her workshop clone (sloane/workshop.py). The Claude CLI
+        only: it is the one provider that can edit files and run the checks.
+        Raises NoProviderAvailable."""
+        from sloane.providers.claude_code import code
+
+        name = "claude_code"
+        try:
+            provider = self._provider(name, False)
+            text = await code(provider, workdir, request, timeout=timeout, model=model)  # type: ignore[arg-type]
+        except (ProviderError, ValueError) as exc:
+            message = exc.message if isinstance(exc, ProviderError) else str(exc)
+            await self._record(Usage(provider=name), "build", ok=False, error=message, degraded_from=None)
+            raise NoProviderAvailable(message) from exc
+        await self._record(Usage(provider=name), "build", ok=True, error=None, degraded_from=None)
+        return text
+
     async def prewarm(self, system: str) -> None:
         """Have the main lane's first provider ready for this system prompt."""
         try:

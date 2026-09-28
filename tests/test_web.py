@@ -168,9 +168,12 @@ async def integration() -> None:
             posts = ["/api/chat", "/api/reminders/00000000-0000-0000-0000-000000000000/cancel",
                      "/api/proposals/00000000-0000-0000-0000-000000000000/approve", "/api/trust/revoke",
                      "/api/memory/forget", "/api/followups/00000000-0000-0000-0000-000000000000/close",
-                     "/api/jobs/entity_sync/run", "/app/logout"]
+                     "/api/jobs/entity_sync/run", "/app/logout", "/api/workshop/ideas",
+                     "/api/workshop/00000000-0000-0000-0000-000000000000/accept",
+                     "/api/workshop/00000000-0000-0000-0000-000000000000/build"]
             check("signed out: every read is refused",
-                  [(await client.get(p)).status_code for p in ("/api/overview", "/api/history")], [401, 401])
+                  [(await client.get(p)).status_code for p in ("/api/overview", "/api/history", "/api/workshop")],
+                  [401, 401, 401])
             check("signed out: every change is refused",
                   [(await client.post(p, json={}, headers={"X-Sloane": "1"})).status_code for p in posts], [401] * len(posts))
 

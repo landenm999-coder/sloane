@@ -21,7 +21,7 @@ from urllib.parse import urlsplit
 
 # Blank is fine for these: she runs without them and says so in /status.
 OPTIONAL = {"GROQ_API_KEY", "CANVAS_BASE_URL", "CANVAS_TOKEN", "CANVAS_FEED_URL", "CALENDAR_ICS_URL",
-            "LOCAL_BASE_URL"}
+            "LOCAL_BASE_URL", "GITHUB_TOKEN"}
 
 _BAD_PASSWORD = re.compile(r"[@#/?\[\]\s$]|%(?![0-9A-Fa-f]{2})")
 _RESET = ("Easiest fix: Supabase → Project Settings → Database → Reset database password, "
@@ -112,6 +112,9 @@ def problem(key: str, value: str) -> str | None:
         return _calendar(value)
     if key == "LOCAL_BASE_URL":
         return _local(value)
+    if key == "GITHUB_TOKEN" and (not re.match(r"^(github_pat_|ghp_)[A-Za-z0-9_]{20,}$", value)):
+        return ("A GitHub token starts with github_pat_ (GitHub → Settings → Developer settings → Fine-grained "
+                "tokens → Generate new token; DEPLOY 7h has the exact boxes to tick).")
     return None
 
 

@@ -340,6 +340,45 @@ PLAN_BEDTIME=22:30               # when /plan stops filling your evening
 `SKILLS_DISABLED=money,habits` switches skills off by name. `doctor.py` lists
 which skills loaded and checks the weather reaches Open-Meteo.
 
+## 7h. The workshop: she builds features on herself (10 minutes, once)
+
+The **Workshop** tab in the control room (7e) is where new things for her
+start. You write down what you want her to have ("a skill that tracks my
+workouts"). She writes a plan, you press **Build tonight** or **Build now**,
+and she builds it on its own branch: Claude Code, in a copy of her code, never
+the running one. Every test must pass, and a guard in code refuses anything
+that touches her safety rules, deletes or rewrites what's in her database, or
+puts a password in the code. Then it waits in
+**Ready for you** with what changed. **Accept** and the box puts it live on its
+own, checks she's healthy, and rolls back if she isn't; **Undo** reverses it
+later. **Deny** (say why) and she learns from it.
+
+At night (1:10 AM) she builds what you queued, then, with room left, one idea
+of her own from what you've said lately, on `WORKSHOP_MODEL` (Sonnet: cheaper
+than her chat model, still a strong coder). In the morning she tells you what's
+waiting. Nothing she builds goes live without your Accept.
+
+It needs one thing from you, a GitHub token that can change her repo and
+nothing else:
+
+1. On GitHub: your picture (top right) → **Settings** → **Developer settings**
+   (bottom of the left menu) → **Personal access tokens** → **Fine-grained
+   tokens** → **Generate new token**.
+2. **Token name** `Sloane workshop`; **Expiration** a year (doctor tells you
+   when it stops working).
+3. **Repository access**: **Only select repositories** → `sloane`.
+4. **Repository permissions**: **Contents** Read and write, **Pull requests**
+   Read and write, **Actions** Read-only. (Metadata sets itself.)
+5. **Generate token** and copy it (it starts `github_pat_`). It's a password:
+   it goes only into the box.
+6. On the box, run the installer again (the upgrade command). It asks for the
+   token, checks it, and installs the upgrader that puts accepted changes live.
+
+`doctor.py`'s `workshop` line checks the token can push to the repo and that
+the upgrader is installed. Also on Telegram: `/idea <what you want>` and
+`/workshop`. Settings: `WORKSHOP_MODEL`, `WORKSHOP_NIGHTLY`, `NIGHTLY_BUILDS`,
+`NIGHTLY_OWN_IDEAS` (`.env.example`).
+
 ## 8. Run her
 
 ```bash
@@ -374,6 +413,7 @@ Each of these should work on day one. If one doesn't, `/status` and
 | forward her a friend's text | who it's from, what they want, and a reply you could send; `make it shorter` still sees it |
 | `remember that I'm vegetarian now`, then `/memory` | "Got it.", and it's listed; a correction later replaces it |
 | open `https://<box>.<tailnet>.ts.net/app` (7e) | the control room: talk to her there too, see your day, approve, run a job |
+| Workshop tab: add "a /coin command that flips a coin", press **Build now** (7h) | a plan, then a few minutes later "Built and tested", Ready for you with what changed; Accept and she's back with it live |
 | `put batteries on the grocery list and remind me at 7 to charge the car` | both done in one go, each result shown under her reply |
 | `who won the Broncos game?` | "Checking.", then the answer with a source |
 | `/college add CU Boulder EA nov 1`, then `just finished my Boulder essays`, then `what's left for Boulder?` | the school, the checklist ticked, and what's left with the deadline |
@@ -394,13 +434,13 @@ Each of these should work on day one. If one doesn't, `/status` and
 journalctl -u sloane -f              # logs
 docker compose run --rm sloane python scripts/doctor.py
 
-# update
-cd /opt/sloane && git pull
-docker compose build && sudo systemctl restart sloane
-
-# after every pull: apply migrations (idempotent, safe to repeat)
-docker compose run --rm sloane sh -c 'for f in sql/*.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f "$f" || exit 1; done'
+# update: the installer again. It pulls, rebuilds, applies the migrations,
+# moves old .env defaults on, (re)installs the workshop's upgrader, restarts her.
+curl -fsSL https://raw.githubusercontent.com/landenm999-coder/sloane/main/scripts/install.sh | bash
 ```
+
+What you accept in the workshop updates her by itself (7h); the installer is for
+everything else (a merged pull request from a Claude Code session, say).
 
 On Telegram: "remind me at 5 to call Keegan" (typed or as a voice note) or `/remind tomorrow 7am bring the lab` sets a reminder; "remind me every weekday at 7 to …" sets one that repeats; "set a timer for 10 minutes" is a timer; `/reminders` lists them and `/unremind <n>` cancels one (and stops a repeating one). `/promise send Keegan the outline by friday` tracks a promise until `/kept`.
 `/status` says whether anything is broken. `/grades` shows current course grades. `/today` and `/week` show the schedule straight from the database (they work even if every AI provider is down). `/trust` shows what she may do without asking. `/brief` gives the morning brief on demand. `/jobs` shows what
