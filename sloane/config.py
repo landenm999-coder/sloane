@@ -211,6 +211,11 @@ class Settings(BaseSettings):
     # week" from the shifts. 0 leaves earnings out.
     pay_rate: float = 0.0
 
+    # --- thinking on her own (jobs/briefs.py `think`) ------------------------------
+    # A few times a day she looks over everything and says the one thing worth
+    # saying, if there is one. Off: only the briefs, the heartbeat and replies.
+    think: bool = True
+
     # --- behaviour -----------------------------------------------------------
     # What she calls him when she addresses him: his name, or "sir" if he likes.
     address_as: str = "Landen"

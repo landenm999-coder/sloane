@@ -224,12 +224,16 @@ class Agent:
         today: date | None = None,
         on_text=None,  # noqa: ANN001 - async (raw text so far) -> None, to show it as it's written
         can_act: bool = False,
+        persist: bool = True,
     ) -> Reply:
         """One turn. Returns a Reply even when the model is unreachable.
 
         `can_act` is for his own messages only: the reply may then carry
         commands to run for him (sloane/actions.py). With ingested text in
         the prompt it is off whatever the caller says.
+
+        `persist=False` keeps the turn out of her episodes (the think job: a
+        silent "nothing to say" is not a memory).
         """
         can_act = can_act and not ingested.strip()
         # Landen's clock, never the container's. Docker runs in UTC, and from
@@ -313,7 +317,8 @@ class Agent:
                 speech="I cannot reach a model right now, so I have not answered that.",
                 detail=f"Every provider in the main lane failed: {exc}",
             )
-            self._later(self._persist(question, reply, channel=channel, answered=False))
+            if persist:
+                self._later(self._persist(question, reply, channel=channel, answered=False))
             return reply
 
         reply = parse(raw)
@@ -329,7 +334,8 @@ class Agent:
                 reply = Reply(speech=reply.speech, detail=reply.detail, actions=reply.actions)
         if origin and not reply.tainted:
             reply = Reply(speech=reply.speech, detail=reply.detail, tainted=True)
-        self._later(self._persist(question, reply, channel=channel, answered=True, origin=origin))
+        if persist:
+            self._later(self._persist(question, reply, channel=channel, answered=True, origin=origin))
         return reply
 
     async def _looked_up(self, question: str, first: Reply, context, on_text) -> Reply:  # noqa: ANN001

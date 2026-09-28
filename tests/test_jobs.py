@@ -46,8 +46,9 @@ class FakeAgent:
     def __init__(self) -> None:
         self.asked: list[str] = []
 
-    async def answer(self, question, *, channel="", today=None, ingested=""):
+    async def answer(self, question, *, channel="", today=None, ingested="", persist=True):
         self.asked.append(channel)
+        self.kept = persist
         return Reply(speech="Two things are due today.", detail="- Stat p. 214")
 
 
@@ -189,6 +190,41 @@ async def main() -> None:
         await runner.run("wrap", local(22))
         check("his question is 'reply'; a job's call is 'job'", purposes, ["reply", "job", "job"])
 
+        # -- she thinks: one thing worth saying, or nothing ----------------------
+        await store._exec("update jobs set runs = 0, last_run_at = null")
+        await store._exec("truncate usage_log restart identity")
+
+        class Quiet(FakeAgent):
+            async def answer(self, question, *, channel="", today=None, ingested="", persist=True):
+                self.asked.append(channel)
+                self.kept = persist
+                return Reply(speech="NOTHING.", detail="NOTHING.")
+
+        friday = datetime(2026, 9, 25, tzinfo=DEN)  # a Friday
+        thinker, outbox = FakeAgent(), Outbox()
+        school = await HANDLERS["think"](context(outbox, thinker), friday.replace(hour=10, minute=25))
+        check("not in class", (school.ran, school.reason, thinker.asked), (False, "he's at school", []))
+        await store._exec("delete from shifts where starts_at::date = '2026-09-25'")
+        await store.add_shift(friday.replace(hour=15), friday.replace(hour=19))
+        working = await HANDLERS["think"](context(outbox, thinker), friday.replace(hour=16, minute=25))
+        check("not on a shift", (working.ran, working.reason), (False, "he's at work"))
+        quiet = Quiet()
+        nothing = await HANDLERS["think"](context(outbox, quiet), friday.replace(hour=20, minute=25))
+        check("nothing worth saying: nothing sent", (nothing.ran, nothing.sent, outbox.sent, nothing.reason), (True, False, [], "nothing worth saying"))
+        check("and a silent turn is no memory", getattr(quiet, "kept", None), False)
+        saturday = friday + timedelta(days=1)
+        spoke = await HANDLERS["think"](context(outbox, thinker), saturday.replace(hour=12, minute=25))
+        check("something worth saying is said, once", (spoke.sent, [r.speech for r in outbox.sent]),
+              (True, ["Two things are due today."]))
+        check("as a job turn", thinker.asked, ["job:think"])
+        off = await HANDLERS["think"](JobContext(store=store, agent=thinker, governor=Governor(store, config),
+                                                 config=isolated(database_url=os.environ["DATABASE_URL"], think=False),
+                                                 send=outbox), friday.replace(hour=20, minute=25))
+        check("THINK=false turns it off", (off.ran, off.reason), (False, "THINK is off"))
+        check("it is a speaking job's cousin, not in SPEAKING (it may stay silent)", "think" in SPEAKING, False)
+        await store._exec("delete from shifts where starts_at::date = '2026-09-25'")
+        await store._exec("truncate usage_log restart identity")
+
         # -- the scheduler -----------------------------------------------------
         sched = Scheduler(context(Outbox()))
         await sched.start()
@@ -197,7 +233,7 @@ async def main() -> None:
             sorted(sched.registered),
             sorted(["morning_brief", "pre_shift", "post_shift", "wrap",
                     "reflection", "entity_sync", "inbox", "reminders", "watchdog",
-                    "weekly_review", "backup", "heartbeat", "learn"]),
+                    "weekly_review", "backup", "heartbeat", "learn", "think"]),
         )
         nxt = sched.next_runs()
 

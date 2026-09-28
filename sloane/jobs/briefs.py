@@ -5,6 +5,8 @@
     19:05  post_shift      what is left tonight     Mon-Fri
     22:00  wrap            what slipped, tomorrow   every day
     00:15  reflection      rebuild tier 2, prune    every day, SILENT
+    10:25, 12:25, 16:25, 20:25  think   one thing worth saying, or nothing
+                                        (not in class, not on a shift)
 
 Plus two that feed them: `entity_sync` (Canvas, calendar, shifts; silent) and
 `inbox` (Gmail triage every three hours, 7 AM-7 PM; speaks only when something
@@ -108,6 +110,22 @@ QUESTIONS: dict[str, str] = {
 # Only these send. Reflection is deliberately absent.
 SPEAKING = set(QUESTIONS)
 
+# She thinks: nobody asked, so she speaks only when there's one thing worth it.
+THINK_QUESTION = (
+    "(Nobody sent a message: this is you, thinking, between conversations.) Look over everything you "
+    "know right now -- FACTS, LOOPS, STATE, RECALL and CONVERSATION -- and decide whether there is ONE "
+    "thing genuinely worth saying to Landen now that he hasn't already heard from you today: a clash "
+    "coming up, a deadline he'll miss at this rate given his free time, something he said he'd do that's "
+    "due, a better plan for tonight, how something he was worried about went, or an idea for the "
+    "business or DECA that fits today. Say it the way a friend who noticed would, in a line or two. If "
+    "you'd offer to do something, offer it (\"Want me to remind you at 6?\"): his yes is what makes it "
+    "happen. If nothing clears that bar, or CONVERSATION shows you already said it, make speech exactly "
+    "NOTHING. Most of the time, NOTHING is right."
+)
+SILENT = "NOTHING"
+# Weekday school hours, when a thought can wait for lunch.
+SCHOOL = (7 * 60 + 45, 14 * 60 + 30)
+
 
 async def _brief(name: str, ctx: JobContext, now: datetime | None = None) -> JobResult:
     decision = await ctx.governor.may_run(sends_message=True, now=now)
@@ -145,6 +163,44 @@ async def post_shift(ctx: JobContext, now: datetime | None = None) -> JobResult:
 
 async def wrap(ctx: JobContext, now: datetime | None = None) -> JobResult:
     return await _brief("wrap", ctx, now)
+
+
+async def think(ctx: JobContext, now: datetime | None = None) -> JobResult:
+    """A few times a day: anything worth saying? Usually not, and then nothing is sent.
+
+    Not in class, not on a shift. Counted against the scheduled-work budget
+    like a brief, and a silent turn is not kept as a memory. What she offers
+    to do, she only does if he says yes (actions.grounded reads the offer).
+    """
+    if not ctx.config.think:
+        return JobResult("think", ran=False, reason="THINK is off")
+    zone = ZoneInfo(ctx.config.timezone)
+    moment = (now or datetime.now(zone)).astimezone(zone)
+    minute = moment.hour * 60 + moment.minute
+    if moment.weekday() < 5 and SCHOOL[0] <= minute < SCHOOL[1]:
+        return JobResult("think", ran=False, reason="he's at school")
+    try:
+        shifts = await ctx.store.shifts_between(moment.date(), moment.date())
+    except Exception:  # noqa: BLE001 - unknown is not "at work"
+        shifts = []
+    if any(s.get("starts_at") and s.get("ends_at") and not s.get("cancelled")
+           and s["starts_at"] <= moment < s["ends_at"] for s in shifts):
+        return JobResult("think", ran=False, reason="he's at work")
+    decision = await ctx.governor.may_run(sends_message=True, now=now)
+    if not decision:
+        return JobResult("think", ran=False, reason=decision.reason)
+
+    reply = await ctx.agent.answer(THINK_QUESTION, channel="job:think", today=moment.date(), persist=False)
+    said = (reply.speech or "").strip().strip(".!").upper()
+    if not said or said.startswith(SILENT):
+        return JobResult("think", ran=True, sent=False, reason="nothing worth saying")
+    if ctx.send is None:
+        return JobResult("think", ran=True, sent=False, reason="no chat to deliver to", reply=reply)
+    try:
+        await ctx.send(reply)
+    except Exception as exc:  # noqa: BLE001 - recorded, not raised
+        return JobResult("think", ran=True, sent=False, reason=f"delivery failed: {exc}", reply=reply)
+    return JobResult("think", ran=True, sent=True, reason="said one thing", reply=reply)
 
 
 async def reflection(ctx: JobContext, now: datetime | None = None) -> JobResult:
@@ -482,6 +538,7 @@ HANDLERS: dict[str, Callable[..., Awaitable[JobResult]]] = {
     "inbox": inbox,
     "reminders": reminders,
     "watchdog": watchdog,
+    "think": think,
     "weekly_review": weekly_review,
     "backup": backup,
     "heartbeat": heartbeat,
