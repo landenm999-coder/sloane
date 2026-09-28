@@ -43,7 +43,7 @@ The whole body must be 64 KB or less.
 |---|---|---|
 | `201` | `{"stored": true, "id": "<uuid>", "kind": "note"}` | mark it sent |
 | `200` + ok | `{"ok": true}` | the answer to `{"check": true}`: connected, token good |
-| `201` + reminder | `…, "reminder": "tomorrow at 7:00 AM: bring the lab"` | show "Reminder set: …" |
+| `201` + reminder | `…, "reminder": "tomorrow at 7:00 AM: bring the lab"` (a repeating one: `"every weekday at 7:00 AM, first tomorrow at 7:00 AM: take my meds"`) | show "Reminder set: …" |
 | `201` + no time | `…, "reminder": null, "note": "…no time could be read…"` | show "Saved as a note (no time found)" |
 | `201` + action | `…, "action": "Added milk to your grocery list; 3 things on it now."` | show the `action` line |
 | `200` | the first answer, plus `"duplicate": true` | mark it sent: this `client_id` was already stored |

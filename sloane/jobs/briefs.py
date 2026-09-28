@@ -5,6 +5,8 @@
     19:05  post_shift      what is left tonight     Mon-Fri
     22:00  wrap            what slipped, tomorrow   every day
     00:15  reflection      rebuild tier 2, prune    every day, SILENT
+    10:25, 12:25, 16:25, 20:25  think   one thing worth saying, or nothing
+                                        (not in class, not on a shift)
 
 Plus two that feed them: `entity_sync` (Canvas, calendar, shifts; silent) and
 `inbox` (Gmail triage every three hours, 7 AM-7 PM; speaks only when something
@@ -108,6 +110,22 @@ QUESTIONS: dict[str, str] = {
 # Only these send. Reflection is deliberately absent.
 SPEAKING = set(QUESTIONS)
 
+# She thinks: nobody asked, so she speaks only when there's one thing worth it.
+THINK_QUESTION = (
+    "(Nobody sent a message: this is you, thinking, between conversations.) Look over everything you "
+    "know right now -- FACTS, LOOPS, STATE, RECALL and CONVERSATION -- and decide whether there is ONE "
+    "thing genuinely worth saying to Landen now that he hasn't already heard from you today: a clash "
+    "coming up, a deadline he'll miss at this rate given his free time, something he said he'd do that's "
+    "due, a better plan for tonight, how something he was worried about went, or an idea for the "
+    "business or DECA that fits today. Say it the way a friend who noticed would, in a line or two. If "
+    "you'd offer to do something, offer it (\"Want me to remind you at 6?\"): his yes is what makes it "
+    "happen. If nothing clears that bar, or CONVERSATION shows you already said it, make speech exactly "
+    "NOTHING. Most of the time, NOTHING is right."
+)
+SILENT = "NOTHING"
+# Weekday school hours, when a thought can wait for lunch.
+SCHOOL = (7 * 60 + 45, 14 * 60 + 30)
+
 
 async def _brief(name: str, ctx: JobContext, now: datetime | None = None) -> JobResult:
     decision = await ctx.governor.may_run(sends_message=True, now=now)
@@ -145,6 +163,44 @@ async def post_shift(ctx: JobContext, now: datetime | None = None) -> JobResult:
 
 async def wrap(ctx: JobContext, now: datetime | None = None) -> JobResult:
     return await _brief("wrap", ctx, now)
+
+
+async def think(ctx: JobContext, now: datetime | None = None) -> JobResult:
+    """A few times a day: anything worth saying? Usually not, and then nothing is sent.
+
+    Not in class, not on a shift. Counted against the scheduled-work budget
+    like a brief, and a silent turn is not kept as a memory. What she offers
+    to do, she only does if he says yes (actions.grounded reads the offer).
+    """
+    if not ctx.config.think:
+        return JobResult("think", ran=False, reason="THINK is off")
+    zone = ZoneInfo(ctx.config.timezone)
+    moment = (now or datetime.now(zone)).astimezone(zone)
+    minute = moment.hour * 60 + moment.minute
+    if moment.weekday() < 5 and SCHOOL[0] <= minute < SCHOOL[1]:
+        return JobResult("think", ran=False, reason="he's at school")
+    try:
+        shifts = await ctx.store.shifts_between(moment.date(), moment.date())
+    except Exception:  # noqa: BLE001 - unknown is not "at work"
+        shifts = []
+    if any(s.get("starts_at") and s.get("ends_at") and not s.get("cancelled")
+           and s["starts_at"] <= moment < s["ends_at"] for s in shifts):
+        return JobResult("think", ran=False, reason="he's at work")
+    decision = await ctx.governor.may_run(sends_message=True, now=now)
+    if not decision:
+        return JobResult("think", ran=False, reason=decision.reason)
+
+    reply = await ctx.agent.answer(THINK_QUESTION, channel="job:think", today=moment.date(), persist=False)
+    said = (reply.speech or "").strip().strip(".!").upper()
+    if not said or said.startswith(SILENT):
+        return JobResult("think", ran=True, sent=False, reason="nothing worth saying")
+    if ctx.send is None:
+        return JobResult("think", ran=True, sent=False, reason="no chat to deliver to", reply=reply)
+    try:
+        await ctx.send(reply)
+    except Exception as exc:  # noqa: BLE001 - recorded, not raised
+        return JobResult("think", ran=True, sent=False, reason=f"delivery failed: {exc}", reply=reply)
+    return JobResult("think", ran=True, sent=True, reason="said one thing", reply=reply)
 
 
 async def reflection(ctx: JobContext, now: datetime | None = None) -> JobResult:
@@ -244,6 +300,27 @@ async def inbox(ctx: JobContext, now: datetime | None = None) -> JobResult:
 LATE_AFTER = timedelta(minutes=15)
 
 
+def _leads_with_symbol(text: str) -> bool:
+    import unicodedata
+
+    return bool(text) and unicodedata.category(text[0]) == "So"
+
+
+async def _schedule_next(ctx: JobContext, row: dict, moment: datetime, zone: ZoneInfo) -> None:
+    from datetime import time as clock
+
+    from sloane.reminders import next_due
+
+    quiet = (clock(ctx.config.quiet_start_hour, 0), clock(ctx.config.quiet_end_hour, ctx.config.quiet_end_minute))
+    after = row["due_at"].astimezone(zone)
+    nxt = next_due(row["repeat"], after, quiet=quiet)
+    for _ in range(1000):  # a rule always moves forward; the cap is belt and braces
+        if nxt > moment:
+            break
+        nxt = next_due(row["repeat"], nxt, quiet=quiet)
+    await ctx.store.add_next_reminder(row, nxt)
+
+
 async def reminders(ctx: JobContext, now: datetime | None = None) -> JobResult:
     """Deliver due reminders. No model call; quiet hours hold them till morning."""
     from sloane.reminders import spoken
@@ -251,16 +328,25 @@ async def reminders(ctx: JobContext, now: datetime | None = None) -> JobResult:
     if ctx.say is None:
         return JobResult("reminders", ran=False, reason="no chat to deliver to")
     speaking = ctx.governor.may_send(now)
-    if not speaking:
-        return JobResult("reminders", ran=False, reason=speaking.reason)
 
     zone = ZoneInfo(ctx.config.timezone)
     moment = (now or datetime.now(zone)).astimezone(zone)
     # UPDATE ... RETURNING has no order; deliver in the order they were due.
-    due = sorted(await ctx.store.claim_due_reminders(moment), key=lambda r: r["due_at"])
+    # Quiet hours hold everything but a timer: he set that one minutes ago,
+    # awake, and a timer that goes off at 6:30 AM is no timer at all.
+    due = sorted(await ctx.store.claim_due_reminders(moment, sources=None if speaking else ("timer",)),
+                 key=lambda r: r["due_at"])
+    if not speaking and not due:
+        return JobResult("reminders", ran=False, reason=speaking.reason)
     delivered = 0
     for row in due:
-        text = f"⏰ {row['text']}"
+        if row.get("repeat"):
+            # The next of the series, made before this one is sent: a send that
+            # fails is retried, but the series never silently stops. Several
+            # missed (the box was off) come back as one, then the next ahead.
+            await remember("next repeating reminder", _schedule_next(ctx, row, moment, zone))
+        # A timer or a focus session's end carries its own emoji already.
+        text = row["text"] if _leads_with_symbol(row["text"]) else f"⏰ {row['text']}"
         due_at = row["due_at"].astimezone(zone)
         if moment - due_at > LATE_AFTER:
             text += f" (this was for {spoken(due_at, moment).removeprefix('at ')})"
@@ -434,7 +520,8 @@ async def learn(ctx: JobContext, now: datetime | None = None) -> JobResult:
         return JobResult("learn", ran=False, reason="no model router")
     moment = now or datetime.now(ZoneInfo(ctx.config.timezone))
     try:
-        added, facts = await learn_day(ctx.store, router, ctx.config, moment)
+        added, facts = await learn_day(ctx.store, router, ctx.config, moment,
+                                       embedder=getattr(ctx.agent, "embedder", None))
     except NoProviderAvailable as exc:
         return JobResult("learn", ran=False, reason=f"nothing learned, no model: {exc}")
     return JobResult("learn", ran=True, reason=f"{added} follow-up{'s' if added != 1 else ''}, "
@@ -451,6 +538,7 @@ HANDLERS: dict[str, Callable[..., Awaitable[JobResult]]] = {
     "inbox": inbox,
     "reminders": reminders,
     "watchdog": watchdog,
+    "think": think,
     "weekly_review": weekly_review,
     "backup": backup,
     "heartbeat": heartbeat,

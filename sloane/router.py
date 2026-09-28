@@ -26,6 +26,7 @@ from sloane.providers.anthropic_api import AnthropicProvider
 from sloane.providers.base import Completion, Provider, ProviderError, Usage
 from sloane.providers.claude_code import ClaudeCodeProvider
 from sloane.providers.groq import GroqProvider
+from sloane.providers.local import LocalProvider
 from sloane.providers.tts import Audio, GroqTTS, PiperTTS, TTSProvider
 
 log = logging.getLogger(__name__)
@@ -37,8 +38,10 @@ log = logging.getLogger(__name__)
 # work -- not Landen's own questions, which are never rationed.
 SCHEDULED: ContextVar[bool] = ContextVar("sloane_scheduled", default=False)
 
-MAIN_ORDER = ("claude_code", "anthropic", "groq")
-BULK_ORDER = ("groq", "anthropic", "claude_code")
+# A local model (LOCAL_BASE_URL) is last in both: the fallback that needs no
+# internet. Unconfigured, it is passed over without a failure on the books.
+MAIN_ORDER = ("claude_code", "anthropic", "groq", "local")
+BULK_ORDER = ("groq", "anthropic", "claude_code", "local")
 # Voice: Groq Orpheus is fast and free up to its daily cap; Piper is local and
 # has no cap. Either way, a failure here costs the voice, never the reply.
 SPEAK_ORDER = ("groq", "piper")
@@ -58,6 +61,8 @@ def build(name: str, config: Settings, *, bulk: bool = False) -> Provider:
         return GroqProvider(config)
     if name == "anthropic":
         return AnthropicProvider(config, bulk=bulk)
+    if name == "local":
+        return LocalProvider(config)
     raise ValueError(f"unknown provider {name!r}")
 
 
@@ -213,6 +218,8 @@ class Router:
                 log.error("provider %s is not usable: %s", name, exc)
                 failures.append(f"{name}: {exc}")
                 continue
+            if name != configured and not getattr(provider, "configured", True):
+                continue  # a fallback with nothing to call (no local model set up)
 
             try:
                 if on_text is not None:

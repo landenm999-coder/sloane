@@ -10,10 +10,15 @@ installer, where they're hidden as you type.
 
 On GitHub, open each pull request, press **Merge pull request**, then **Confirm merge**:
 
-- [Sloane #12](https://github.com/landenm999-coder/sloane/pull/12)
+- [Sloane #14](https://github.com/landenm999-coder/sloane/pull/14) (if it's still open)
 - [Capture #2](https://github.com/landenm999-coder/capture/pull/2) (Vercel updates the app on its own)
 
 The installer uses `main`, so this comes first.
+
+**Already running her?** Then this is all you do: connect to the box and run the step 4
+command again. It upgrades her in place, keeps your `.env`, moves any old defaults on (her
+bulk model was left on one Groq retired), makes the control room's password, and she
+messages you when she's back.
 
 ---
 
@@ -112,6 +117,13 @@ Send these to her on Telegram. Each should do what it says.
 10. `spent 12 on lunch`, then `/budget 60`.
 11. `/plan` → your free time tonight, filled with what's due soonest.
 12. `/today`, `/week`, `/grades`, `/status`.
+13. `remind me every weekday at 7am to take my meds` → one that repeats; `/reminders` shows 🔁.
+14. `set a timer for 1 minute` → "Time's up" a minute later, on the second.
+15. Forward her a text from a friend (long-press it → Forward → Sloane) → who it's from, what
+    they want, and a reply you could send. Then `make it shorter`.
+16. `remember that I'm vegetarian now` → "Got it." Then `/memory`. Tomorrow, ask her something
+    that needs it.
+17. Talk to her about anything that's on your mind. She's not only a schedule.
 
 Type `/` in her chat for the menu of commands; `/help` lists everything. The full table is in
 [DEPLOY.md](DEPLOY.md), *The first day: try everything*.
@@ -145,6 +157,23 @@ This lets every Capture note also go to Sloane, so she remembers it.
 
 4. In Capture: **Settings → Sloane**. Paste the `https://….ts.net` address and the token, then
    press **Connect**. If Chrome asks about devices on your local network, allow it.
+
+---
+
+## 7. Optional: the control room (5 minutes)
+
+A private page where you talk to her and see and steer everything: your day, what needs you,
+what she remembers about you, her jobs.
+
+1. If you skipped step 6, do its item 1 and 2 (Tailscale on the server and your phone).
+2. On the server, read the password the installer made:
+
+   ```
+   grep DASHBOARD_TOKEN /opt/sloane/.env
+   ```
+
+3. On your phone or laptop, open `https://….ts.net/app` (the address from step 6), paste it,
+   and sign in. On a phone: **Share → Add to Home Screen**, and it opens like an app.
 
 ---
 

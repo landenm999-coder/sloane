@@ -132,7 +132,7 @@ class Store:
         """Every pinned durable fact. Rides in every prompt."""
         return await self._fetch(
             """
-            select key, category, value, confidence
+            select key, category, value, confidence, updated_at
             from state
             where pinned
             order by category, key
@@ -147,7 +147,10 @@ class Store:
         category: str = "fact",
         confidence: float = 1.0,
         source: str | None = None,
+        pin: bool = False,
     ) -> None:
+        """Set a fact. An unpinned (forgotten) one stays forgotten unless `pin`:
+        the nightly learner mustn't undo /forget, but his own "remember that" does."""
         await self._exec(
             """
             insert into state (key, value, category, confidence, source)
@@ -157,9 +160,10 @@ class Store:
                   category = excluded.category,
                   confidence = excluded.confidence,
                   source = excluded.source,
+                  pinned = state.pinned or %s,
                   updated_at = now()
             """,
-            (key, value, category, confidence, source),
+            (key, value, category, confidence, source, pin),
         )
 
     # -- tier 2: working set --------------------------------------------------
@@ -362,6 +366,12 @@ class Store:
         """
         half_life = half_life_days or self._config.recency_half_life_days
         wanted = limit or self._config.retrieval_limit
+        # Long memory. Decay alone buries everything past a month or two: RRF
+        # barely separates a perfect match from a weak one (1/61 vs 1/110), so
+        # any decay stronger than that lets every recent weak hit beat the one
+        # old conversation that answers the question. So the few most relevant
+        # rows, however old, always get a seat; recency fills the rest.
+        lasting = min(self._config.recall_lasting, wanted)
         # Over-fetch per arm so fusion has something to reorder. Cheap at this
         # table size and the standard recommendation.
         candidates = max(wanted * 4, 50)
@@ -372,6 +382,7 @@ class Store:
             "candidates": candidates,
             "k": RRF_K,
             "include_untrusted": include_untrusted,
+            "lasting": lasting,
         }
 
         arms = []
@@ -441,24 +452,31 @@ class Store:
             """
 
         sql = f"""
-            with {",".join(arms)}, {fused}
-            select e.id,
-                   e.occurred_at,
-                   e.role,
-                   e.channel,
-                   e.trusted,
-                   e.source,
-                   coalesce(e.summary, e.content) as text,
-                   fused.rrf,
-                   fused.rrf * power(
-                       0.5,
-                       (extract(epoch from (now() - e.occurred_at)) / 86400.0)
-                         / %(half_life)s
-                   ) as score
-              from fused
-              join episodes e on e.id = fused.id
-             order by score desc
-             limit %(limit)s
+            with {",".join(arms)}, {fused},
+            ranked as (
+              select e.id,
+                     e.occurred_at,
+                     e.role,
+                     e.channel,
+                     e.trusted,
+                     e.source,
+                     coalesce(e.summary, e.content) as text,
+                     fused.rrf,
+                     fused.rrf * power(
+                         0.5,
+                         (extract(epoch from (now() - e.occurred_at)) / 86400.0)
+                           / %(half_life)s
+                     ) as score,
+                     row_number() over (order by fused.rrf desc, e.occurred_at desc) as relevance_rank
+                from fused
+                join episodes e on e.id = fused.id
+            ),
+            picked as (
+              select * from ranked
+               order by (relevance_rank <= %(lasting)s) desc, score desc
+               limit %(limit)s
+            )
+            select * from picked order by score desc
         """
         return await self._fetch(sql, params)
 
@@ -966,7 +984,7 @@ class Store:
     async def reminders_between(self, start: datetime, end: datetime) -> list[Row]:
         return await self._fetch(
             """
-            select id, text, due_at from reminders
+            select id, text, due_at, repeat from reminders
              where sent_at is null and cancelled_at is null and due_at between %s and %s
              order by due_at
             """,
@@ -1189,29 +1207,53 @@ class Store:
 
     # -- reminders ----------------------------------------------------------------
 
-    async def add_reminder(self, *, text: str, due_at: datetime, source: str = "telegram") -> Row:
+    async def add_reminder(self, *, text: str, due_at: datetime, source: str = "telegram",
+                           repeat: str | None = None) -> Row:
+        """One reminder; with `repeat`, the first of a series (sql/029)."""
         row = await self._one(
-            "insert into reminders (text, due_at, source) values (%s, %s, %s) returning *",
-            (text, due_at, source),
+            """
+            insert into reminders (text, due_at, source, repeat, series_id)
+            values (%s, %s, %s, %s, case when %s::text is null then null else gen_random_uuid() end)
+            returning *
+            """,
+            (text, due_at, source, repeat, repeat),
         )
         assert row is not None
         return row
 
-    async def claim_due_reminders(self, now: datetime, limit: int = 20) -> list[Row]:
-        """Mark due reminders sent and return them, atomically: each is claimed once."""
+    async def add_next_reminder(self, previous: Row, due_at: datetime) -> Row | None:
+        """The next of a repeating reminder's series. None if it is already there."""
+        return await self._one(
+            """
+            insert into reminders (text, due_at, source, repeat, series_id)
+            values (%s, %s, %s, %s, %s)
+            on conflict (series_id, due_at) where series_id is not null do nothing
+            returning *
+            """,
+            (previous["text"], due_at, previous["source"], previous["repeat"], previous["series_id"]),
+        )
+
+    async def claim_due_reminders(self, now: datetime, limit: int = 20,
+                                  sources: tuple[str, ...] | None = None) -> list[Row]:
+        """Mark due reminders sent and return them, atomically: each is claimed once.
+
+        `sources` limits it to those (quiet hours deliver only timers).
+        """
         return await self._fetch(
             """
             update reminders set sent_at = %s
              where id in (
                select id from reminders
                 where due_at <= %s and sent_at is null and cancelled_at is null
+                  and (%s::text[] is null or source = any(%s::text[]))
                 order by due_at
                 limit %s
                 for update skip locked
              )
             returning *
             """,
-            (now, now, limit),
+            (now, now, list(sources) if sources is not None else None,
+             list(sources) if sources is not None else None, limit),
         )
 
     async def claim_snooze(self, reminder_id: str) -> Row | None:
@@ -1559,13 +1601,14 @@ class Store:
     async def recent_messages(self, chat_id: int, since: datetime, limit: int = 20) -> list[Row]:
         """The recent exchange with him, oldest first: his words and hers.
 
-        Text and voice only (a button press is not something said), and only
-        what has a body.
+        Text, voice and what he forwarded (a button press is not something
+        said), and only what has a body. A forward is someone else's words:
+        it is logged untrusted and shown only as a placeholder.
         """
         rows = await self._fetch(
             """
             select direction, kind, body, at, trusted from messages
-             where chat_id = %s and at >= %s and kind in ('text', 'voice')
+             where chat_id = %s and at >= %s and kind in ('text', 'voice', 'forward')
                and body is not null and body <> ''
              order by at desc, id desc
              limit %s
@@ -2152,6 +2195,43 @@ class Store:
              order by at
             """,
             (chat_id, since, until),
+        )
+
+    async def his_captures(self, since: datetime, until: datetime) -> list[Row]:
+        """What he captured (the Capture app) in a window, oldest first: his words too."""
+        return await self._fetch(
+            """
+            select content as body, occurred_at as at from episodes
+             where channel = 'capture' and role = 'user' and trusted
+               and occurred_at >= %s and occurred_at < %s
+             order by occurred_at
+            """,
+            (since, until),
+        )
+
+    async def put_diary(self, day: date, content: str, *, occurred_at: datetime,
+                        embedding: Sequence[float] | None = None) -> str:
+        """One diary entry per day (a re-run replaces it): what the day was, for later recall."""
+        row = await self._one(
+            """
+            update episodes set content = %s, summary = %s,
+                   embedding = coalesce(%s::vector, embedding)
+             where channel = 'diary' and source = %s
+            returning id
+            """,
+            (content, content, as_vector(embedding) if embedding is not None else None, f"diary {day.isoformat()}"),
+        )
+        if row is not None:
+            return str(row["id"])
+        return await self.add_episode(content, role="sloane", channel="diary", summary=content,
+                                      embedding=embedding, occurred_at=occurred_at, trusted=True,
+                                      source=f"diary {day.isoformat()}")
+
+    async def recent_diary(self, limit: int = 7) -> list[Row]:
+        """Her diary of the last few days (the learn job writes one a night)."""
+        return await self._fetch(
+            "select occurred_at, content from episodes where channel = 'diary' order by occurred_at desc limit %s",
+            (limit,),
         )
 
     async def open_follow_ups(self) -> list[Row]:

@@ -24,7 +24,7 @@ from sloane.contract import Reply, parse
 from sloane.jobs.conflicts import find as find_conflicts, render as render_conflicts
 from sloane.memory.embed import Embedder, EmbedUnavailable
 from sloane.memory.store import Store, remember
-from sloane.memory.tiers import assemble, conversation_that_fits, usage_sink
+from sloane.memory.tiers import assemble, conversation_that_fits, prioritize_state, usage_sink
 from sloane.persona import system_prompt
 from sloane.router import NoProviderAvailable, Router
 from sloane.skills import Registry
@@ -54,6 +54,13 @@ HARD_LINES: frozenset[tuple[str, str]] = frozenset(
         ("publish", "public"),
     }
 )
+
+
+# The channels a turn of chat is stored under: what CONVERSATION already shows.
+# Telegram answers are stored as "text" or "voice" (the kind he sent), so a
+# check for "telegram" alone never matched one, and every recent exchange came
+# back a second time as RECALL, crowding out older memories.
+CHAT_CHANNELS = frozenset({"telegram", "text", "voice", "dashboard"})
 
 
 def _stamp(moment: datetime) -> str:
@@ -112,8 +119,10 @@ class Agent:
         self._router = router or Router(self._config, usage_sink=usage_sink(store))
         self._embedder = embedder or Embedder(self._config)
         self.skills = skills
-        # The nightly learn job asks the bulk lane through the same router.
+        # The nightly learn job asks the bulk lane through the same router,
+        # and embeds its diary line with the same embedder.
         self.router = self._router
+        self.embedder = self._embedder
         # Memory writes run after the reply is on its way (invariant 5, taken
         # literally). settle() waits for them: shutdown, tests, the eval.
         self._pending: set[asyncio.Task] = set()
@@ -215,12 +224,16 @@ class Agent:
         today: date | None = None,
         on_text=None,  # noqa: ANN001 - async (raw text so far) -> None, to show it as it's written
         can_act: bool = False,
+        persist: bool = True,
     ) -> Reply:
         """One turn. Returns a Reply even when the model is unreachable.
 
         `can_act` is for his own messages only: the reply may then carry
         commands to run for him (sloane/actions.py). With ingested text in
         the prompt it is off whatever the caller says.
+
+        `persist=False` keeps the turn out of her episodes (the think job: a
+        silent "nothing to say" is not a memory).
         """
         can_act = can_act and not ingested.strip()
         # Landen's clock, never the container's. Docker runs in UTC, and from
@@ -244,7 +257,7 @@ class Agent:
             episodes = [
                 e for e in episodes
                 if not (
-                    e.get("channel", "telegram") == "telegram"
+                    e.get("channel", "telegram") in CHAT_CHANNELS
                     and e.get("occurred_at")
                     and e["occurred_at"] >= start
                 )
@@ -262,7 +275,7 @@ class Agent:
             log.info("%s conflict(s) found for %s", len(collisions), when)
 
         context = assemble(
-            state=tiers["state"],
+            state=prioritize_state(tiers["state"], question),
             working_set=tiers["working_set"],
             assignments=tiers["assignments"],
             overdue=tiers["overdue"],
@@ -304,7 +317,8 @@ class Agent:
                 speech="I cannot reach a model right now, so I have not answered that.",
                 detail=f"Every provider in the main lane failed: {exc}",
             )
-            self._later(self._persist(question, reply, channel=channel, answered=False))
+            if persist:
+                self._later(self._persist(question, reply, channel=channel, answered=False))
             return reply
 
         reply = parse(raw)
@@ -320,7 +334,8 @@ class Agent:
                 reply = Reply(speech=reply.speech, detail=reply.detail, actions=reply.actions)
         if origin and not reply.tainted:
             reply = Reply(speech=reply.speech, detail=reply.detail, tainted=True)
-        self._later(self._persist(question, reply, channel=channel, answered=True, origin=origin))
+        if persist:
+            self._later(self._persist(question, reply, channel=channel, answered=True, origin=origin))
         return reply
 
     async def _looked_up(self, question: str, first: Reply, context, on_text) -> Reply:  # noqa: ANN001

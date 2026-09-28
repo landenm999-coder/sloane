@@ -46,6 +46,22 @@ class Settings(BaseSettings):
     groq_model: str = "openai/gpt-oss-120b"
     groq_stt_model: str = "whisper-large-v3-turbo"
 
+    # --- a local model (providers/local.py; LOCAL_MODELS.md) ---------------------
+    # Any OpenAI-compatible server on hardware he owns -- Ollama on a Raspberry
+    # Pi, llama.cpp, LM Studio. Blank: not configured, and the lanes skip it.
+    # MAIN_PROVIDER=local or BULK_PROVIDER=local puts it first in that lane;
+    # set but not chosen, it is the last fallback when every cloud lane fails.
+    local_base_url: str = ""   # e.g. http://raspberrypi.local:11434/v1 (Ollama)
+    local_model: str = ""      # e.g. llama3.2:3b
+    local_api_key: str = ""    # most local servers need none
+    # A Pi is slow: give it longer than the cloud lanes get.
+    local_timeout: int = 180
+    # Voice notes transcribed locally too (a Whisper server with the OpenAI
+    # audio endpoint, e.g. speaches). Blank: Groq's Whisper, as before. Its
+    # address if it isn't the same server as the model (it usually isn't).
+    local_stt_model: str = ""
+    local_stt_base_url: str = ""
+
     # --- voice out (P3) -------------------------------------------------------
     # groq | piper. The other is the fallback. Either failing leaves a text
     # reply, never no reply.
@@ -140,6 +156,13 @@ class Settings(BaseSettings):
     # Scoped to the token-checked endpoints only; see sloane/cors.py.
     cors_origins: str = ""
 
+    # --- the control room: /app (sloane/web.py) ----------------------------------
+    # A password for the dashboard where he sees everything, runs things and
+    # talks to her. Unset, or shorter than 32 characters, and /app is off.
+    # Reach it the way Capture does: tailscale serve (DEPLOY section 7e).
+    #   python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+    dashboard_token: str = ""
+
     # --- telegram ------------------------------------------------------------
     telegram_bot_token: str = ""
     telegram_chat_id: int = 0
@@ -188,6 +211,11 @@ class Settings(BaseSettings):
     # week" from the shifts. 0 leaves earnings out.
     pay_rate: float = 0.0
 
+    # --- thinking on her own (jobs/briefs.py `think`) ------------------------------
+    # A few times a day she looks over everything and says the one thing worth
+    # saying, if there is one. Off: only the briefs, the heartbeat and replies.
+    think: bool = True
+
     # --- behaviour -----------------------------------------------------------
     # What she calls him when she addresses him: his name, or "sir" if he likes.
     address_as: str = "Landen"
@@ -195,7 +223,8 @@ class Settings(BaseSettings):
     # his own messages only, through the Claude CLI's search tools alone.
     web_lookup: bool = True
     timezone: str = "America/Denver"
-    max_reply_tokens: int = 1024
+    # Room for a real answer when he wants one: a drafted pitch, a talk-through.
+    max_reply_tokens: int = 2048
 
     # Context budget per tier, in tokens. Tiers 1 and 2 ride in every prompt.
     budget_state: int = 1500
@@ -204,13 +233,17 @@ class Settings(BaseSettings):
     # FACTS: school rows first, then the skills' lines with what is left.
     budget_entities: int = 2000
     # The running conversation: what "it", "that" and "why" refer to.
-    budget_conversation: int = 1500
-    conversation_hours: int = 12
-    conversation_messages: int = 24
+    # A day of it, like a person who was there yesterday too.
+    budget_conversation: int = 2500
+    conversation_hours: int = 24
+    conversation_messages: int = 40
 
     # Retrieval decay: cosine similarity times 0.5 ** (age_days / half_life).
     recency_half_life_days: float = 14.0
     retrieval_limit: int = 12
+    # Of those, how many seats go to the most relevant rows however old they
+    # are (store.search_episodes): what makes a month-old conversation findable.
+    recall_lasting: int = 4
 
     # Fixed 3-7 PM Mon-Fri rule. Work never posts a schedule; we generate it.
     shift_start_hour: int = 15

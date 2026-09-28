@@ -294,7 +294,30 @@ checks a password, and it stays off until you set one.
      -d '{"check": true}'          # {"ok": true}: connected, nothing stored
    ```
 
-## 7e. Optional: the TV dashboard (2 minutes)
+## 7e. The control room: talk to her and run everything from a browser (2 minutes)
+
+`/app` is a private page where you talk to her (the same conversation as
+Telegram: commands, reminders and actions all work) and see and steer
+everything she runs:
+
+- **Today:** your day on a rail, what needs you, what's due, reminders, grades.
+- **Memory:** what she knows about you, loose ends, her diary. Forget anything.
+- **Engine:** jobs you can run now, what she may do without asking, model use.
+
+The installer makes its password, `DASHBOARD_TOKEN`, for you. Read it on the
+box with:
+
+```bash
+grep DASHBOARD_TOKEN /opt/sloane/.env
+```
+
+With `tailscale serve` from 7d running, open `https://<box>.<tailnet>.ts.net/app`
+on your phone or laptop and paste it. You stay signed in for 30 days. On a
+phone, use **Add to Home Screen** and it opens like an app. It is reachable only
+from your own tailnet devices, and even there it needs the password. Changing
+`DASHBOARD_TOKEN` (and restarting) signs every device out.
+
+## 7f. Optional: the TV dashboard (2 minutes)
 
 With `tailscale serve` from 7d running, open `https://<box>.<tailnet>.ts.net/tv`
 on any device signed in to your tailnet: an old tablet on the wall, a laptop, a
@@ -304,7 +327,7 @@ skill, and refreshes itself every minute. It never loads anything from the
 internet and needs no token (it is as private as `/facts`: your tailnet only).
 Put it in full screen and leave it.
 
-## 7f. Skill settings (optional)
+## 7g. Skill settings (optional)
 
 The skills need nothing to start. Three settings in `.env` make them better:
 
@@ -346,6 +369,11 @@ Each of these should work on day one. If one doesn't, `/status` and
 | `what's due tomorrow?`, then `and friday?` | the exact rows from Canvas; the follow-up understood without repeating yourself |
 | a voice note: "what's on today?" | a voice note back (British, if you set `PIPER_VOICE=en_GB-cori-medium`) |
 | `remind me in 2 minutes to test this` | a reminder in 2 minutes, with Snooze buttons |
+| `remind me every weekday at 7am to take my meds`, then `/reminders` | a repeating one (🔁); `/unremind <n>` stops the series |
+| `set a timer for 1 minute` | "Time's up" a minute later, on the second |
+| forward her a friend's text | who it's from, what they want, and a reply you could send; `make it shorter` still sees it |
+| `remember that I'm vegetarian now`, then `/memory` | "Got it.", and it's listed; a correction later replaces it |
+| open `https://<box>.<tailnet>.ts.net/app` (7e) | the control room: talk to her there too, see your day, approve, run a job |
 | `put batteries on the grocery list and remind me at 7 to charge the car` | both done in one go, each result shown under her reply |
 | `who won the Broncos game?` | "Checking.", then the answer with a source |
 | `/college add CU Boulder EA nov 1`, then `just finished my Boulder essays`, then `what's left for Boulder?` | the school, the checklist ticked, and what's left with the deadline |
@@ -374,7 +402,7 @@ docker compose build && sudo systemctl restart sloane
 docker compose run --rm sloane sh -c 'for f in sql/*.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f "$f" || exit 1; done'
 ```
 
-On Telegram: "remind me at 5 to call Keegan" (typed or as a voice note) or `/remind tomorrow 7am bring the lab` sets a reminder; `/reminders` lists them and `/unremind <n>` cancels one. `/promise send Keegan the outline by friday` tracks a promise until `/kept`.
+On Telegram: "remind me at 5 to call Keegan" (typed or as a voice note) or `/remind tomorrow 7am bring the lab` sets a reminder; "remind me every weekday at 7 to …" sets one that repeats; "set a timer for 10 minutes" is a timer; `/reminders` lists them and `/unremind <n>` cancels one (and stops a repeating one). `/promise send Keegan the outline by friday` tracks a promise until `/kept`.
 `/status` says whether anything is broken. `/grades` shows current course grades. `/today` and `/week` show the schedule straight from the database (they work even if every AI provider is down). `/trust` shows what she may do without asking. `/brief` gives the morning brief on demand. `/jobs` shows what
 ran and whether it worked. `/sync` pulls Canvas, the calendar and shifts now.
 `/usage` shows model calls in the last day. `/state` shows her durable facts.
@@ -454,7 +482,10 @@ is the 6:35 AM brief. The heartbeat starts too, but it only speaks when a
 skill has something new (a countdown a week out, rain before your shift). One
 `claude` process sits idle, ready for your next message (about 150 MB); it is
 replaced after every reply. At 12:20 AM she quietly reads back the day's
-messages for loose ends to follow up on. `TELEGRAM_CHAT_ID` must be set or the briefs run and
+messages (and captures) for loose ends, facts that changed, and a diary line.
+A few times a day she thinks (`think`: weekday evenings, through the day at
+weekends, never in class or on a shift) and says the one thing worth saying,
+if there is one; most runs send nothing. `THINK=false` turns it off. `TELEGRAM_CHAT_ID` must be set or the briefs run and
 record but have nobody to send to; `/jobs` will show that plainly. The inbox
 job runs only once Gmail is set up (7c); until then `/jobs` lists it as
 deferred with the reason `gmail is not configured`.

@@ -42,6 +42,12 @@ class Provider(abc.ABC):
 
     name: str = "base"
 
+    @property
+    def configured(self) -> bool:
+        """False when it has nothing to call (no URL): the router passes over it
+        without counting a failure. Providers that need a key still fail loudly."""
+        return True
+
     @abc.abstractmethod
     async def complete(
         self,

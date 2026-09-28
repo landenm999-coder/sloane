@@ -1,0 +1,13 @@
+{
+  "name": "Sloane",
+  "short_name": "Sloane",
+  "description": "Talk to Sloane and run everything she does.",
+  "start_url": "/app",
+  "scope": "/app",
+  "display": "standalone",
+  "background_color": "#14161f",
+  "theme_color": "#14161f",
+  "icons": [
+    {"src": "/app/static/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"}
+  ]
+}

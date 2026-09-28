@@ -219,14 +219,18 @@ def partial_reply(raw: str) -> tuple[str, str]:
     """(speech, detail) so far, from a model reply that is still streaming in.
 
     Only for showing progress: the finished reply still goes through parse(),
-    which is what the contract promises. Anything that isn't the JSON shape
-    yields ("", "") and simply isn't shown until it's done.
+    which is what the contract promises. Prose (she sometimes skips the JSON)
+    is shown as it comes, as speech.
     """
     text = (raw or "").lstrip()
     if text.startswith("```"):
         text = text.split("\n", 1)[1] if "\n" in text else ""
-    if not text.startswith("{"):
+    if not text:
         return "", ""
+    if not text.startswith("{"):
+        # She answered in prose, not the JSON shape: show it as it comes (parse()
+        # still decides what the finished reply is).
+        return text, ""
     return _partial_string(text, "speech"), _partial_string(text, "detail")
 
 
@@ -279,5 +283,12 @@ def parse(raw: str) -> Reply:
                 detail=detail or speech,
             )
 
-    # 5 -- no structure at all. Everything is detail; speech is the readable head.
-    return Reply(speech=clean_speech(text), detail=text)
+    # 5 -- no structure at all. Speech is the readable head; detail is the rest.
+    # A plan or a list in prose leads with a sentence and then a blank line:
+    # that sentence is what he hears, and the rest is shown under it once, not
+    # the whole text flattened into speech and then repeated.
+    head, _, rest = text.partition("\n\n")
+    speech = clean_speech(head)
+    if rest.strip() and speech == clean_speech(head, max_sentences=99):
+        return Reply(speech=speech, detail=rest.strip())
+    return Reply(speech=clean_speech(text) if not rest.strip() else speech, detail=text)

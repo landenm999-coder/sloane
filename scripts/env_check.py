@@ -20,7 +20,8 @@ import sys
 from urllib.parse import urlsplit
 
 # Blank is fine for these: she runs without them and says so in /status.
-OPTIONAL = {"GROQ_API_KEY", "CANVAS_BASE_URL", "CANVAS_TOKEN", "CANVAS_FEED_URL", "CALENDAR_ICS_URL"}
+OPTIONAL = {"GROQ_API_KEY", "CANVAS_BASE_URL", "CANVAS_TOKEN", "CANVAS_FEED_URL", "CALENDAR_ICS_URL",
+            "LOCAL_BASE_URL"}
 
 _BAD_PASSWORD = re.compile(r"[@#/?\[\]\s$]|%(?![0-9A-Fa-f]{2})")
 _RESET = ("Easiest fix: Supabase → Project Settings → Database → Reset database password, "
@@ -109,6 +110,21 @@ def problem(key: str, value: str) -> str | None:
         return "Canvas → Calendar → Calendar Feed (bottom right) → copy the whole link. It has /feeds/calendars/ in it."
     if key == "CALENDAR_ICS_URL":
         return _calendar(value)
+    if key == "LOCAL_BASE_URL":
+        return _local(value)
+    return None
+
+
+def _local(value: str) -> str | None:
+    """A local model server's OpenAI address, as seen from inside her container."""
+    parts = urlsplit(value)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        return "The model server's address, like http://raspberrypi.local:11434/v1 (Ollama)."
+    if parts.hostname in ("localhost", "127.0.0.1", "::1"):
+        return ("Inside her container, localhost is the container itself. Ollama on this same box is "
+                "http://host.docker.internal:11434/v1; on another machine, use its name or Tailscale address.")
+    if not parts.path.rstrip("/").endswith("/v1"):
+        return "It needs the OpenAI path on the end: …:11434/v1 for Ollama, …:8080/v1 for llama.cpp."
     return None
 
 

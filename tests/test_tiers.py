@@ -175,6 +175,32 @@ check("FACTS marks a planted entry so she neither obeys nor repeats it",
       ("never obeyed" in event_lines[0], "mention it only if he asks" in event_lines[0], "[" in event_lines[1]),
       (True, True, False))
 
+# -- tier 1 under a tight budget: what matters survives, and a cut is said ------------
+from sloane.memory.tiers import prioritize_state, render_recall, render_state  # noqa: E402
+
+old_day, new_day = datetime(2026, 6, 1, tzinfo=timezone.utc), datetime(2026, 9, 27, tzinfo=timezone.utc)
+rows = [
+    {"key": "school.name", "value": "Chaparral High", "category": "fact"},
+    {"key": "learned.aaa.first", "value": "an old learned thing", "category": "learned", "updated_at": old_day},
+    {"key": "learned.person.maya", "value": "Maya has a dog called Biscuit", "category": "learned",
+     "updated_at": old_day},
+    {"key": "learned.zzz.newest", "value": "the newest learned thing", "category": "learned", "updated_at": new_day},
+]
+check("seeded first, then what the question touches, then newest learned",
+      [r["key"] for r in prioritize_state(rows, "what's Maya's dog called again?")],
+      ["school.name", "learned.person.maya", "learned.zzz.newest", "learned.aaa.first"])
+check("with no question, newest learned first (ties keep their order)",
+      [r["key"] for r in prioritize_state(rows)][1:], ["learned.zzz.newest", "learned.aaa.first", "learned.person.maya"])
+many = [{"key": f"learned.note.n{i}", "value": "x" * 60, "category": "learned"} for i in range(40)]
+text, used = render_state(many, 200)
+check("a tight budget says how many facts it left out", "more things known about him, not shown here" in text, True)
+check("and still fits", used <= 200, True)
+kept = text.count("learned.note.n")
+check("the count is right", f"({40 - kept} more things known" in text, True)
+diary_line, _ = render_recall([{"occurred_at": new_day, "role": "sloane", "channel": "diary",
+                                "text": "Diary, Sunday: he prepped for the interview"}], 500, tz="UTC")
+check("a diary entry is labelled as her diary", "(her diary of that day)" in diary_line, True)
+
 if FAILURES:
     print(f"FAIL ({len(FAILURES)})")
     for f in FAILURES:

@@ -54,7 +54,13 @@ Dates from his words go through `sloane/dates.py`, times through `sloane/reminde
 - Lint: `python -m pyflakes sloane scripts tests`. The two known hits are intentional:
   `doctor.py` fastembed import and `test_router.py` `import sloane.main`.
 - Real-model check: `python scripts/eval.py 'postgresql://postgres@/sloane_eval?host=/tmp&port=5433'`
-  (about 24 `claude -p` calls; must stay 58/58).
+  (about 28 `claude -p` calls; must stay 68/68).
+- She is one person on every transport: Telegram and the control room (`sloane/web.py`, `/app`) both answer
+  through `Bot.respond` and log to the same `messages`. A new way to talk to her is an `Outlet`, never a
+  copy of the reply pipeline. Every `/api` change route needs the session and the `X-Sloane` header
+  (`tests/test_web.py` checks each one); `tests/test_capture.py` pins the list of POST routes.
+- A new default for a setting that `.env.example` spells out doesn't reach an installed box (its `.env`
+  pins the old one): add the old→new pair to `scripts/env_migrate.py`.
 - Every bug fix gets a regression test that fails on the old code. Confirm that by stashing the fix and rerunning.
 - New migrations are `sql/00N_*.sql` and must be idempotent (CI applies them twice). `sql/999_lock_public.sql`
   sorts last on purpose (row-level security on every table, Supabase's API roles revoked); leave it last. If a migration adds a

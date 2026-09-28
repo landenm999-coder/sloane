@@ -146,6 +146,11 @@ def create_app() -> FastAPI:
         state["scheduler"] = scheduler
         if bot is not None:
             bot.run_job = scheduler.run
+        # The control room's chat answers through the same Bot.respond as
+        # Telegram; with no bot token it gets a bot that never polls.
+        responder = bot if bot is not None else Bot(store, agent, config, voice=voice, skills=skills)
+        responder.run_job = scheduler.run
+        state["responder"] = responder
         try:
             await scheduler.start()
             # Canvas, the calendar and shifts now, if the last sync is missing
@@ -174,6 +179,10 @@ def create_app() -> FastAPI:
     app = FastAPI(title="Sloane", version="0.1.0", lifespan=lifespan)
     # Browser apps (Capture) may call the token-checked endpoints, and only those.
     app.add_middleware(ScopedCORS, origins=cors_origins(config.cors_origins), paths=CORS_PATHS)
+    # The control room: /app and /api (sloane/web.py). Off without DASHBOARD_TOKEN.
+    from sloane import web
+
+    web.install(app, state, store, config)
 
     @app.get("/health")
     async def health() -> dict:
