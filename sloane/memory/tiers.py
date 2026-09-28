@@ -85,9 +85,52 @@ def _when(value: Any, tz: str) -> str:
 # -- tier 1 -------------------------------------------------------------------
 
 
+_STOP = frozenset("""a an and are about but can could did does for from had has have her him his how
+i i'm im in is it its just like me my of on or our she so that the their them then there they this to
+too was we what when where which who why will with would you your""".split())
+
+
+def _content_words(text: str) -> set[str]:
+    import re
+
+    return {w for w in re.findall(r"[a-z0-9']+", text.lower().replace("_", " ").replace(".", " "))
+            if len(w) > 2 and w not in _STOP}
+
+
+def prioritize_state(rows: Sequence[Row], question: str = "") -> list[Row]:
+    """Tier 1 in the order it should survive a tight budget.
+
+    What he seeded himself first; then what she learned that the question
+    touches ("what's Maya's dog called?" pulls learned.person.maya); then the
+    rest of what she learned, newest first. Alphabetical order, which this
+    replaces, dropped whatever sorted last once learned facts filled the budget.
+    """
+    seeded = [r for r in rows if r.get("category") != "learned"]
+    learned = [r for r in rows if r.get("category") == "learned"]
+    asked = _content_words(question)
+
+    def touches(r: Row) -> bool:
+        return bool(asked & _content_words(f"{r.get('key', '')} {r.get('value', '')}"))
+
+    def newest(r: Row) -> float:
+        at = r.get("updated_at")
+        return at.timestamp() if isinstance(at, datetime) else 0.0
+
+    relevant = [r for r in learned if touches(r)]
+    rest = sorted((r for r in learned if not touches(r)), key=newest, reverse=True)
+    return [*seeded, *relevant, *rest]
+
+
 def render_state(rows: Sequence[Row], budget: int, *, tz: str = "") -> tuple[str, int]:
     lines = [f"- {r['key']}: {r['value']}" for r in rows]
     kept, used = fit(lines, budget)
+    if len(kept) < len(lines):
+        # Say so: a fact that didn't fit is not a fact she doesn't have.
+        note = f"- ({len(lines) - len(kept) + 1} more things known about him, not shown here)"
+        kept, used = fit(lines, budget - estimate_tokens(note) - 1)
+        note = f"- ({len(lines) - len(kept)} more things known about him, not shown here)"
+        kept.append(note)
+        used += estimate_tokens(note) + 1
     return _block("STATE", kept, "durable facts about Landen"), used
 
 
@@ -117,7 +160,7 @@ def render_recall(rows: Sequence[Row], budget: int, *, tz: str = "UTC") -> tuple
     lines = []
     for r in rows:
         stamp = _when(r.get("occurred_at"), tz)
-        who = r.get("role", "user")
+        who = "her diary of that day" if r.get("channel") == "diary" else r.get("role", "user")
         text = " ".join(str(r.get("text", "")).split())
         if r.get("trusted") is False:
             src = r.get("source") or "ingested"

@@ -78,6 +78,13 @@ TABLE = [
 for proposed, want in TABLE:
     check(f"check({proposed[:40]!r})", actions.check(proposed, allowed), want)
 check("only loaded skills are offered", "weather" in allowed or "cards" in allowed, False)
+mem = actions.available({"remember"})
+check("remembering is something she may do for him",
+      actions.check("/remember he switched to oat milk", mem), "/remember he switched to oat milk")
+check("but not an empty one", actions.check("/remember x", mem), None)
+check("and only what he said", (actions.grounded("/remember switched to oat milk", "btw I switched to oat milk"),
+                                actions.grounded("/remember his password is hunter2", "btw I switched to oat milk")),
+      (True, False))
 
 # Only what he asked for: a command must come from his words, or from an offer
 # of hers that he just said yes to. Enforced here, not only in the prompt.

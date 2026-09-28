@@ -464,7 +464,8 @@ async def learn(ctx: JobContext, now: datetime | None = None) -> JobResult:
         return JobResult("learn", ran=False, reason="no model router")
     moment = now or datetime.now(ZoneInfo(ctx.config.timezone))
     try:
-        added, facts = await learn_day(ctx.store, router, ctx.config, moment)
+        added, facts = await learn_day(ctx.store, router, ctx.config, moment,
+                                       embedder=getattr(ctx.agent, "embedder", None))
     except NoProviderAvailable as exc:
         return JobResult("learn", ran=False, reason=f"nothing learned, no model: {exc}")
     return JobResult("learn", ran=True, reason=f"{added} follow-up{'s' if added != 1 else ''}, "

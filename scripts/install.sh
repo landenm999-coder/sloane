@@ -140,6 +140,9 @@ main() {
     echo "Saved .env (chmod 600). Edit it later with: nano $DIR/.env"
   else
     say ".env already exists -- leaving it alone"
+    # Except for defaults the code has since moved past (a retired model, a
+    # longer memory window): changed only where .env still holds the old one.
+    python3 scripts/env_migrate.py .env
   fi
 
   # -- 4. Image and migrations --------------------------------------------------------

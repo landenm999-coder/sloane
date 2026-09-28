@@ -103,6 +103,33 @@ check("CLI: a good value comes back cleaned", cli("CANVAS_BASE_URL", " dcsd.inst
 code, out, err = cli("DATABASE_URL", POOLER.replace(":5432/", ":6543/"))
 check("CLI: a bad one fails with the reason, and nothing on stdout", (code, out, "6543" in err), (1, "", True))
 
+# -- env_migrate: old defaults move on, his own values stay -------------------------
+import tempfile  # noqa: E402
+
+from env_migrate import migrate  # noqa: E402
+
+before = ("GROQ_API_KEY=gsk_secret\nGROQ_MODEL=llama-3.3-70b-versatile\nCONVERSATION_HOURS=12\n"
+          "CONVERSATION_MESSAGES=30\n# BUDGET_CONVERSATION=1500\nBUDGET_CONVERSATION='1500'\n")
+after, changed = migrate(before)
+check("a retired model moves to the new default", "GROQ_MODEL=openai/gpt-oss-120b" in after, True)
+check("an old window moves on", "CONVERSATION_HOURS=24" in after, True)
+check("a quoted old default too", "BUDGET_CONVERSATION=2500" in after, True)
+check("a value he chose stays", "CONVERSATION_MESSAGES=30" in after, True)
+check("comments and secrets are untouched", ("# BUDGET_CONVERSATION=1500" in after, "GROQ_API_KEY=gsk_secret" in after),
+      (True, True))
+check("and it says which keys moved", changed, ["GROQ_MODEL", "CONVERSATION_HOURS", "BUDGET_CONVERSATION"])
+check("nothing to do is nothing done", migrate("GROQ_MODEL=openai/gpt-oss-120b\n"), ("GROQ_MODEL=openai/gpt-oss-120b\n", []))
+with tempfile.TemporaryDirectory() as tmp:
+    env = Path(tmp) / ".env"
+    env.write_text(before)
+    env.chmod(0o600)
+    proc = subprocess.run([sys.executable, str(ROOT / "scripts" / "env_migrate.py"), str(env)],
+                          capture_output=True, text=True)
+    check("the script rewrites the file in place", "GROQ_MODEL=openai/gpt-oss-120b" in env.read_text(), True)
+    check("keeping it private", oct(env.stat().st_mode & 0o777), "0o600")
+    check("naming keys, never values", ("GROQ_MODEL" in proc.stdout, "gsk_secret" in proc.stdout + proc.stderr),
+          (True, False))
+
 if FAILURES:
     print(f"FAIL ({len(FAILURES)})")
     for f in FAILURES:

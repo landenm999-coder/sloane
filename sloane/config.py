@@ -195,7 +195,8 @@ class Settings(BaseSettings):
     # his own messages only, through the Claude CLI's search tools alone.
     web_lookup: bool = True
     timezone: str = "America/Denver"
-    max_reply_tokens: int = 1024
+    # Room for a real answer when he wants one: a drafted pitch, a talk-through.
+    max_reply_tokens: int = 2048
 
     # Context budget per tier, in tokens. Tiers 1 and 2 ride in every prompt.
     budget_state: int = 1500
@@ -204,13 +205,17 @@ class Settings(BaseSettings):
     # FACTS: school rows first, then the skills' lines with what is left.
     budget_entities: int = 2000
     # The running conversation: what "it", "that" and "why" refer to.
-    budget_conversation: int = 1500
-    conversation_hours: int = 12
-    conversation_messages: int = 24
+    # A day of it, like a person who was there yesterday too.
+    budget_conversation: int = 2500
+    conversation_hours: int = 24
+    conversation_messages: int = 40
 
     # Retrieval decay: cosine similarity times 0.5 ** (age_days / half_life).
     recency_half_life_days: float = 14.0
     retrieval_limit: int = 12
+    # Of those, how many seats go to the most relevant rows however old they
+    # are (store.search_episodes): what makes a month-old conversation findable.
+    recall_lasting: int = 4
 
     # Fixed 3-7 PM Mon-Fri rule. Work never posts a schedule; we generate it.
     shift_start_hour: int = 15

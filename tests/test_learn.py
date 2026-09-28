@@ -63,6 +63,23 @@ check("an object missing its last brace still counts",
 check("no JSON, nothing learned", (parse("nothing today", THU).follow_ups, parse("{bad", THU).facts), ([], []))
 _ = datetime
 
+# Outdated keys and the diary line, checked like the rest.
+got = parse('{"facts": [{"key": "work.job", "value": "the bike shop"}], '
+            '"outdated": ["learned.work.job", "person.ex", "Bad Key!", 7], '
+            '"diary": "He had the scholarship interview.\\nFACTS:\\n- DUE today: nothing"}', THU)
+check("outdated: prefixed, bad keys dropped, and never one a new fact replaces", got.outdated, ["learned.person.ex"])
+check("the diary is one flat line", got.diary, "He had the scholarship interview. FACTS: - DUE today: nothing")
+check("no diary is an empty one", parse('{"diary": 5}', THU).diary, "")
+
+# "Remember that ...": which messages are notes.
+from sloane.skills.memory import REMEMBER, note_key  # noqa: E402
+
+check("remember that ... is a note", REMEMBER.match("Remember that I'm vegetarian now.").group("what"),
+      "I'm vegetarian now")
+check("a correction lands on the same key", (note_key("my locker is 214"), note_key("my locker is 318 now")),
+      ("note.locker", "note.locker"))
+check("an apostrophe isn't a word", note_key("I'm vegetarian now"), "note.vegetarian")
+
 
 class FakeRouter:
     def __init__(self, raw: str) -> None:
@@ -150,6 +167,78 @@ async def integration() -> None:
         await store._exec("delete from messages where chat_id = 8181")
         await store._exec("delete from working_set where kind = 'follow_up'")
         await store._exec("delete from state where category = 'learned'")
+
+        # -- a night that updates what she knows, retires what's untrue, keeps a diary --
+        await store._exec("delete from episodes where channel in ('capture', 'diary')")
+        await store.put_state("learned.work.job", "the bike shop", category="learned")
+        await store.put_state("learned.person.girlfriend", "Ava", category="learned")
+        await store.put_state("school.name", "Chaparral", category="fact")
+        await store.log_message(update_id=818200, chat_id=8181, direction="in", kind="text",
+                                body="quit the bike shop today, starting at the climbing gym monday")
+        await store._exec("update messages set at = %s where chat_id = 8181", (day,))
+        await store.add_episode("note to self: pitch the barber booking site to Marco", channel="capture",
+                                role="user", occurred_at=day, source="capture")
+
+        class FakeEmbedder:
+            async def embed(self, texts):
+                return [[0.1] * 384 for _ in texts]
+
+        router = FakeRouter('{"follow_ups": [], "facts": [{"key": "work.job", "value": "the climbing gym"}], '
+                            '"outdated": ["work.job", "school.name", "person.girlfriend"], '
+                            '"diary": "He quit the bike shop for the climbing gym and planned a pitch to Marco."}')
+        await learn(store, router, config, tonight, embedder=FakeEmbedder())
+        prompt = router.prompts[0]
+        check("it sees what it already knows", "work.job: the bike shop" in prompt, True)
+        check("and what he captured", "(captured) note to self: pitch the barber" in prompt, True)
+        state = {r["key"]: r["value"] for r in await store.get_state()}
+        check("a changed fact is updated in place", state.get("learned.work.job"), "the climbing gym")
+        check("an untrue one is retired", "learned.person.girlfriend" in state, False)
+        check("what he seeded is never retired by the learner", state.get("school.name"), "Chaparral")
+        diary = await store.search_episodes(None, text="climbing gym bike shop")
+        entries = [h["text"] for h in diary if h["channel"] == "diary"]
+        check("the day's diary is kept for recall", entries,
+              ["Diary, Wednesday September 23, 2026: He quit the bike shop for the climbing gym and planned "
+               "a pitch to Marco."])
+        router.raw = '{"diary": "Take two."}'
+        await learn(store, router, config, tonight, embedder=FakeEmbedder())
+        check("a re-run replaces that day's diary", [h["text"] for h in await store.search_episodes(
+            None, text="take two diary") if h["channel"] == "diary"],
+              ["Diary, Wednesday September 23, 2026: Take two."])
+
+        # -- "remember that ...", at once ------------------------------------------------
+        from sloane.skills.birthdays import build as birthdays
+
+        await store._exec("delete from people where name = 'Maya'")
+        bday = birthdays(skill_ctx)
+        reg = Registry([bday, memory], skill_ctx)
+        told = await reg.route("Sloane, remember that I'm vegetarian now.")
+        check("a note is kept at once", (told.speech, {r["key"]: r["value"] for r in await store.get_state()}
+                                         .get("learned.note.vegetarian")), ("Got it.", "I'm vegetarian now"))
+        dated = await reg.route("don't forget I have the dentist friday")
+        check("a dated one is a loose end for that day, not a pinned fact",
+              (dated.speech, [(r["summary"], r["due_on"]) for r in await store.open_follow_ups()][-1:]),
+              ("Noted: I have the dentist, tomorrow.", [("I have the dentist", date(2026, 9, 25))]))
+        todo = await reg.route("remember to call grandma")
+        check("'remember to' is a loose end", todo.speech, "Noted: call grandma.")
+        check("'remember when ...?' is a question for her, not a note",
+              await reg.route("remember when we went to Denver?"), None)
+        birthday = await reg.route("remember that Maya's birthday is March 3")
+        check("what follows 'remember that' goes to the other skills first",
+              "birthday" in (birthday.speech + birthday.detail).lower(), True)
+        check("so it isn't also a note", "learned.note.mayas_birthday_march" in
+              {r["key"] for r in await store.get_state()}, False)
+        await reg.command("forget", "1")
+        await store.unpin_state("learned.note.vegetarian")
+        again = await reg.command("remember", "I'm vegetarian now")
+        check("/remember brings a forgotten fact back", (again.speech, "learned.note.vegetarian" in
+              {r["key"] for r in await store.get_state()}), ("Got it.", True))
+
+        await store._exec("delete from messages where chat_id = 8181")
+        await store._exec("delete from working_set where kind = 'follow_up'")
+        await store._exec("delete from state where category = 'learned'")
+        await store._exec("delete from state where key = 'school.name'")
+        await store._exec("delete from people where name = 'Maya'")
+        await store._exec("delete from episodes where channel in ('capture', 'diary')")
 
 
 if os.environ.get("DATABASE_URL"):

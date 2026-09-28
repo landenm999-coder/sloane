@@ -323,6 +323,49 @@ async def main() -> None:
             True,
         )
 
+        # -- long memory: the most relevant rows keep a seat however old -------
+        # A perfect match from three months ago, under twenty fresh weak ones.
+        # Decay alone ranked it below every one of them (a quarter-weight hit
+        # can't beat any fresh one once RRF has flattened the ranks), so the
+        # conversation that answered the question could never come back.
+        await store.add_episode("the scholarship interview went badly, they asked about DECA nationals",
+                                embedding=vec(0.0, -1.0), occurred_at=now - timedelta(days=90))
+        for i in range(20):
+            await store.add_episode(f"weak fresh filler {i}", embedding=vec(-0.6, -0.8), occurred_at=now)
+        remembered = await store.search_episodes(vec(0.0, -1.0), text="how did the scholarship interview go",
+                                                 limit=12)
+        check("a three-month-old answer is still recalled", any("scholarship" in h["text"] for h in remembered), True)
+        check("and fresh rows still fill the rest", sum("filler" in h["text"] for h in remembered) >= 7, True)
+        check("still ordered by the decayed score", [h["score"] for h in remembered],
+              sorted((h["score"] for h in remembered), reverse=True))
+
+        # -- the diary: one per day, a re-run replaces it --------------------------
+        day = (now - timedelta(days=3)).date()
+        first = await store.put_diary(day, "Diary: first draft", occurred_at=now - timedelta(days=3))
+        second = await store.put_diary(day, "Diary: the real one", occurred_at=now - timedelta(days=3))
+        check("the same day's diary is replaced, not doubled", first, second)
+        diary = await store.search_episodes(None, text="real one diary")
+        check("and recall finds it, labelled as the diary",
+              [(h["text"], h["channel"]) for h in diary if h["channel"] == "diary"], [("Diary: the real one", "diary")])
+
+        # -- captures are his words for the learner --------------------------------
+        await store.add_episode("idea: a booking page for barbers", channel="capture", role="user",
+                                occurred_at=now - timedelta(hours=1), source="capture")
+        await store.add_episode("an email about a sale", channel="capture", role="user", trusted=False,
+                                occurred_at=now - timedelta(hours=1))
+        caught = await store.his_captures(now - timedelta(hours=2), now)
+        check("his captures, and only trusted ones", [r["body"] for r in caught], ["idea: a booking page for barbers"])
+
+        # -- a forgotten fact stays forgotten, unless he says it again -------------
+        await store.put_state("learned.note.locker", "my locker is 214", category="learned")
+        await store.unpin_state("learned.note.locker")
+        await store.put_state("learned.note.locker", "my locker is 214", category="learned")
+        check("the learner doesn't undo /forget",
+              "learned.note.locker" in {r["key"] for r in await store.get_state()}, False)
+        await store.put_state("learned.note.locker", "my locker is 318", category="learned", pin=True)
+        check("but his own 'remember that' does",
+              {r["key"]: r["value"] for r in await store.get_state()}.get("learned.note.locker"), "my locker is 318")
+
         # -- transport: the long-poll cursor ---------------------------------
         check("first offset is 1", await store.next_update_offset(), 1)
         check("a new update is accepted", await store.log_message(update_id=41, chat_id=7), True)

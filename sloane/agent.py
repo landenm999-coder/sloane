@@ -24,7 +24,7 @@ from sloane.contract import Reply, parse
 from sloane.jobs.conflicts import find as find_conflicts, render as render_conflicts
 from sloane.memory.embed import Embedder, EmbedUnavailable
 from sloane.memory.store import Store, remember
-from sloane.memory.tiers import assemble, conversation_that_fits, usage_sink
+from sloane.memory.tiers import assemble, conversation_that_fits, prioritize_state, usage_sink
 from sloane.persona import system_prompt
 from sloane.router import NoProviderAvailable, Router
 from sloane.skills import Registry
@@ -112,8 +112,10 @@ class Agent:
         self._router = router or Router(self._config, usage_sink=usage_sink(store))
         self._embedder = embedder or Embedder(self._config)
         self.skills = skills
-        # The nightly learn job asks the bulk lane through the same router.
+        # The nightly learn job asks the bulk lane through the same router,
+        # and embeds its diary line with the same embedder.
         self.router = self._router
+        self.embedder = self._embedder
         # Memory writes run after the reply is on its way (invariant 5, taken
         # literally). settle() waits for them: shutdown, tests, the eval.
         self._pending: set[asyncio.Task] = set()
@@ -262,7 +264,7 @@ class Agent:
             log.info("%s conflict(s) found for %s", len(collisions), when)
 
         context = assemble(
-            state=tiers["state"],
+            state=prioritize_state(tiers["state"], question),
             working_set=tiers["working_set"],
             assignments=tiers["assignments"],
             overdue=tiers["overdue"],

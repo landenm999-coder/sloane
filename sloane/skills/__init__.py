@@ -70,6 +70,10 @@ _AS_OF: ContextVar[datetime | None] = ContextVar("sloane_skill_as_of", default=N
 _ADDRESSED = re.compile(r"^\s*(?:(?:hey|hi|ok|okay|yo)[\s,!]+)?sloane\b[\s,:!.-]*", re.I)
 
 
+_TOLD = re.compile(r"^\s*(?:please\s+)?(?:remember|don'?t\s+forget|keep\s+in\s+mind)\s+(?:that\s+)?(?P<rest>(?!to\b).+)$",
+                   re.I | re.S)
+
+
 def unaddressed(text: str) -> str:
     """The message without "Sloane," (or "hey Sloane,") in front."""
     stripped = _ADDRESSED.sub("", text, count=1)
@@ -264,6 +268,21 @@ class Registry:
                 return answer
 
         plain = unaddressed(text)
+        # "Remember that Maya's birthday is March 3" is a birthday: what follows
+        # "remember that" goes to the other skills first, and only if none
+        # takes it does the memory skill keep it as a note.
+        told = _TOLD.match(plain)
+        if told is not None:
+            for skill in self.skills:
+                if skill.name == "memory" or (not sessions and skill.match_opens_session):
+                    continue
+                try:
+                    answer = await skill.match(told.group("rest"))
+                except Exception:  # noqa: BLE001
+                    log.exception("skill %s failed to match", skill.name)
+                    continue
+                if answer is not None:
+                    return answer
         for skill in self.skills:
             if not sessions and skill.match_opens_session:
                 continue
