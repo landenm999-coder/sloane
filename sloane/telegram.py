@@ -30,6 +30,7 @@ from sloane.reminders import REMIND_ME, parse_timer
 from sloane.memory.store import Store, remember
 from sloane.providers.base import ProviderError
 from sloane.providers.groq import GroqProvider
+from sloane.providers.local import LocalProvider
 from sloane.agency import Agency, callback_data, parse_callback
 from sloane.skills import Answer, Registry
 from sloane.tgformat import formatted, to_html
@@ -348,7 +349,9 @@ class Bot:
         self.skills = skills
         # Set by main once the scheduler exists: runs a named job now.
         self.run_job: Callable[[str], Awaitable[Any]] | None = None
-        self._stt = GroqProvider(self._config)
+        # Voice notes: a local Whisper server if one is set up, else Groq's.
+        local_stt = self._config.local_stt_model and (self._config.local_stt_base_url or self._config.local_base_url)
+        self._stt = LocalProvider(self._config) if local_stt else GroqProvider(self._config)
         self._token = self._config.telegram_bot_token
         self._owner = self._config.telegram_chat_id
         self._stop = asyncio.Event()

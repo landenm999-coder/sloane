@@ -103,6 +103,13 @@ check("CLI: a good value comes back cleaned", cli("CANVAS_BASE_URL", " dcsd.inst
 code, out, err = cli("DATABASE_URL", POOLER.replace(":5432/", ":6543/"))
 check("CLI: a bad one fails with the reason, and nothing on stdout", (code, out, "6543" in err), (1, "", True))
 
+# -- a local model's address, as her container sees it -------------------------------
+check("an Ollama address on another box is fine", problem("LOCAL_BASE_URL", "http://raspberrypi:11434/v1"), None)
+check("localhost is the container, not the box", "host.docker.internal" in (problem(
+    "LOCAL_BASE_URL", "http://localhost:11434/v1") or ""), True)
+check("the /v1 path is needed", "/v1" in (problem("LOCAL_BASE_URL", "http://raspberrypi:11434") or ""), True)
+check("it's optional", problem("LOCAL_BASE_URL", ""), None)
+
 # -- env_migrate: old defaults move on, his own values stay -------------------------
 import tempfile  # noqa: E402
 

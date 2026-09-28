@@ -21,6 +21,10 @@ services:
     volumes:
       - claude-auth:/home/sloane/.claude
       - models:/var/lib/sloane/models
+    extra_hosts:
+      # A model server on this same box (Ollama; LOCAL_MODELS.md) is reachable
+      # as http://host.docker.internal:11434/v1. Harmless when there isn't one.
+      - "host.docker.internal:host-gateway"
     ports:
       # 127.0.0.1 on purpose. Publishing 8000 would put /facts -- his whole
       # schedule -- on the public internet, and Docker writes its own iptables

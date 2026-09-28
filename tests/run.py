@@ -38,6 +38,7 @@ UNIT = [
     "test_env_check.py",
     "test_canvas_feed.py",  # its integration half runs when DATABASE_URL is set
     "test_forward.py",  # likewise
+    "test_local.py",
 ]
 INTEGRATION = [
     "test_store.py", "test_school.py", "test_jobs.py", "test_agency.py", "test_mail.py",

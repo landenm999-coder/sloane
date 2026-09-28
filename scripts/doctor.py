@@ -132,6 +132,9 @@ async def check_provider(config: Settings, name: str, label: str, *, bulk: bool)
     if name == "anthropic" and not config.anthropic_api_key:
         record(label, FAIL, "ANTHROPIC_API_KEY is unset. Get one at console.anthropic.com")
         return
+    if name == "local" and not (config.local_base_url and config.local_model):
+        record(label, FAIL, "LOCAL_BASE_URL and LOCAL_MODEL are unset (LOCAL_MODELS.md)")
+        return
 
     provider = build(name, config, bulk=bulk)
     try:
@@ -158,6 +161,9 @@ async def check_fallbacks(config: Settings) -> None:
 
     for name in spares:
         provider = build(name, config, bulk=False)
+        if not provider.configured:
+            record(f"fallback: {name}", SKIP, "not set up (optional; LOCAL_MODELS.md)")
+            continue
         try:
             await provider.complete("Reply with the single word: ok", "ok", max_tokens=16)
         except ProviderError as exc:
@@ -422,7 +428,7 @@ def check_values(config: Settings) -> None:
 
     wrong = []
     for key in ("DATABASE_URL", "GROQ_API_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
-                "CANVAS_BASE_URL", "CANVAS_TOKEN", "CANVAS_FEED_URL", "CALENDAR_ICS_URL"):
+                "CANVAS_BASE_URL", "CANVAS_TOKEN", "CANVAS_FEED_URL", "CALENDAR_ICS_URL", "LOCAL_BASE_URL"):
         value = getattr(config, key.lower())
         if not value:
             continue  # unset is each check's own business below
@@ -529,6 +535,35 @@ async def check_skills(config: Settings) -> None:
         record("pay rate", PASS, f"${config.pay_rate:g}/h for earnings estimates")
 
 
+async def check_local(config: Settings) -> None:
+    """A local model, if one is set up: reachable, serving LOCAL_MODEL, and how fast."""
+    from sloane.providers.local import LocalProvider
+
+    local = LocalProvider(config)
+    if not local.configured:
+        record("local model", SKIP, "none set up (optional; LOCAL_MODELS.md)")
+        return
+    try:
+        served = await local.models()
+    except ProviderError as exc:
+        record("local model", FAIL, f"{exc.message} -- is the server up, and listening beyond localhost?")
+        return
+    names = {m.removesuffix(":latest") for m in served}
+    if config.local_model.removesuffix(":latest") not in names:
+        record("local model", FAIL, f"{config.local_model!r} isn't on that server "
+                                    f"(it has: {', '.join(sorted(names)[:6]) or 'nothing'}). "
+                                    f"On it: ollama pull {config.local_model}")
+        return
+    try:
+        answer = await local.complete("Reply with the single word: ok", "ok", max_tokens=16)
+    except ProviderError as exc:
+        record("local model", FAIL, f"listed but the call failed: {exc.message}")
+        return
+    seconds = (answer.usage.latency_ms or 0) / 1000
+    note = " -- slow for chat; fine for BULK_PROVIDER=local" if seconds > 15 else ""
+    record("local model", PASS, f"{config.local_model} answered in {seconds:.1f}s{note}")
+
+
 async def main(warm: bool = False) -> int:
     config = load_settings()
 
@@ -541,6 +576,7 @@ async def main(warm: bool = False) -> int:
     await check_provider(config, config.main_provider, "main provider", bulk=False)
     await check_provider(config, config.bulk_provider, "bulk provider", bulk=True)
     await check_fallbacks(config)
+    await check_local(config)
     await check_school(config)
     await check_gmail(config)
     await check_voice(config, warm=warm)

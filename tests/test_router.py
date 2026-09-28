@@ -24,30 +24,38 @@ def check(label: str, got, want) -> None:
 class Fake(Provider):
     """A provider that answers or fails on command, and counts its calls."""
 
-    def __init__(self, name: str, *, fails: bool) -> None:
+    def __init__(self, name: str, *, fails: bool, configured: bool = True) -> None:
         self.name = name
         self._fails = fails
+        self._configured = configured
         self.calls = 0
+
+    @property
+    def configured(self) -> bool:
+        return self._configured
 
     async def complete(self, system, prompt, *, max_tokens=1024) -> Completion:
         self.calls += 1
-        if self._fails:
-            raise ProviderError(self.name, "down")
+        if self._fails or not self._configured:  # unset, like the real one, it can't answer
+            raise ProviderError(self.name, "down" if self._fails else "not set up")
         return Completion(
             text=f"answer from {self.name}",
             usage=Usage(provider=self.name, model=f"{self.name}-model", latency_ms=7),
         )
 
 
-def harness(broken: set[str]):
-    """Build a router whose named providers fail, plus the usage rows it logs."""
+def harness(broken: set[str], *, local: bool = False, main: str = "claude_code"):
+    """Build a router whose named providers fail, plus the usage rows it logs.
+
+    `local`: whether a local model is set up (unset, like a real box without
+    LOCAL_BASE_URL, the lanes pass over it)."""
     made: dict[str, Fake] = {}
     rows: list[tuple[str, bool, str | None, str | None]] = []
     purposes: list[str] = []
 
     def factory(name: str, config: Settings, bulk: bool) -> Fake:
         if name not in made:
-            made[name] = Fake(name, fails=name in broken)
+            made[name] = Fake(name, fails=name in broken, configured=local or name != "local")
         return made[name]
 
     async def sink(usage: Usage, purpose: str, ok: bool, error: str | None,
@@ -55,7 +63,7 @@ def harness(broken: set[str]):
         rows.append((usage.provider, ok, error, degraded_from))
         purposes.append(purpose)
 
-    config = Settings(main_provider="claude_code", bulk_provider="groq", database_url="")
+    config = Settings(main_provider=main, bulk_provider="groq", database_url="")
     return Router(config, usage_sink=sink, factory=factory), made, rows, purposes
 
 
@@ -91,6 +99,20 @@ except NoProviderAvailable:
     pass
 check("every failure was accounted for", len(rows), 3)
 check("every row is a failure", [r[1] for r in rows], [False, False, False])
+
+# --- a local model: the last fallback when set up, and first when chosen ------------
+router, made, rows, purposes = harness(broken={"claude_code", "anthropic", "groq"}, local=True)
+check("with every cloud lane down, a local model answers", run(router.reply("s", "p")), "answer from local")
+check("and says what it stood in for", rows[-1], ("local", True, None, "claude_code"))
+router, made, rows, purposes = harness(broken=set(), local=True, main="local")
+check("MAIN_PROVIDER=local asks it first", (run(router.reply("s", "p")), sorted(made)),
+      ("answer from local", ["local"]))
+router, made, rows, purposes = harness(broken=set(), main="local")
+try:
+    run(router.reply("s", "p"))
+except NoProviderAvailable:
+    pass
+check("chosen but not set up, it's a real failure, not a silent skip", rows[0][:2], ("local", False))
 
 # --- the purpose must reach the usage log, or /usage cannot split the lanes --
 router, made, rows, purposes = harness(broken=set())

@@ -46,6 +46,22 @@ class Settings(BaseSettings):
     groq_model: str = "openai/gpt-oss-120b"
     groq_stt_model: str = "whisper-large-v3-turbo"
 
+    # --- a local model (providers/local.py; LOCAL_MODELS.md) ---------------------
+    # Any OpenAI-compatible server on hardware he owns -- Ollama on a Raspberry
+    # Pi, llama.cpp, LM Studio. Blank: not configured, and the lanes skip it.
+    # MAIN_PROVIDER=local or BULK_PROVIDER=local puts it first in that lane;
+    # set but not chosen, it is the last fallback when every cloud lane fails.
+    local_base_url: str = ""   # e.g. http://raspberrypi.local:11434/v1 (Ollama)
+    local_model: str = ""      # e.g. llama3.2:3b
+    local_api_key: str = ""    # most local servers need none
+    # A Pi is slow: give it longer than the cloud lanes get.
+    local_timeout: int = 180
+    # Voice notes transcribed locally too (a Whisper server with the OpenAI
+    # audio endpoint, e.g. speaches). Blank: Groq's Whisper, as before. Its
+    # address if it isn't the same server as the model (it usually isn't).
+    local_stt_model: str = ""
+    local_stt_base_url: str = ""
+
     # --- voice out (P3) -------------------------------------------------------
     # groq | piper. The other is the fallback. Either failing leaves a text
     # reply, never no reply.
