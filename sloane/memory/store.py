@@ -1215,21 +1215,27 @@ class Store:
             (previous["text"], due_at, previous["source"], previous["repeat"], previous["series_id"]),
         )
 
-    async def claim_due_reminders(self, now: datetime, limit: int = 20) -> list[Row]:
-        """Mark due reminders sent and return them, atomically: each is claimed once."""
+    async def claim_due_reminders(self, now: datetime, limit: int = 20,
+                                  sources: tuple[str, ...] | None = None) -> list[Row]:
+        """Mark due reminders sent and return them, atomically: each is claimed once.
+
+        `sources` limits it to those (quiet hours deliver only timers).
+        """
         return await self._fetch(
             """
             update reminders set sent_at = %s
              where id in (
                select id from reminders
                 where due_at <= %s and sent_at is null and cancelled_at is null
+                  and (%s::text[] is null or source = any(%s::text[]))
                 order by due_at
                 limit %s
                 for update skip locked
              )
             returning *
             """,
-            (now, now, limit),
+            (now, now, list(sources) if sources is not None else None,
+             list(sources) if sources is not None else None, limit),
         )
 
     async def claim_snooze(self, reminder_id: str) -> Row | None:

@@ -75,7 +75,7 @@ EVERYDAY_HELP = (
     "`/today` · `/week` — the schedule straight from the database, no AI",
     "`/grades` — current course grades from Canvas",
     "`/brief` — the morning brief, right now",
-    "`/remind 5pm call Keegan` — a reminder at a time; `/reminders`, `/unremind <n>`",
+    "`/remind 5pm call Keegan` — a reminder; \"every weekday at 7\" repeats; `/reminders`, `/unremind <n>`",
     "`/promise <what> by <when>` — track a promise; `/promises`, `/kept <n>`",
     "`/done <assignment>` — handed it in; stop counting it as due",
 )
@@ -108,8 +108,6 @@ def menu(lines: list[str] | tuple[str, ...]) -> list[dict]:
                 out.append({"command": name, "description": description})
     return out[:100]
 
-# "typing…" lasts about five seconds on his screen; renew it a little sooner.
-# Calls whose text may carry her Markdown, shown as Telegram HTML.
 # -- forwards --------------------------------------------------------------------
 #
 # A forwarded message is someone else's words. It never runs a command, a
@@ -214,7 +212,9 @@ def _duration(seconds: float) -> str:
     return " ".join(parts) or "1 minute"
 
 
+# Calls whose text may carry her Markdown, shown as Telegram HTML.
 FORMATTED_METHODS = frozenset({"sendMessage", "editMessageText"})
+# "typing…" lasts about five seconds on his screen; renew it a little sooner.
 TYPING_EVERY = 4.5
 # A command or skill still working after this long shows "typing…".
 SLOW_SKILL_SECONDS = 0.6
@@ -948,7 +948,8 @@ class Bot:
                 speech="Mostly, just talk to me, typed or as a voice note. The commands are below if you want them.",
                 detail="\n".join([
                     "**Just talk**: \"what's due tomorrow?\" · \"remind me at 5 to call Keegan\" · "
-                    "\"put milk on the grocery list\" · \"who won the game?\" · \"help me plan tonight\"",
+                    "\"set a timer for 10 minutes\" · \"put milk on the grocery list\" · \"who won the game?\" · "
+                    "\"help me plan tonight\" · or forward me a text and ask what to say back",
                     "",
                     "**Every day**",
                     *EVERYDAY_HELP,

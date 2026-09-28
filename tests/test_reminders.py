@@ -112,6 +112,43 @@ for text, want in {"at 5 to do my daily reading": ("Tue 09-22 17:00", "do my dai
     got = parse(text, NOW)
     check(f"not a repeat: {text!r}", (got.due.strftime("%a %m-%d %H:%M"), got.text, got.repeat) if got else None,
           (*want, None))
+# An "every ..." phrase inside what to be reminded about is content: the one-off
+# day wins. (It used to become a daily series reading "tomorrow to plan of the trip".)
+for text, want in {
+    "tomorrow at 7 to plan every day of the trip": ("Wed 09-23 07:00", "plan every day of the trip"),
+    "tomorrow to ask about the every other week meeting": ("Wed 09-23 07:00", "ask about the every other week meeting"),
+    "at 5 to ask about the every other week meeting": ("Tue 09-22 17:00", "ask about the every other week meeting"),
+    "friday at 3 to plan every day of camp": ("Fri 09-25 15:00", "plan every day of camp"),
+}.items():
+    got = parse(text, NOW)
+    check(f"content, not a rule: {text!r}",
+          (got.due.strftime("%a %m-%d %H:%M"), got.text, got.repeat) if got else None, (*want, None))
+# A series can start later, and "of the week" belongs to the rule.
+for text, want in {
+    "every day at 7 starting tomorrow to take my meds": ("Wed 09-23 07:00", "take my meds", "days:0,1,2,3,4,5,6"),
+    "every monday at 5 starting next week to call grandpa": ("Mon 09-28 17:00", "call grandpa", "days:0"),
+    "every weekday at 9 from thursday to check canvas": ("Thu 09-24 09:00", "check canvas", "days:0,1,2,3,4"),
+    "every day of the week at 6 to run": ("Tue 09-22 18:00", "run", "days:0,1,2,3,4,5,6"),
+    "every weekday at 7 to email monday's notes": ("Wed 09-23 07:00", "email monday's notes", "days:0,1,2,3,4"),
+}.items():
+    got = parse(text, NOW)
+    check(f"series {text!r}", (got.due.strftime("%a %m-%d %H:%M"), got.text, got.repeat) if got else None, want)
+# "at 8 start the essay" is 8 o'clock (the "st" of "start" read as "8st" lost the time).
+for text, want in {
+    "at 8 start the essay": ("Tue 09-22 20:00", "start the essay"),
+    "at 4 stretch": ("Tue 09-22 16:00", "stretch"),
+    # Calendar dates, through sloane/dates.py (they used to be ignored: the 21st
+    # at 3 became tomorrow at 3 AM).
+    "on the 30th at 3 to pay rent": ("Wed 09-30 15:00", "pay rent"),
+    "oct 12 at noon to renew my license": ("Mon 10-12 12:00", "renew my license"),
+    "on 10/5 at 9 to call the dentist": ("Mon 10-05 09:00", "call the dentist"),
+    "in 2 weeks to renew my permit": ("Tue 10-06 07:00", "renew my permit"),
+    # A bare fraction is not a date.
+    "at 5 to buy 1/2 gallon milk": ("Tue 09-22 17:00", "buy 1/2 gallon milk"),
+}.items():
+    got = parse(text, NOW)
+    check(f"one-off {text!r}", (got.due.strftime("%a %m-%d %H:%M"), got.text) if got else None, want)
+check("a date today whose time has passed asks", parse("on the 22nd at 8am to x", NOW), None)
 
 from datetime import time as clock_time  # noqa: E402
 
@@ -143,6 +180,15 @@ TIMERS = {
     "start a timer for an hour": ("11:00:00", ""),
     "timer for 90 seconds": ("10:01:30", ""),
     "Sloane, set a timer for 5 min to flip the chicken": ("10:05:00", "flip the chicken"),
+    # Lengths added up, and a polite ending (these used to fall through to the model).
+    "set a timer for 1 hour 30 minutes": ("11:30:00", ""),
+    "timer 1h30m": ("11:30:00", ""),
+    "set a timer for an hour and a half": ("11:30:00", ""),
+    "set a timer for 2 hours and 15 min": ("12:15:00", ""),
+    "set a timer for 20 mins please": ("10:20:00", ""),
+    "can you set a timer for 4 minutes?": ("10:04:00", ""),
+    "a 30 second timer": ("10:00:30", ""),
+    "set a timer for 5 minutes for the eggs please": ("10:05:00", "the eggs"),
 }
 for text, want in TIMERS.items():
     got = parse_timer(text, NOW)
@@ -336,6 +382,18 @@ async def integration() -> None:
         await asyncio.sleep(2.0)
         check("a short timer wakes the reminders job on time", woke, ["reminders"])
         bot._now = lambda: NOW
+
+        # -- a timer goes off in quiet hours; nothing else does ------------------------
+        await store._exec("truncate reminders")
+        said.clear()
+        late = datetime(2026, 9, 23, 0, 5, tzinfo=DEN)
+        await store.add_reminder(text="⏲️ Time's up: the tea", due_at=late - timedelta(minutes=1), source="timer")
+        await store.add_reminder(text="take meds", due_at=late - timedelta(minutes=1))
+        night = await reminders_job(ctx, late)
+        check("a timer set at midnight goes off at once, with one emoji", said, ["⏲️ Time's up: the tea"])
+        check("that run delivered", night.ran, True)
+        await reminders_job(ctx, datetime(2026, 9, 23, 6, 31, tzinfo=DEN))
+        check("the reminder still waits for morning", said[-1], "⏰ take meds (this was for 12:04 AM)")
 
 
 asyncio.run(integration())

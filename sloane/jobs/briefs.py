@@ -244,6 +244,12 @@ async def inbox(ctx: JobContext, now: datetime | None = None) -> JobResult:
 LATE_AFTER = timedelta(minutes=15)
 
 
+def _leads_with_symbol(text: str) -> bool:
+    import unicodedata
+
+    return bool(text) and unicodedata.category(text[0]) == "So"
+
+
 async def _schedule_next(ctx: JobContext, row: dict, moment: datetime, zone: ZoneInfo) -> None:
     from datetime import time as clock
 
@@ -266,13 +272,16 @@ async def reminders(ctx: JobContext, now: datetime | None = None) -> JobResult:
     if ctx.say is None:
         return JobResult("reminders", ran=False, reason="no chat to deliver to")
     speaking = ctx.governor.may_send(now)
-    if not speaking:
-        return JobResult("reminders", ran=False, reason=speaking.reason)
 
     zone = ZoneInfo(ctx.config.timezone)
     moment = (now or datetime.now(zone)).astimezone(zone)
     # UPDATE ... RETURNING has no order; deliver in the order they were due.
-    due = sorted(await ctx.store.claim_due_reminders(moment), key=lambda r: r["due_at"])
+    # Quiet hours hold everything but a timer: he set that one minutes ago,
+    # awake, and a timer that goes off at 6:30 AM is no timer at all.
+    due = sorted(await ctx.store.claim_due_reminders(moment, sources=None if speaking else ("timer",)),
+                 key=lambda r: r["due_at"])
+    if not speaking and not due:
+        return JobResult("reminders", ran=False, reason=speaking.reason)
     delivered = 0
     for row in due:
         if row.get("repeat"):
@@ -280,7 +289,8 @@ async def reminders(ctx: JobContext, now: datetime | None = None) -> JobResult:
             # fails is retried, but the series never silently stops. Several
             # missed (the box was off) come back as one, then the next ahead.
             await remember("next repeating reminder", _schedule_next(ctx, row, moment, zone))
-        text = f"⏰ {row['text']}"
+        # A timer or a focus session's end carries its own emoji already.
+        text = row["text"] if _leads_with_symbol(row["text"]) else f"⏰ {row['text']}"
         due_at = row["due_at"].astimezone(zone)
         if moment - due_at > LATE_AFTER:
             text += f" (this was for {spoken(due_at, moment).removeprefix('at ')})"

@@ -153,7 +153,7 @@ async def _store(store: Store, text: str, kind: str, act: bool, captured_at: dat
     # A captured "remind me ..." is a reminder, read by the chat's own rules.
     asked = REMIND_ME.match(text)
     if asked:
-        from sloane.reminders import parse, spoken
+        from sloane.reminders import parse, repeat_spoken, spoken
 
         parsed = parse(asked.group(1), when.astimezone(zone))
         if parsed and parsed.text:
@@ -161,7 +161,10 @@ async def _store(store: Store, text: str, kind: str, act: bool, captured_at: dat
                 text=safe_field(parsed.text, limit=300), due_at=parsed.due, source="capture",
                 repeat=parsed.repeat,
             ))
-            body["reminder"] = f"{spoken(parsed.due, when.astimezone(zone))}: {safe_field(parsed.text, limit=300)}"
+            first = spoken(parsed.due, when.astimezone(zone))
+            if parsed.repeat:
+                first = f"{repeat_spoken(parsed.repeat, parsed.due)}, first {first}"
+            body["reminder"] = f"{first}: {safe_field(parsed.text, limit=300)}"
         else:
             body["reminder"] = None
             body["note"] = "sounded like a reminder, but no time could be read; stored as a note"
