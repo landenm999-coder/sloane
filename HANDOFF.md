@@ -2,12 +2,12 @@
 
 **Read this first if you are a new Claude Code session picking up Sloane.**
 This file records what exists, what's verified, what's in flight and what's left.
-It's kept up to date at the end of every work session. Last updated: 2026-09-26.
+It's kept up to date at the end of every work session. Last updated: 2026-09-28.
 
-- Repo: `github.com/landenm999-coder/sloane`, branch `main` (commit straight to main; CI runs on push).
-- **The skills build-out (2026-09-24) is on branch `claude/cloud-credits-build-nh2vtj`, draft PR
-  landenm999-coder/sloane#12, not yet on main.** Everything under "Skills build-out" below lives there
-  until that PR is merged.
+- Repo: `github.com/landenm999-coder/sloane`, branch `main` (CI runs on push).
+- landenm999-coder/sloane#12 (skills, partner, colleges, DECA) and landenm999-coder/sloane#13 (capture recall,
+  Groq model) are **merged**. **The 2026-09-28 work is on branch `claude/continue-previous-work-k8coat`,
+  draft PR landenm999-coder/sloane#14, not yet on main** (see "2026-09-28" below).
 - Separate from **Capture** (`landenm999-coder/capture`), a voice-capture PWA that will later feed Sloane
   through an API. Keep them in separate repos. The old `claude/sloane-personal-assistant-nodd15` branch on
   capture is stale and can be deleted by Landen.
@@ -108,6 +108,36 @@ Suites: 50/50. Real-model eval: 58/58 (the one soft check, "small talk isn't a b
 It now includes a follow-up that needs the conversation, small talk, an action, a non-action, a college
 FACTS question and a college action.
 
+**2026-09-28 (PR #14).** Picked up what the 09-27 session left unmerged, then what Landen asked for
+("remember like a real person, talk about anything, think on her own, a dashboard to see and control
+everything and talk to her, local models on a Pi, and edit herself"):
+- *Unmerged work, rescued*: repeating reminders, timers, forwards read as someone else's words (three
+  commits on the old branch, cherry-picked). Reviewed; 25 checks for what the review found: an "every …"
+  phrase in the reminder's text isn't a schedule, "starting tomorrow", calendar dates in reminders (via
+  `dates.py`; "the 21st at 3" had become tomorrow 3 AM), "at 8 start the essay" (the "st" bug), compound
+  timers, timers not held by quiet hours.
+- *Memory like a person's*: recall keeps seats (`RECALL_LASTING`) for the most relevant rows however old
+  (decay alone buried everything past a month); STATE puts his seeded facts, then learned ones the
+  question touches, then the newest, and says how many it cut; "remember that …" is kept at once (and
+  re-pins a forgotten fact); the learner reads captures, sees what it knows, updates and retires facts,
+  and writes a nightly diary line (a recall episode); CONVERSATION is a day. Found: the recall de-dup
+  never matched real chat turns (stored as `text`/`voice`, not `telegram`); an installed `.env` pins old
+  defaults forever (GROQ_MODEL stayed on the retired model), so `scripts/env_migrate.py` moves them on
+  at upgrade.
+- *The control room* (`/app`, `sloane/web.py`, `sloane/webui/`): talk to her (same `Bot.respond` as
+  Telegram, streamed) and see/steer everything. Password `DASHBOARD_TOKEN` (installer makes it),
+  signed HttpOnly SameSite=Strict session, `X-Sloane` header on every change, lockout after five wrong.
+  Checked in Chromium at desktop and phone sizes, dark and light, with no console or CSP errors.
+- *She thinks*: the `think` job (sql/030) says the one thing worth saying, or nothing; only offers to act.
+- *Local models*: `providers/local.py` (any OpenAI-compatible server: Ollama on a Pi), streaming, last
+  fallback in both lanes or first with `BULK_PROVIDER=local`; local Whisper optional; `LOCAL_MODELS.md`.
+- *Prose replies*: when the model skips the JSON, the lead paragraph is speech and the rest detail
+  (it used to flatten everything into speech and repeat it), and prose streams live.
+- *Self-editing is NOT built*: the permission system refused the step that gives her a coding session
+  on her own repo with auto-deploy. Landen's call; see "Only Landen can do".
+
+Suites: 53/53. Real-model eval: 68/68 (10 new checks: memory, diary recall, talk, think).
+
 **She has never run against the real services.** This sandbox can't reach Telegram, Groq, Canvas, Google or
 Supabase. Everything external is tested against local stubs, and the real-model eval (via `claude -p`) scores
 58/58. The next real milestone is Landen deploying it.
@@ -162,6 +192,13 @@ Supabase. Everything external is tested against local stubs, and the real-model 
 | Capture contract v2 (PR #12) | `client_id` makes retries safe (`capture_refs`, sql/028: a retry after a lost response gets the first answer, `200` + `duplicate`; one still in flight gets `409`; a failed store releases its claim); `act: false` stores memory only (Capture sets its own reminders and logs its own expenses, so it sends `false` and he isn't told twice); `{"check": true}` tests the connection without storing anything | `capture.py`, `CAPTURE_API.md`, `test_capture` |
 | Capture + skills (PR #12) | a capture that is exactly a skill phrase is acted on (`action` in the 201 body); `Registry.route(sessions=False)` so a capture is never a quiz answer | `capture.py`, `CAPTURE_API.md` |
 
+| Reminders+ (PR #14) | repeating (`sql/029`: rule + series; delivering one makes the next; `/unremind` stops it), timers ("set a timer for 1 hour 30 minutes"; woken on the second; delivered even in quiet hours), calendar dates via `dates.py`, "starting tomorrow" | `reminders.py`, `jobs/briefs.py`, `tests/test_reminders.py` |
+| Forwards (PR #14) | a forward is someone else's words: logged untrusted, answered as INGESTED (no actions), his note is the question, follow-ups see it for 10 minutes | `telegram.py`, `tests/test_forward.py` |
+| Memory upgrade (PR #14) | lasting recall seats; STATE priority + cut note; "remember that" at once; learner: captures, updates, retires, diary (`put_diary`); CONVERSATION 24h/40; de-dup on real chat channels; `env_migrate.py` | `memory/store.py`, `tiers.py`, `learn.py`, `skills/memory.py`, `skills/__init__.py`, `agent.py`; tests in store, tiers, learn, agent, actions, env_check |
+| Control room (PR #14) | `/app` + `/api/*`: chat (NDJSON stream through `Bot.respond` via an `Outlet`), overview (rail, needs-you, due, reminders, grades, panels, memory, diary, jobs, trust, usage, system), controls (cancel reminder, approve/deny, revoke, forget, close loose end, run job) | `web.py`, `webui/`, `telegram.py` `Outlet`, `tests/test_web.py` |
+| Think (PR #14) | `think` 10:25/12:25/16:25/20:25, not in class or on a shift, NOTHING = silent and not remembered | `jobs/briefs.py`, `sql/030`, `tests/test_jobs.py` |
+| Local models (PR #14) | `LOCAL_BASE_URL`/`LOCAL_MODEL` (+ `LOCAL_STT_*`), `Provider.configured` so an unset fallback isn't a failure, doctor + paste checks, compose `host.docker.internal` | `providers/local.py`, `router.py`, `LOCAL_MODELS.md`, `tests/test_local.py` |
+
 Telegram commands (all listed by `/help`): `/today /week /grades /done /status /brief /jobs /sync /inbox /remind /reminders /unremind /promise /promises /kept /trust /revoke /cancel /usage /state /help`, plus plain "remind me …".
 Skill commands (PR #12): `/list /countdown /weather /card /cards /quiz /habit /habits /did /client /clients /plan /estimate /focus /birthday /birthdays /spent /budget /memory /forget /followup /followups /end`, plus plain phrases (each skill's docstring lists them).
 HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /state /facts /jobs /tv /panels POST /sync POST /jobs/{name}/run`, plus `POST /capture` (token).
@@ -181,18 +218,26 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
 
 ## In flight
 
-- **PR landenm999-coder/sloane#12**: the skills build-out, the partner upgrade, colleges, DECA, the British
-  voice and capture contract v2. Complete and green (50/50 suites, eval 58/58); waiting on Landen to merge it
-  to main. After merging, `install.sh` (the upgrade command) pulls, rebuilds and applies `sql/014`–`028`
-  and `999`.
-  Then follow START_HERE.md (step 5 is the try-everything list), and add every school with
-  `/college add <school> <EA|ED|RD> <deadline>`.
+- **PR landenm999-coder/sloane#14**: everything under "2026-09-28" above. Green in CI (suite + arm64);
+  waiting on Landen to merge. After merging, rerunning `install.sh` upgrades the box: applies
+  `sql/029`–`030` and `999`, moves old `.env` defaults on, makes `DASHBOARD_TOKEN`.
+- **Self-editing ("she can edit herself and add skills")**: designed, not built. The design, if Landen
+  approves it: `/build <what>` (or asked in words) → a Claude Code session in a *clone* of her repo on a
+  volume (file tools scoped to the clone, Bash only for the tests, no secrets in its env) → a guard in
+  code (her safety files untouchable: hard lines, agency, actions, ingest, school, mail, CI, installer,
+  Dockerfile, requirements; no secrets in the diff) → unit tests + pyflakes → branch + PR → GitHub CI →
+  merge → a host-side systemd path unit runs the upgrade, checks /health, rolls back on failure → "Live:
+  … [Undo]". Her own ideas would go through `Agency.propose` (and earn trust like any action). Landen
+  chose auto-deploy and "all but safety rules" as scope. It needs his explicit go-ahead in a session
+  (the auto-mode permission check blocked it), a fine-grained GitHub token, and branch protection on
+  `main` requiring the `test` check.
 - **PR landenm999-coder/capture#2**: the Capture → Sloane client (Settings → Sloane, an IndexedDB outbox,
   memory-only by default). Tested in Chromium against a real Sloane server; not yet on a phone. Merging it
   deploys it (Vercel); then DEPLOY §7d on the box (`CAPTURE_TOKEN`, `CORS_ORIGINS`, `tailscale serve`).
 
 ## Backlog (ideas, in priority order)
 
+0. Self-editing, if Landen says go (design under "In flight").
 1. Whatever the first real week turns up. She has never run against real Telegram, Canvas, the calendar or
    Groq; expect small fixes (DEPLOY's "try everything" table is the checklist).
 2. Infinite Campus (grades), deliberately out of v1. Needs district credentials, and repeated automated logins can
@@ -200,11 +245,19 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
 3. P5 phone calls, beyond v1.
 4. More skills, if he wants them: a stock watchlist (quotes only, since trading is a hard line). One module
    plus a migration. (The college tracker and DECA role-play practice are built.)
-5. Streaming for the Groq and Anthropic providers (only `claude_code` streams today; the others answer whole).
+5. Streaming for the Groq and Anthropic providers (`claude_code` and `local` stream; the others answer whole).
+6. The control room: a microphone button (browser recording → Whisper → voice reply), and approvals there
+   when Telegram isn't set up (today the agency needs `TELEGRAM_CHAT_ID`).
+7. A weekday lunch slot for `think`, if Landen wants one (school hours are skipped today).
 
 ## Only Landen can do (the whole list; see DEPLOY.md)
 
-0. Merge landenm999-coder/sloane#12 and landenm999-coder/capture#2 (the installer deploys `main`).
+0. Merge landenm999-coder/sloane#14 and landenm999-coder/capture#2 (the installer deploys `main`), then rerun
+   the installer on the box to upgrade.
+0b. Decide on self-editing (see "In flight"). If yes: say so in a session, create a fine-grained GitHub
+   token (this repo only: Contents + Pull requests read/write, Actions + Checks read), and turn on branch
+   protection for `main` requiring the `test` check.
+0c. Optional: the control room (START_HERE step 7) and a Raspberry Pi for local models (`LOCAL_MODELS.md`).
 1. Create the Oracle Cloud ARM instance (DEPLOY §1).
 2. SSH in and run the one-command installer (DEPLOY "The fast way"):
    `curl -fsSL https://raw.githubusercontent.com/landenm999-coder/sloane/main/scripts/install.sh | bash`.
@@ -215,7 +268,8 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
 4. Optional British voice: `SPEAK_PROVIDER=piper` and `PIPER_VOICE=en_GB-cori-medium` in `.env` (DEPLOY §7b).
 5. Capture on the phone: Tailscale on the phone, `CAPTURE_TOKEN` + `CORS_ORIGINS` on the box, then
    Capture → Settings → Sloane (DEPLOY §7d).
-6. Open decision, not set up: a nightly cloud routine that keeps improving the repo. It would spend his Claude limits.
+6. Open decision, not set up: a nightly cloud routine that keeps improving the repo. It would spend his Claude
+   limits. (Superseded by self-editing on the box, if he approves that.)
 
 Security rules he follows: never paste tokens or credentials into chat. Credentials live only in `.env`
 (gitignored, chmod 600). The ICS URL and the Canvas token are passwords.
@@ -229,7 +283,7 @@ Security rules he follows: never paste tokens or credentials into chat. Credenti
 python3.11 -m venv /tmp/sv2 && /tmp/sv2/bin/pip install -r requirements.txt pyflakes
 sh scripts/dev_db.sh      # Postgres 16 + pgvector on /tmp:5433; creates sloane, sloane_eval, sloane_review; applies sql/*
 DATABASE_URL="postgresql://postgres@/sloane?host=/tmp&port=5433" /tmp/sv2/bin/python tests/run.py   # all suites
-/tmp/sv2/bin/python scripts/eval.py 'postgresql://postgres@/sloane_eval?host=/tmp&port=5433'       # real model, ~11 calls
+/tmp/sv2/bin/python scripts/eval.py 'postgresql://postgres@/sloane_eval?host=/tmp&port=5433'       # real model, ~28 calls
 ```
 
 - Integration tests are **destructive**: point them at a throwaway database. Give review agents their own

@@ -60,8 +60,11 @@ Total running cost: **$0/mo**, every layer on a free tier.
 | Gmail | triage every 3h in one batched call; replies drafted in his voice, sent only on Approve |
 | Skills | thirteen plug-in skills (below): lists, countdowns, weather, flashcards + quizzes, habits, clients, a study plan, focus, birthdays, money, memory, college applications, DECA role-plays. Each adds its own commands, plain-English rules, FACTS lines, a TV card and nudges, without touching the core |
 | Heartbeat | every quarter hour, 7 AM–10 PM, no model: what the skills think is worth saying now (rain before your shift, a streak about to break, a follow-up due), each said once |
+| Control room | `/app`: a private page (phone or laptop, over Tailscale, with its own password) where he talks to her — the same conversation as Telegram, streamed, commands and actions included — and sees and steers everything: his day on a rail, what needs him (Approve/Deny), due work, reminders (cancel), grades, what she knows about him (forget), loose ends, her diary, jobs (run now), trust (take back), model use. Add it to the home screen and it opens like an app |
+| Thinking | `think`, a few times a day (evenings on weekdays, through the day at weekends; never in class or on a shift): she looks over everything and says the one thing worth saying — a clash coming, a deadline at risk, how the thing he was worried about went — or nothing. She only *offers* to act; his yes runs it. `THINK=false` turns it off |
+| Local models | `LOCAL_BASE_URL` + `LOCAL_MODEL`: Ollama (or llama.cpp, LM Studio) on hardware he owns — a Raspberry Pi 5 — as a lane: the last fallback when every cloud model is down, or `BULK_PROVIDER=local` for the nightly work. Voice notes can be transcribed locally too. `LOCAL_MODELS.md` |
 | TV dashboard | `GET /tv`: the day at a glance for a screen on the wall — clock, weather, today, overdue, due soon, reminders, grades, and a card per skill. No model, no outside requests, refreshes itself |
-| HTTP | `/health`, `/usage`, `/state`, `/facts`, `/jobs`, `/tv`, `/panels`, `POST /sync`, `POST /jobs/{name}/run`, `POST /capture` (token) |
+| HTTP | `/health`, `/usage`, `/state`, `/facts`, `/jobs`, `/tv`, `/panels`, `POST /sync`, `POST /jobs/{name}/run`, `POST /capture` (token), `/app` and `/api/*` (the control room; password) |
 
 Not built: Infinite Campus (deferred — see below).
 
@@ -72,11 +75,11 @@ Landen asked for a JARVIS. What that takes, and where it lives:
 | | |
 |---|---|
 | **Character** | `sloane/persona.py`: composed, dry, candid, anticipatory, conversational in his register ("how's it going?" gets a line, not a briefing), never help-desk phrasing. `ADDRESS_AS` sets what she calls him (his name, or "sir"). Her persona *replaces* Claude Code's system prompt; before, she was a coding assistant wearing a name tag |
-| **Conversation** | the last 24 messages of the last 12 hours ride in every prompt as `CONVERSATION`, so "and in stat?", "why?" and "which is worse?" mean something. Voice notes are logged with their transcripts |
+| **Conversation** | the last day of talk (40 messages, 24 hours) rides in every prompt as `CONVERSATION`, so "and in stat?", "why?" and "which is worse?" mean something — on Telegram or in the control room, one conversation. Voice notes are logged with their transcripts. He can talk to her about anything, not just the schedule |
 | **Speed** | a `claude -p` process is kept warm (started at boot and after each turn, one turn each); "typing…" shows at once; the reply appears after its first phrase and is edited in place as she writes it. First words in about 2 s, instead of the whole reply in 4–10 s |
 | **Doing** | "put batteries on the grocery list and remind me at 7" gets done: her reply carries the commands and the bot runs them exactly as if he'd typed them, showing each result. His own messages only; an allowlist with a rule per command; nothing that drops, clears, cancels, forgets or undoes; and only what he asked for, checked in code: a command's words must come from his message or from the offer of hers he said yes to (`sloane/actions.py`) |
 | **Knowing** | when a question needs the outside world (news, prices, scores), she says "Checking.", runs one lookup through the Claude CLI with web search and nothing else, and answers from the results (fenced as untrusted), with sources. That answer is remembered as untrusted and never shown back to her as plain conversation. `WEB_LOOKUP=false` turns it off |
-| **Remembering** | each night (`learn`, 12:20 AM) she reads what *he* said that day and keeps follow-ups ("call the orthodontist") and plain facts ("my manager is Dana"). Follow-ups ride in every prompt, get a nudge on their day, and she asks how they went; `/memory` shows it all and `/forget` corrects it |
+| **Remembering** | like a person. "Remember that I'm vegetarian now" is kept at once (a correction replaces the old fact; "remember to …" is a loose end). Each night (`learn`, 12:20 AM) she reads what *he* said and captured that day, keeps follow-ups and facts, updates what changed, retires what's no longer true, and writes a diary line for the day. Recall keeps seats for the most relevant memories however old, so last month's conversation is still findable; what he told her comes first in every prompt. `/memory` shows it all, `/forget` corrects it |
 
 ### Skills
 
@@ -465,6 +468,8 @@ python tests/test_voice.py      # real ffmpeg transcode; text always survives
 python tests/test_dates.py      # dates from words, by rules
 python tests/test_weather.py    # the weather skill against a stub Open-Meteo
 python tests/test_dashboard.py  # /tv: every card, everything escaped
+python tests/test_local.py      # a local model over the OpenAI API, against a stub server
+python tests/test_web.py        # the control room: sessions, refusals, the shared chat (DB half too)
 
 # integration — needs a Postgres with pgvector and the schema applied
 DATABASE_URL=... python tests/test_store.py
@@ -477,7 +482,7 @@ DATABASE_URL=... python tests/test_heartbeat.py  # nudges said once, retried, qu
 # and one suite per skill: test_lists, test_countdowns, test_cards, test_habits,
 # test_clients, test_plan, test_focus, test_birthdays, test_money, test_colleges, test_deca
 # the partner: test_conversation, test_claude_stream (a fake CLI), test_live,
-# test_actions, test_lookup, test_learn
+# test_actions, test_lookup, test_learn, test_forward
 
 # or all of it
 python tests/run.py
@@ -530,7 +535,9 @@ sloane/
   dates.py       "may 22", "the 30th", "next friday" -> a date, by rules
   actions.py     the commands she may run for him in conversation, and the rules
   dashboard.py   the /tv page: SQL + skill panels, escaped, self-contained
-  providers/     claude_code · groq · anthropic_api · tts (groq, piper)
+  web.py         the control room: /app + /api, sessions, the chat through Bot.respond
+  webui/         its page, script and styles (CSP 'self', nothing from outside)
+  providers/     claude_code · groq · anthropic_api · local (Ollama & co.) · tts (groq, piper)
   jobs/
     conflicts.py collisions computed in code, and what they refuse to flag
     governor.py  quiet hours + a budget that defers scheduled work
@@ -560,7 +567,7 @@ sloane/
     store.py     THE ONLY FILE THAT TALKS SQL
     embed.py     fastembed, 384-dim, local
     tiers.py     the four tiers + the conversation, budgets, the usage sink
-    learn.py     nightly: follow-ups and facts from his own words
+    learn.py     nightly: follow-ups, facts (updated, retired) and a diary line from his own words
 sql/
   001_init.sql   schema, idempotent
   002_hybrid_search.sql  full-text arm + provenance, idempotent
@@ -584,9 +591,11 @@ sql/
   027_deca.sql     scored practice role-plays
   028_capture_refs.sql  a capture retried after a lost response is stored once
   029_repeating_reminders.sql  a reminder's repeat rule and series
+  030_think.sql    the think job: one thing worth saying, or nothing
   999_lock_public.sql  row-level security on every table; always last
 scripts/
   doctor.py      validates every credential
+  env_migrate.py moves an installed .env's old defaults on (run by install.sh)
   seed_state.py  tier 1 from a markdown file
   seed_courses.py  the real semester schedule into tier 4
   gmail_auth.py  one-time Gmail consent; writes the token into .env

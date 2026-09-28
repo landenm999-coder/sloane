@@ -372,6 +372,8 @@ Each of these should work on day one. If one doesn't, `/status` and
 | `remind me every weekday at 7am to take my meds`, then `/reminders` | a repeating one (🔁); `/unremind <n>` stops the series |
 | `set a timer for 1 minute` | "Time's up" a minute later, on the second |
 | forward her a friend's text | who it's from, what they want, and a reply you could send; `make it shorter` still sees it |
+| `remember that I'm vegetarian now`, then `/memory` | "Got it.", and it's listed; a correction later replaces it |
+| open `https://<box>.<tailnet>.ts.net/app` (7e) | the control room: talk to her there too, see your day, approve, run a job |
 | `put batteries on the grocery list and remind me at 7 to charge the car` | both done in one go, each result shown under her reply |
 | `who won the Broncos game?` | "Checking.", then the answer with a source |
 | `/college add CU Boulder EA nov 1`, then `just finished my Boulder essays`, then `what's left for Boulder?` | the school, the checklist ticked, and what's left with the deadline |
@@ -480,7 +482,10 @@ is the 6:35 AM brief. The heartbeat starts too, but it only speaks when a
 skill has something new (a countdown a week out, rain before your shift). One
 `claude` process sits idle, ready for your next message (about 150 MB); it is
 replaced after every reply. At 12:20 AM she quietly reads back the day's
-messages for loose ends to follow up on. `TELEGRAM_CHAT_ID` must be set or the briefs run and
+messages (and captures) for loose ends, facts that changed, and a diary line.
+A few times a day she thinks (`think`: weekday evenings, through the day at
+weekends, never in class or on a shift) and says the one thing worth saying,
+if there is one; most runs send nothing. `THINK=false` turns it off. `TELEGRAM_CHAT_ID` must be set or the briefs run and
 record but have nobody to send to; `/jobs` will show that plainly. The inbox
 job runs only once Gmail is set up (7c); until then `/jobs` lists it as
 deferred with the reason `gmail is not configured`.
