@@ -6,9 +6,9 @@ Always-on personal assistant for Landen. Reached by Telegram text and voice
 notes. She runs the day: what's due, what shift, what slipped, what's next.
 
 **v1 is built: P0 (the spine), P1 (memory + school), P2 (rhythm), P3 (voice)
-and P4 (agency, including Gmail).** On top of it sit thirteen **skills** (lists,
+and P4 (agency, including Gmail).** On top of it sit fourteen **skills** (lists,
 countdowns, weather, flashcards, habits, clients, a study plan, focus,
-birthdays, money, memory, college applications, DECA role-play practice), a **heartbeat** that lets them speak up once when it
+birthdays, money, memory, college applications, DECA role-play practice, the workshop), a **heartbeat** that lets them speak up once when it
 matters, and a **TV dashboard**. And she is built to feel like a **partner**
 rather than a help desk: she follows the conversation, has a character, answers
 fast (streamed), does what he asks, looks things up, and remembers what he tells
@@ -58,9 +58,10 @@ Total running cost: **$0/mo**, every layer on a free tier.
 | Voice briefs | `VOICE_BRIEFS=morning_brief` sends that brief as a voice note (text if voice fails) |
 | Status | `/status`: open problems, last sync, provider health, last brief, Gmail — from her own bookkeeping, no model |
 | Gmail | triage every 3h in one batched call; replies drafted in his voice, sent only on Approve |
-| Skills | thirteen plug-in skills (below): lists, countdowns, weather, flashcards + quizzes, habits, clients, a study plan, focus, birthdays, money, memory, college applications, DECA role-plays. Each adds its own commands, plain-English rules, FACTS lines, a TV card and nudges, without touching the core |
+| Skills | fourteen plug-in skills (below): lists, countdowns, weather, flashcards + quizzes, habits, clients, a study plan, focus, birthdays, money, memory, college applications, DECA role-plays, and the workshop's Telegram side. Each adds its own commands, plain-English rules, FACTS lines, a TV card and nudges, without touching the core |
 | Heartbeat | every quarter hour, 7 AM–10 PM, no model: what the skills think is worth saying now (rain before your shift, a streak about to break, a follow-up due), each said once |
 | Control room | `/app`: a private page (phone or laptop, over Tailscale, with its own password) where he talks to her — the same conversation as Telegram, streamed, commands and actions included — and sees and steers everything: his day on a rail, what needs him (Approve/Deny), due work, reminders (cancel), grades, what she knows about him (forget), loose ends, her diary, jobs (run now), trust (take back), model use. Add it to the home screen and it opens like an app |
+| Workshop | she builds features on herself, with his say at every step. He writes down what he wants (the control room's Workshop tab, `/idea`, or in words); she plans it; he says build; Claude Code builds it in a clone of her repo on its own branch (file tools scoped to the clone, no secrets in its environment), a guard in code refuses anything touching her safety rules (`deploy/protected.txt`, the hard lines, the owner checks) or carrying a credential, the tests and GitHub CI must pass; then it waits in **Ready for you**. **Accept** merges it and the box upgrades itself (`scripts/upgrade.sh`: health check, automatic rollback); **Undo** reverts it; **Deny** (with why) teaches her. At 1:10 AM she builds what he queued and one idea of her own, on Sonnet (`WORKSHOP_MODEL`), so there's a pipeline in the morning. Needs a GitHub token (DEPLOY 7h) |
 | Thinking | `think`, a few times a day (evenings on weekdays, through the day at weekends; never in class or on a shift): she looks over everything and says the one thing worth saying — a clash coming, a deadline at risk, how the thing he was worried about went — or nothing. She only *offers* to act; his yes runs it. `THINK=false` turns it off |
 | Local models | `LOCAL_BASE_URL` + `LOCAL_MODEL`: Ollama (or llama.cpp, LM Studio) on hardware he owns — a Raspberry Pi 5 — as a lane: the last fallback when every cloud model is down, or `BULK_PROVIDER=local` for the nightly work. Voice notes can be transcribed locally too. `LOCAL_MODELS.md` |
 | TV dashboard | `GET /tv`: the day at a glance for a screen on the wall — clock, weather, today, overdue, due soon, reminders, grades, and a card per skill. No model, no outside requests, refreshes itself |
@@ -470,6 +471,7 @@ python tests/test_weather.py    # the weather skill against a stub Open-Meteo
 python tests/test_dashboard.py  # /tv: every card, everything escaped
 python tests/test_local.py      # a local model over the OpenAI API, against a stub server
 python tests/test_web.py        # the control room: sessions, refusals, the shared chat (DB half too)
+python tests/test_workshop.py   # the guard, the upgrader (stubbed docker); the pipeline with a DB
 
 # integration — needs a Postgres with pgvector and the schema applied
 DATABASE_URL=... python tests/test_store.py
@@ -536,6 +538,7 @@ sloane/
   actions.py     the commands she may run for him in conversation, and the rules
   dashboard.py   the /tv page: SQL + skill panels, escaped, self-contained
   web.py         the control room: /app + /api, sessions, the chat through Bot.respond
+  workshop.py    features she builds on herself: plan, build in a clone, the guard, PR, CI, accept, deploy, undo
   webui/         its page, script and styles (CSP 'self', nothing from outside)
   providers/     claude_code · groq · anthropic_api · local (Ollama & co.) · tts (groq, piper)
   jobs/
@@ -592,10 +595,15 @@ sql/
   028_capture_refs.sql  a capture retried after a lost response is stored once
   029_repeating_reminders.sql  a reminder's repeat rule and series
   030_think.sql    the think job: one thing worth saying, or nothing
+  031_workshop.sql the workshop's items, idea to live, and its night shift
   999_lock_public.sql  row-level security on every table; always last
 scripts/
   doctor.py      validates every credential
   env_migrate.py moves an installed .env's old defaults on (run by install.sh)
+  upgrade.sh     on the box, as root: puts an accepted workshop change live, or rolls back
+deploy/
+  protected.txt  what a workshop build may never touch
+  sloane-upgrade.path / .service  run upgrade.sh when she asks
   seed_state.py  tier 1 from a markdown file
   seed_courses.py  the real semester schedule into tier 4
   gmail_auth.py  one-time Gmail consent; writes the token into .env

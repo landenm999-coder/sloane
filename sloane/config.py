@@ -211,6 +211,35 @@ class Settings(BaseSettings):
     # week" from the shifts. 0 leaves earnings out.
     pay_rate: float = 0.0
 
+    # --- the workshop: features she builds on herself (sloane/workshop.py) ----------
+    # A fine-grained GitHub token for her own repo only (Contents and Pull
+    # requests read/write; Actions and Checks read-only). Blank: the Workshop
+    # still holds ideas and plans, but nothing is built.
+    github_token: str = ""
+    github_repo: str = "landenm999-coder/sloane"
+    # Overridable so tests can point them at a stub and a local git remote.
+    github_api_base: str = "https://api.github.com"
+    workshop_remote: str = ""
+    # Her clone of her own code (a volume). Never the code that is running.
+    workshop_dir: str = "/var/lib/sloane/workshop"
+    # Shared with the box (compose mounts /opt/sloane/.deploy here). She writes
+    # request.json when he accepts; the host's sloane-upgrade unit deploys it,
+    # checks her health, rolls back on failure and writes result.json.
+    deploy_dir: str = "/var/lib/sloane/deploy"
+    # The model her builds use: cheaper than a chat model, still a strong coder.
+    workshop_model: str = "sonnet"
+    # One build's coding session, and GitHub CI's run, in minutes.
+    build_minutes: int = 40
+    ci_minutes: int = 30
+    # At night (the `workshop` job): builds in all, and how many may be her own ideas.
+    workshop_nightly: bool = True
+    nightly_builds: int = 2
+    nightly_own_ideas: int = 1
+
+    @property
+    def workshop_ready(self) -> bool:
+        return bool(self.github_token and self.github_repo)
+
     # --- thinking on her own (jobs/briefs.py `think`) ------------------------------
     # A few times a day she looks over everything and says the one thing worth
     # saying, if there is one. Off: only the briefs, the heartbeat and replies.

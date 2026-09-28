@@ -1,0 +1,50 @@
+# Her safety rules, and the machinery that checks her. A change she builds in
+# the workshop may not touch any of these: sloane/workshop.py refuses the build
+# before anything is pushed, and scripts/upgrade.sh refuses to deploy one of her
+# commits that does. A person changes them, in a reviewed session.
+#
+# One glob per line (fnmatch, from the repo root). Blank lines and # are ignored.
+
+# approvals, what she may run, ingested text, the workshop itself, the doors in
+sloane/agency.py
+sloane/actions.py
+sloane/ingest.py
+sloane/workshop.py
+sloane/web.py
+sloane/capture.py
+sloane/cors.py
+sloane/providers/*
+sloane/webui/*
+# read-only school, and never emailing school staff
+sloane/school/*
+sloane/mail/*
+# the hard lines as seeded, and the database lockdown
+sql/001_init.sql
+sql/999_lock_public.sql
+# the tests that hold those rules in place
+tests/test_invariants.py
+tests/test_actions.py
+tests/test_agency.py
+tests/test_forward.py
+tests/test_capture.py
+tests/test_mail.py
+tests/test_school.py
+tests/test_lookup.py
+tests/test_web.py
+tests/test_workshop.py
+tests/test_claude_stream.py
+# CI, deploys, the box, dependencies, and her instructions
+.github/*
+.claude/*
+deploy/*
+scripts/install.sh
+scripts/upgrade.sh
+scripts/env_check.py
+scripts/env_migrate.py
+Dockerfile
+compose.yml
+sloane.service
+requirements.txt
+.dockerignore
+CLAUDE.md
+.env*

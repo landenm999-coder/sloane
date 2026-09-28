@@ -14,3 +14,4 @@ piper-tts==1.8.0            # the local voice (British, or the fallback); espeak
 # Optional: only needed once MAIN_PROVIDER or BULK_PROVIDER is `anthropic`.
 # The provider imports it lazily, so the free tier runs without it.
 # anthropic==0.69.0
+pyflakes==4.0.0             # the workshop checks her builds with it, as CI does

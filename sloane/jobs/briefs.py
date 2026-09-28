@@ -7,6 +7,8 @@
     00:15  reflection      rebuild tier 2, prune    every day, SILENT
     10:25, 12:25, 16:25, 20:25  think   one thing worth saying, or nothing
                                         (not in class, not on a shift)
+    01:10  workshop        the night shift: build what he queued, then an
+                           idea of her own; all of it waits for his Accept
 
 Plus two that feed them: `entity_sync` (Canvas, calendar, shifts; silent) and
 `inbox` (Gmail triage every three hours, 7 AM-7 PM; speaks only when something
@@ -29,7 +31,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -80,6 +82,8 @@ class JobContext:
     remind: Callable[[str, str], Awaitable[None]] | None = None
     # Every loaded skill (sloane.skills.Registry), for jobs that ask them things.
     skills: Registry | None = None
+    # The workshop (sloane/workshop.py), for the night shift.
+    workshop: Any = None
 
     def today(self) -> date:
         return datetime.now(ZoneInfo(self.config.timezone)).date()
@@ -201,6 +205,23 @@ async def think(ctx: JobContext, now: datetime | None = None) -> JobResult:
     except Exception as exc:  # noqa: BLE001 - recorded, not raised
         return JobResult("think", ran=True, sent=False, reason=f"delivery failed: {exc}", reply=reply)
     return JobResult("think", ran=True, sent=True, reason="said one thing", reply=reply)
+
+
+async def workshop(ctx: JobContext, now: datetime | None = None) -> JobResult:
+    """1:10 AM, silent: build what he queued, then (with room) one idea of her own.
+
+    Everything built waits in the workshop for his Accept; the heartbeat tells
+    him in the morning. Nothing here reaches the running code.
+    """
+    shop = ctx.workshop
+    if shop is None or not ctx.config.workshop_nightly:
+        return JobResult("workshop", ran=False, reason="the night shift is off")
+    if not shop.ready:
+        return JobResult("workshop", ran=False, reason="no GitHub token, so nothing can be built")
+    decision = await ctx.governor.may_run(sends_message=False, now=now)
+    if not decision:
+        return JobResult("workshop", ran=False, reason=decision.reason)
+    return JobResult("workshop", ran=True, sent=False, reason=await shop.nightly())
 
 
 async def reflection(ctx: JobContext, now: datetime | None = None) -> JobResult:
@@ -539,6 +560,7 @@ HANDLERS: dict[str, Callable[..., Awaitable[JobResult]]] = {
     "reminders": reminders,
     "watchdog": watchdog,
     "think": think,
+    "workshop": workshop,
     "weekly_review": weekly_review,
     "backup": backup,
     "heartbeat": heartbeat,

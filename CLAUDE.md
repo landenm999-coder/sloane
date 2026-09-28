@@ -37,7 +37,7 @@ rules a skill keeps) is the docstring of `sloane/skills/__init__.py`. A skill's 
 Its tests are `tests/test_<name>.py`, listed in `tests/run.py`. `SKILLS_DISABLED` switches one off.
 A skill's tables never reference a core table (`test_invariants` checks), its user data goes in
 `Store.BACKUP_TABLES` (parents before children) and doctor's `EXPECTED_TABLES`, and its FACTS lines render
-after the school rows. Thirteen skills exist; read one (`lists.py` is the smallest) before writing the next.
+after the school rows. Fourteen skills exist; read one (`lists.py` is the smallest) before writing the next.
 Dates from his words go through `sloane/dates.py`, times through `sloane/reminders.py`. Never a model.
 
 ## Working
@@ -66,6 +66,10 @@ Dates from his words go through `sloane/dates.py`, times through `sloane/reminde
   sorts last on purpose (row-level security on every table, Supabase's API roles revoked); leave it last. If a migration adds a
   table, add it to `EXPECTED_TABLES` in `scripts/doctor.py`. If it adds a job, add the handler to
   `jobs/briefs.py` `HANDLERS` and the name to `tests/test_jobs.py`.
+- She edits herself through the workshop (`sloane/workshop.py`): a build in her own clone, a guard in code,
+  CI, then Landen's Accept, then `scripts/upgrade.sh` on the box. What she may never change is
+  `deploy/protected.txt` plus `LOCKED` and `KEPT_LINES` in `workshop.py`. A new safety file, safety test or
+  hard-line definition goes on that list in the same commit. Her own builds read this file too, so keep it true.
 - Keep README, DEPLOY, `.env.example` and HANDOFF in step with the code in the same commit.
 - Commit to `main` and push. CI (`test.yml`, `image.yml` for linux/arm64) must be green afterwards.
 - This sandbox can't reach Telegram, Groq, Canvas, Google or Supabase. Test those against local stub servers

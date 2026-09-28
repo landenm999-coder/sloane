@@ -1,0 +1,11 @@
+# Installed by scripts/install.sh. When she writes .deploy/request.json (Landen
+# pressed Accept in the workshop), run the upgrader once.
+[Unit]
+Description=Sloane: deploy what Landen accepted in the workshop
+
+[Path]
+PathExists=/opt/sloane/.deploy/request.json
+Unit=sloane-upgrade.service
+
+[Install]
+WantedBy=multi-user.target

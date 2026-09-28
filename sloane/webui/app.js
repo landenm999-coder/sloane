@@ -111,7 +111,8 @@ function show(view) {
     if (tab.dataset.view === view) tab.setAttribute("aria-current", "page");
     else tab.removeAttribute("aria-current");
   });
-  for (const id of ["today", "memory", "engine"]) $("#" + id).hidden = id !== view;
+  for (const id of ["today", "memory", "workshop", "engine"]) $("#" + id).hidden = id !== view;
+  if (view === "workshop") loadWorkshop();
   $("#talk").hidden = !wide.matches && view !== "talk";
   try { localStorage.setItem("sloane.view", view); } catch { /* private mode */ }
 }
@@ -393,6 +394,120 @@ function renderEngine(data) {
 
 $("#sync-now").addEventListener("click", () => post("/api/jobs/entity_sync/run"));
 
+// -- the workshop ------------------------------------------------------------------------------
+
+const ORIGIN = { him: "your idea", her: "her idea" };
+const MOVING = { queued: "queued", building: "building now…", deploying: "going live…", accepted: "merged; waiting for the box" };
+
+async function shopPost(id, verb, body) {
+  await post(`/api/workshop/${id}/${verb}`, body);
+  loadWorkshop();
+}
+
+function shopCard(item, actions = [], opts = {}) {
+  const card = el("article", { class: `shop-card ${item.status}` });
+  card.append(el("div", { class: "shop-card-head" },
+    el("h4", { text: item.title }),
+    el("span", { class: `tag ${item.origin}`, text: ORIGIN[item.origin] || item.origin })));
+  const meta = [MOVING[item.status] || (opts.showStatus ? item.status.replace("_", " ") : ""), item.when].filter(Boolean).join(" · ");
+  if (meta) card.append(el("p", { class: "shop-meta", text: meta }));
+  const text = opts.full ? item.summary || item.plan || item.request : item.plan || item.request;
+  if (text) {
+    const body = el("div", { class: "shop-body" });
+    body.innerHTML = markdown(text);
+    card.append(body);
+  }
+  if (opts.full && item.request && item.summary) {
+    card.append(el("details", { class: "shop-more" }, el("summary", { text: "What was asked" }), el("p", { text: item.request })));
+  }
+  if (opts.full && item.plan && item.summary) {
+    const plan = el("div", { class: "shop-body" });
+    plan.innerHTML = markdown(item.plan);
+    card.append(el("details", { class: "shop-more" }, el("summary", { text: "The plan" }), plan));
+  }
+  if (item.files && item.files.length && opts.full) {
+    const list = el("ul", { class: "shop-files" });
+    for (const f of item.files) list.append(el("li", { text: f }));
+    card.append(el("details", { class: "shop-more" }, el("summary", { text: `${item.files.length} file${item.files.length === 1 ? "" : "s"} changed` }), list));
+  }
+  if (item.checks && opts.full) card.append(el("p", { class: "shop-checks", text: "✓ " + item.checks }));
+  if (item.error) card.append(el("p", { class: "shop-error", text: item.error }));
+  if (item.feedback) card.append(el("p", { class: "shop-meta", text: `You said: ${item.feedback}` }));
+  if (item.pr_url && opts.full && /^https:\/\//.test(item.pr_url)) {
+    card.append(el("p", {}, el("a", { href: item.pr_url, target: "_blank", rel: "noopener noreferrer", text: "See every change on GitHub" })));
+  }
+  if (actions.length) card.append(el("div", { class: "acts shop-acts" }, ...actions));
+  return card;
+}
+
+function denyButton(item) {
+  return button("Deny", () => {
+    const card = document.getElementById(`card-${item.id}`);
+    if (!card || card.querySelector(".why")) return;
+    const why = el("input", { class: "why", type: "text", maxlength: "500", placeholder: "Why not? (optional; she learns from it)", "aria-label": "Why not" });
+    const confirm = button("Deny it", () => shopPost(item.id, "deny", { why: why.value }), "act danger");
+    card.append(el("div", { class: "acts shop-acts" }, why, confirm));
+    why.focus();
+  }, "act danger");
+}
+
+function lane(id, items, render, empty) {
+  const box = $(id);
+  box.replaceChildren();
+  if (!items.length) { box.append(el("p", { class: "empty", text: empty })); return; }
+  for (const item of items) {
+    const card = render(item);
+    card.id = `card-${item.id}`;
+    box.append(card);
+  }
+}
+
+async function loadWorkshop() {
+  const response = await api("/api/workshop");
+  if (!response.ok) return;
+  const data = await response.json();
+  const items = data.items || [];
+  const by = (...statuses) => items.filter((i) => statuses.includes(i.status));
+  const notice = $("#shop-notice");
+  if (!data.building_on) {
+    notice.hidden = false;
+    notice.textContent = "Building is off until the GitHub token is on the box (DEPLOY 7h). Ideas and plans still work.";
+  } else if (!data.upgrader) {
+    notice.hidden = false;
+    notice.textContent = "Accepted changes will merge, but go live only when you rerun the installer (it sets up the automatic upgrade).";
+  } else {
+    notice.hidden = true;
+  }
+  const ready = by("ready");
+  lane("#shop-ready", ready, (i) => shopCard(i, [
+    button("Accept", () => shopPost(i.id, "accept"), "act primary"), denyButton(i)], { full: true }),
+  "Nothing waiting on you.");
+  lane("#shop-moving", by("queued", "building", "deploying", "accepted"), (i) => shopCard(i), "Nothing building.");
+  lane("#shop-planned", by("planned", "idea"), (i) => shopCard(i, [
+    button("Build tonight", () => shopPost(i.id, "build", { now: false }), "act primary"),
+    button("Build now", () => shopPost(i.id, "build", { now: true })),
+    ...(i.status === "idea" ? [button("Plan it", () => shopPost(i.id, "plan"))] : []),
+    button("Drop", () => shopPost(i.id, "drop"), "act danger")]),
+  "No ideas yet. Add one above.");
+  lane("#shop-live", by("live"), (i) => shopCard(i, [button("Undo", () => shopPost(i.id, "undo"), "act danger")], { full: true }),
+    "Nothing from the workshop is live yet.");
+  lane("#shop-history", by("denied", "failed", "rolled_back", "undone", "dropped"), (i) => shopCard(i,
+    i.status === "failed" || i.status === "rolled_back" ? [button("Try again", () => shopPost(i.id, "build", { now: false }))] : [],
+    { showStatus: true }), "Nothing here.");
+  const badge = $("#workshop-badge");
+  badge.hidden = !ready.length;
+  badge.textContent = ready.length ? String(ready.length) : "";
+}
+
+$("#idea-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const text = $("#idea-input").value.trim();
+  if (!text) return;
+  $("#idea-input").value = "";
+  await post("/api/workshop/ideas", { text });
+  loadWorkshop();
+});
+
 // -- the clock, the pulse, the refresh ------------------------------------------------------
 
 function tick() {
@@ -413,6 +528,7 @@ async function refresh() {
     renderToday(data);
     renderMemory(data);
     renderEngine(data);
+    loadWorkshop();
     const trouble = (data.alerts || []).length + (data.unreadable || []).length;
     pulse.textContent = trouble ? `${trouble} to look at` : "All systems normal";
     pulse.className = "pulse " + (trouble ? "bad" : "ok");

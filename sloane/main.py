@@ -94,9 +94,13 @@ def create_app() -> FastAPI:
             log.info("telegram poller started")
             if config.telegram_chat_id:
                 # "I'm up", once per version: the sign an install or upgrade worked.
+                # After a workshop deploy, "Live: …" says it instead.
+                from pathlib import Path
+
                 from sloane.hello import announce
 
-                asyncio.create_task(announce(store, bot.say))
+                deployed = (Path(config.deploy_dir) / "result.json").exists()
+                asyncio.create_task(announce(store, bot.say, silent=deployed))
                 asyncio.create_task(bot.set_menu())
         else:
             log.warning("TELEGRAM_BOT_TOKEN is unset; running without the bot")
@@ -135,8 +139,16 @@ def create_app() -> FastAPI:
 
             speak = voice_note
 
+        # The workshop: features she builds on herself, each waiting for his Accept.
+        from sloane.workshop import Workshop
+
+        workshop = Workshop(store, config, router,
+                            say=bot.say if bot is not None and config.telegram_chat_id else None)
+        state["workshop"] = workshop
+        watcher = asyncio.create_task(workshop.watch_deploys())
+
         ctx = JobContext(
-            store=store, agent=agent, governor=Governor(store, config),
+            store=store, agent=agent, governor=Governor(store, config), workshop=workshop,
             config=config, send=send, speak=speak, inbox=inbox,
             say=bot.say if bot is not None and config.telegram_chat_id else None,
             remind=bot.remind if bot is not None and config.telegram_chat_id else None,
@@ -162,6 +174,7 @@ def create_app() -> FastAPI:
         try:
             yield
         finally:
+            watcher.cancel()
             scheduler.stop()
             if task is not None:
                 state["bot"].stop()

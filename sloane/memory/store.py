@@ -1358,7 +1358,7 @@ class Store:
     BACKUP_TABLES = ("state", "people", "commitments", "courses", "trust", "reminders", "jobs",
                      "list_items", "countdowns", "cards", "habits", "habit_log",
                      "clients", "client_notes", "focus_sessions", "expenses", "skill_settings",
-                     "colleges", "college_tasks", "roleplays")
+                     "colleges", "college_tasks", "roleplays", "workshop_items")
 
     async def restore_rows(self, table: str, rows: Sequence[Row]) -> int:
         """Merge backed-up rows back in. Existing rows win; returns rows inserted.
@@ -1493,6 +1493,103 @@ class Store:
     async def release_capture(self, client_id: str) -> None:
         """A capture that failed part-way: its retry must be let in."""
         await self._exec("delete from capture_refs where client_id = %s and body is null", (client_id,))
+
+    # -- the workshop (sql/031) -----------------------------------------------------
+
+    _WORKSHOP_COLUMNS = frozenset({"title", "request", "status", "plan", "summary", "files", "checks", "branch",
+                                   "pr_number", "pr_url", "commit_sha", "merge_sha", "error", "feedback",
+                                   "built_at", "decided_at", "live_at"})
+
+    async def add_workshop_item(self, title: str, request: str, *, origin: str = "him", kind: str = "build",
+                                undoes: str | None = None, status: str = "idea", plan: str | None = None) -> Row:
+        row = await self._one(
+            """
+            insert into workshop_items (title, request, origin, kind, undoes, status, plan)
+            values (%s, %s, %s, %s, %s, %s, %s) returning *
+            """,
+            (title, request, origin, kind, undoes, status, plan),
+        )
+        assert row is not None
+        return row
+
+    async def workshop_item(self, item_id: str) -> Row | None:
+        return await self._one("select * from workshop_items where id = %s", (item_id,))
+
+    async def workshop_items(self, statuses: Sequence[str] | None = None, limit: int = 60) -> list[Row]:
+        return await self._fetch(
+            """
+            select * from workshop_items
+             where (%s::text[] is null or status = any(%s::text[]))
+             order by updated_at desc
+             limit %s
+            """,
+            (list(statuses) if statuses else None, list(statuses) if statuses else None, limit),
+        )
+
+    async def update_workshop_item(self, item_id: str, **fields: Any) -> Row | None:
+        """Set some columns. Names are checked against a fixed set, never taken from input."""
+        unknown = set(fields) - self._WORKSHOP_COLUMNS
+        if unknown or not fields:
+            raise ValueError(f"not workshop columns: {sorted(unknown)}")
+        names = sorted(fields)
+        sets = ", ".join(f"{name} = %s" for name in names)
+        return await self._one(
+            f"update workshop_items set {sets}, updated_at = now() where id = %s returning *",  # noqa: S608
+            (*[fields[n] for n in names], item_id),
+        )
+
+    async def move_workshop_item(self, item_id: str, frm: Sequence[str], to: str, **fields: Any) -> Row | None:
+        """Move an item from one of `frm` to `to`, once: None if it wasn't in one of them."""
+        unknown = set(fields) - self._WORKSHOP_COLUMNS
+        if unknown:
+            raise ValueError(f"not workshop columns: {sorted(unknown)}")
+        names = sorted(fields)
+        sets = "".join(f", {name} = %s" for name in names)
+        return await self._one(
+            f"update workshop_items set status = %s{sets}, updated_at = now() "  # noqa: S608
+            "where id = %s and status = any(%s) returning *",
+            (to, *[fields[n] for n in names], item_id, list(frm)),
+        )
+
+    async def claim_workshop_build(self) -> Row | None:
+        """The oldest queued item, marked building, if nothing else is building. Once."""
+        return await self._one(
+            """
+            update workshop_items set status = 'building', attempts = attempts + 1, updated_at = now()
+             where id = (
+               select id from workshop_items
+                where status = 'queued'
+                  and not exists (select 1 from workshop_items w where w.status = 'building')
+                order by created_at
+                limit 1
+                for update skip locked
+             )
+            returning *
+            """
+        )
+
+    async def stale_workshop_items(self, status: str, older_than_minutes: int) -> list[Row]:
+        """Items stuck in `status` longer than that: a build or deploy nobody finished."""
+        return await self._fetch(
+            "select * from workshop_items where status = %s and updated_at < now() - make_interval(mins => %s)",
+            (status, older_than_minutes),
+        )
+
+    async def workshop_counts(self) -> dict[str, int]:
+        rows = await self._fetch("select status, count(*) as n from workshop_items group by status")
+        return {r["status"]: int(r["n"]) for r in rows}
+
+    async def workshop_feedback(self, limit: int = 12) -> list[Row]:
+        """What he said no to lately, and why: she reads it before her next idea."""
+        return await self._fetch(
+            """
+            select title, feedback, status from workshop_items
+             where status in ('denied', 'undone') or feedback is not null
+             order by coalesce(decided_at, updated_at) desc
+             limit %s
+            """,
+            (limit,),
+        )
 
     # -- ops ------------------------------------------------------------------
 

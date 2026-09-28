@@ -29,6 +29,7 @@
   <button type="button" class="tab talk-tab" data-view="talk" aria-current="page">Talk</button>
   <button type="button" class="tab" data-view="today">Today</button>
   <button type="button" class="tab" data-view="memory">Memory</button>
+  <button type="button" class="tab" data-view="workshop">Workshop <span class="badge" id="workshop-badge" hidden></span></button>
   <button type="button" class="tab" data-view="engine">Engine</button>
 </nav>
 
@@ -94,6 +95,30 @@
         <ol class="diary" id="diary"></ol>
       </article>
     </div>
+  </section>
+
+  <section class="pane view" id="workshop" aria-label="Workshop" hidden>
+    <div class="shop-head">
+      <div>
+        <h2 class="shop-title">Workshop</h2>
+        <p class="hint">Things you want her to have. She plans them, builds them on her own branch, tests them,
+          and nothing goes live until you accept it. At night she builds what you queued, and one idea of her own.</p>
+      </div>
+    </div>
+    <p class="notice" id="shop-notice" hidden></p>
+    <form class="idea" id="idea-form">
+      <label for="idea-input" class="sr">A new idea</label>
+      <textarea id="idea-input" rows="2" maxlength="2000"
+        placeholder="Something you want her to be able to do. e.g. a skill that tracks my workouts and nags me on rest days"></textarea>
+      <button type="submit" class="send">Add to the workshop</button>
+    </form>
+    <div class="lanes">
+      <section class="lane" aria-labelledby="lane-ready"><h3 id="lane-ready">Ready for you</h3><div id="shop-ready"></div></section>
+      <section class="lane" aria-labelledby="lane-moving"><h3 id="lane-moving">Building</h3><div id="shop-moving"></div></section>
+      <section class="lane" aria-labelledby="lane-planned"><h3 id="lane-planned">Planned and ideas</h3><div id="shop-planned"></div></section>
+      <section class="lane" aria-labelledby="lane-live"><h3 id="lane-live">Live</h3><div id="shop-live"></div></section>
+    </div>
+    <details class="history"><summary>Turned down, failed, rolled back</summary><div id="shop-history"></div></details>
   </section>
 
   <section class="pane view" id="engine" aria-label="Engine" hidden>

@@ -149,6 +149,20 @@ main() {
     set_env .env DASHBOARD_TOKEN "$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
     echo "Made a password for the control room (/app). Read it with: grep DASHBOARD_TOKEN $DIR/.env"
   fi
+  # The workshop's GitHub token (DEPLOY 7h), asked for once when there's a terminal.
+  if ! grep -Eq '^GITHUB_TOKEN=.+' .env && { : <"$TTY"; } 2>/dev/null; then
+    say "The workshop: paste a GitHub token so she can build features on herself (Enter to skip)"
+    local token out
+    token=$(secret 'GITHUB_TOKEN (github_pat_...): ')
+    if [ -n "$token" ]; then
+      if out=$(SLOANE_VALUE="$token" python3 scripts/env_check.py GITHUB_TOKEN 2>"$TTY"); then
+        set_env .env GITHUB_TOKEN "$out"
+        echo "Saved. The workshop can build now."
+      else
+        echo "Skipped. Add it later: nano $DIR/.env (GITHUB_TOKEN=...), then run this again."
+      fi
+    fi
+  fi
 
   # -- 4. Image and migrations --------------------------------------------------------
   say "Building the image (first time: a few minutes)"
@@ -179,10 +193,15 @@ main() {
   compose run --rm -T sloane python scripts/doctor.py --warm </dev/null || \
     echo "doctor found things to fix -- see above. Sloane will still start."
 
-  say "Installing the systemd service"
-  sudo cp sloane.service /etc/systemd/system/sloane.service
+  say "Installing the systemd service, and the workshop's upgrader"
+  # The hand-off folder she writes to when you accept a workshop change (her
+  # container runs as uid 10001), and the unit that deploys it.
+  sudo install -d -o 10001 -g 10001 -m 755 "$DIR/.deploy"
+  printf '{"upgrader": 1}\n' | sudo tee "$DIR/.deploy/host.json" >/dev/null
+  sudo cp sloane.service deploy/sloane-upgrade.path deploy/sloane-upgrade.service /etc/systemd/system/
   sudo systemctl daemon-reload
   sudo systemctl enable sloane >/dev/null 2>&1
+  sudo systemctl enable --now sloane-upgrade.path >/dev/null 2>&1
   sudo systemctl restart sloane
   touch .installed
 

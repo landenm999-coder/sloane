@@ -40,11 +40,18 @@ def fingerprint(root: Path = PACKAGE) -> str:
 
 
 async def announce(store, say: Callable[[str], Awaitable[None]], *, root: Path = PACKAGE,  # noqa: ANN001
-                   retries: tuple[float, ...] = RETRIES) -> str | None:
-    """Tell him she's up, once per version. Returns what was said, or None."""
+                   retries: tuple[float, ...] = RETRIES, silent: bool = False) -> str | None:
+    """Tell him she's up, once per version. Returns what was said, or None.
+
+    `silent`: a workshop deploy is about to say what went live, so this
+    version is recorded as greeted without a second message.
+    """
     key = PREFIX + fingerprint(root)
     if await store.nudge_prefix_said(key):
         return None  # this version already said hello
+    if silent and await store.nudge_prefix_said(PREFIX):
+        await store.claim_nudges([key])
+        return None
     text = UPDATED if await store.nudge_prefix_said(PREFIX) else FIRST
     for wait in (*retries, None):
         try:

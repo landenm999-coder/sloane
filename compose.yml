@@ -21,6 +21,11 @@ services:
     volumes:
       - claude-auth:/home/sloane/.claude
       - models:/var/lib/sloane/models
+      # The workshop: her clone of her own repo (never the running code), and
+      # the hand-off to the box's upgrader (scripts/upgrade.sh), which the
+      # installer creates owned by her uid.
+      - workshop:/var/lib/sloane/workshop
+      - ./.deploy:/var/lib/sloane/deploy
     extra_hosts:
       # A model server on this same box (Ollama; LOCAL_MODELS.md) is reachable
       # as http://host.docker.internal:11434/v1. Harmless when there isn't one.
@@ -39,3 +44,4 @@ services:
 volumes:
   claude-auth:
   models:
+  workshop:

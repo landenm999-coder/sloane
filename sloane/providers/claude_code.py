@@ -447,6 +447,90 @@ async def research(provider: "ClaudeCodeProvider", query: str, timeout: int) -> 
     return text
 
 
+# -- the workshop's coding session (sloane/workshop.py) ------------------------
+#
+# Claude Code as itself, a coding assistant, working in her clone of her own
+# repo -- never the running code, and never with her secrets: the env is
+# scrubbed like every other call, the file tools reach only the clone, and
+# Bash runs only the checks. What it writes is checked again in code (the
+# guard, the secret scan, the tests, GitHub CI), and none of it goes live
+# until Landen presses Accept.
+CODE_TOOLS = "Read,Edit,Write,Glob,Grep,Bash"
+CODE_ALLOWED = (
+    "Read(./**)", "Edit(./**)", "Write(./**)", "Glob(./**)", "Grep(./**)",
+    "Bash(python tests/run.py:*)", "Bash(python tests/test_*:*)", "Bash(python -m pyflakes:*)",
+    "Bash(python -m py_compile:*)", "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)",
+    "Bash(ls:*)",
+)
+# Where nothing of the clone's lives: its secrets-adjacent neighbours (the Claude
+# login in /home, /proc's environment of the running process, /etc). A deny
+# rule beats an allow rule, so one covering the clone itself would lock the
+# builder out of its own work: code_denied() drops any that does (the clone is
+# under /var on the box, under /tmp in a test).
+DENY_ROOTS = ("/proc", "/etc", "/home", "/root", "/var", "/app", "/run", "/sys", "/tmp")
+CODE_DENIED = ("Edit(./.git/**)", "Write(./.git/**)")
+
+
+def code_denied(workdir: str) -> tuple[str, ...]:
+    import os
+
+    here = os.path.realpath(workdir)
+    roots = [r for r in DENY_ROOTS if not (here == r or here.startswith(r + "/"))]
+    return (*(f"Read(/{r}/**)" for r in roots), *CODE_DENIED)
+CODE_SYSTEM = """\
+You are changing Sloane's own code. She is Landen's personal assistant, and \
+this change is on the workshop list: he asked for it, or she proposed it and \
+he will review it before it goes anywhere. Work only in this repository. Read \
+CLAUDE.md first and follow it exactly: its invariants, how a skill plugs in, \
+where SQL goes, idempotent migrations, a test for every change, and the docs \
+kept in step. Prefer a new skill in sloane/skills/ to changing the core. Keep \
+the change as small as does the job well. Never touch her safety rules: the \
+files listed in deploy/protected.txt, her hard lines, and the approval, \
+fencing and read-only-school code -- if the request needs that, change \
+nothing and say why. Never put a credential, token, password or secret URL \
+in any file. Run `python tests/run.py` and `python -m pyflakes sloane scripts \
+tests` before you finish and fix what they find. You can't commit or push; \
+that is done for you. End with a short plain summary, in her voice, of what \
+changed and how Landen uses it (two to five lines, no code)."""
+
+
+def build_code_argv(cli: str, *, model: str = "", workdir: str = ".") -> list[str]:
+    argv = [cli, "-p", "--output-format", "json", "--append-system-prompt", CODE_SYSTEM,
+            "--tools", CODE_TOOLS, "--allowedTools", *CODE_ALLOWED, "--disallowedTools", *code_denied(workdir),
+            "--permission-mode", "dontAsk", "--strict-mcp-config", "--setting-sources", "user",
+            "--no-session-persistence"]
+    if model:
+        argv += ["--model", model]
+    return argv
+
+
+async def code(provider: "ClaudeCodeProvider", workdir: str, request: str, *, timeout: int,
+               model: str = "") -> str:
+    """One coding session in `workdir`. Returns its closing summary. Raises ProviderError."""
+    if shutil.which(provider._cli) is None:
+        raise ProviderError(provider.name, f"{provider._cli} is not on PATH")
+    env = _cli_env()
+    # The checks it runs are the unit suites: no database, no model downloads.
+    env["HF_HUB_OFFLINE"] = "1"
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *build_code_argv(provider._cli, model=model or provider._model, workdir=workdir), stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=env, cwd=workdir,
+        )
+    except OSError as exc:
+        raise ProviderError(provider.name, f"could not start {provider._cli}: {exc}") from exc
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(request.encode()), timeout=timeout)
+    except asyncio.TimeoutError as exc:
+        _kill(proc)
+        await proc.wait()
+        raise ProviderError(provider.name, f"the coding session ran past {timeout // 60} minutes") from exc
+    if proc.returncode != 0:
+        raise ProviderError(provider.name, stderr.decode(errors="replace").strip()[:300] or "coding session failed")
+    text, _, _, _ = _unwrap(stdout.decode(errors="replace").strip())
+    return text.strip()
+
+
 class _OldCli(Exception):
     """The installed CLI predates one of FAST_FLAGS."""
 
