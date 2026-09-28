@@ -7,8 +7,8 @@ It's kept up to date at the end of every work session. Last updated: 2026-09-28.
 - Repo: `github.com/landenm999-coder/sloane`, branch `main` (CI runs on push).
 - landenm999-coder/sloane#12 (skills, partner, colleges, DECA), landenm999-coder/sloane#13 (capture recall,
   Groq model) and landenm999-coder/sloane#14 (memory, control room, think, local models) are **merged**.
-  **The workshop (she builds on herself) is on branch `claude/continue-previous-work-k8coat`, in a new draft
-  PR, not yet on main** (see "The workshop" below).
+  **The workshop (she builds on herself) is on branch `claude/continue-previous-work-k8coat`, draft PR
+  landenm999-coder/sloane#15, not yet on main** (see "The workshop" below).
 - Separate from **Capture** (`landenm999-coder/capture`), a voice-capture PWA that will later feed Sloane
   through an API. Keep them in separate repos. The old `claude/sloane-personal-assistant-nodd15` branch on
   capture is stale and can be deleted by Landen.
@@ -259,7 +259,7 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
 
 ## In flight
 
-- **The workshop PR** (branch `claude/continue-previous-work-k8coat`): everything under "The workshop" above.
+- **PR landenm999-coder/sloane#15**, the workshop (branch `claude/continue-previous-work-k8coat`): everything under "The workshop" above.
   After merging, rerunning `install.sh` on the box installs the upgrader (`.deploy/`, `host.json`,
   `sloane-upgrade.path`), applies `sql/031` and asks for `GITHUB_TOKEN`. Until the token is there the
   Workshop tab still takes ideas and plans; it just doesn't build.
@@ -286,7 +286,7 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
 
 ## Only Landen can do (the whole list; see DEPLOY.md)
 
-0. Merge the workshop PR and landenm999-coder/capture#2 (the installer deploys `main`).
+0. Merge landenm999-coder/sloane#15 (the workshop) and landenm999-coder/capture#2 (the installer deploys `main`).
 0b. Make the workshop's GitHub token (DEPLOY §7h: fine-grained, this repo only; Contents and Pull requests
    read and write, Actions read), then rerun the installer on the box and paste it when asked.
 0c. Optional: the control room (START_HERE step 7). Local models are optional too: he has no Raspberry Pi
