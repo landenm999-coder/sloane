@@ -136,6 +136,10 @@ class Agent:
         """Wait for memory writes still under way."""
         while self._pending:
             await asyncio.gather(*list(self._pending), return_exceptions=True)
+            # A finished write leaves the set by a callback on the loop's next turn, and gather()
+            # of finished tasks returns without yielding: take them out here, or this spins forever
+            # (and at shutdown, wait_for's timeout can't stop a coroutine that never yields).
+            self._pending.difference_update([task for task in self._pending if task.done()])
 
     # -- reading ---------------------------------------------------------------
 

@@ -175,6 +175,40 @@ check("a chat episode CONVERSATION already shows is still dropped", "zzchatzz" i
 check("under the channels the bot really stores (text, voice, dashboard) too",
       [w in recorder.prompts[0] for w in ("zztypedzz", "zzspokenzz", "zzwebzz")], [False, False, False])
 
+
+# settle() spun forever when a background task had finished but its clean-up callback hadn't run
+# yet: gather() of finished tasks returns without yielding (3.12), so the callback never got a turn.
+# It hung CI on main after #15 (the workshop suite); in the agent it could hang shutdown, whose
+# wait_for(settle(), 10) can't time out a coroutine that never yields. Forced here, deterministically.
+def settles(owner, add) -> bool:  # noqa: ANN001
+    import signal
+
+    async def main() -> None:
+        async def quick() -> int:
+            return 1
+        add(quick())
+        await asyncio.sleep(0)  # the task finishes on this turn; its clean-up waits for the next
+        await owner.settle()
+
+    def stuck(signum, frame):  # noqa: ANN001
+        raise TimeoutError("settle() spun")
+
+    old = signal.signal(signal.SIGALRM, stuck)
+    signal.alarm(3)
+    try:
+        asyncio.run(main())
+        return True
+    except TimeoutError:
+        return False
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, old)
+
+
+racer = Agent(None, isolated())
+check("settle() returns when a memory write finished a moment ago", settles(racer, racer._later), True)
+check("and leaves nothing behind", len(racer._pending), 0)
+
 if FAILURES:
     print(f"FAIL ({len(FAILURES)})")
     for f in FAILURES:

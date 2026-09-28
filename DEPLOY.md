@@ -300,9 +300,17 @@ checks a password, and it stays off until you set one.
 Telegram: commands, reminders and actions all work) and see and steer
 everything she runs:
 
-- **Today:** your day on a rail, what needs you, what's due, reminders, grades.
-- **Memory:** what she knows about you, loose ends, her diary. Forget anything.
-- **Engine:** jobs you can run now, what she may do without asking, model use.
+- **Talk:** type, or tap the microphone and speak (it needs the `https://`
+  address below and `GROQ_API_KEY`, or a local Whisper). **Read aloud** has
+  the browser read her replies to you.
+- **Today:** her line on your day, what's next, the day on a rail and as a
+  list, one **Needs you** list (approvals, anything broken or failed, overdue
+  work, workshop builds), what's due, reminders, grades.
+- **Memory:** what she knows about you (filter it, forget anything), loose ends, her diary.
+- **Workshop:** what she's building on herself (7h).
+- **Engine:** how she's running, jobs you can run now, what she may do without asking, model use.
+
+Press `/` anywhere to jump to the message box.
 
 The installer makes its password, `DASHBOARD_TOKEN`, for you. Read it on the
 box with:
@@ -313,7 +321,9 @@ grep DASHBOARD_TOKEN /opt/sloane/.env
 
 With `tailscale serve` from 7d running, open `https://<box>.<tailnet>.ts.net/app`
 on your phone or laptop and paste it. You stay signed in for 30 days. On a
-phone, use **Add to Home Screen** and it opens like an app. It is reachable only
+phone, use **Add to Home Screen** (iPhone: Share → Add to Home Screen) and it
+opens like an app, with her icon. The first time you tap the microphone the
+browser asks to use it; say yes. It is reachable only
 from your own tailnet devices, and even there it needs the password. Changing
 `DASHBOARD_TOKEN` (and restarting) signs every device out.
 

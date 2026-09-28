@@ -5,9 +5,26 @@
   "start_url": "/app",
   "scope": "/app",
   "display": "standalone",
-  "background_color": "#14161f",
-  "theme_color": "#14161f",
+  "background_color": "#11131a",
+  "theme_color": "#11131a",
   "icons": [
-    {"src": "/app/static/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"}
+    {
+      "src": "/app/static/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/app/static/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/app/static/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
   ]
 }

@@ -6,9 +6,9 @@ It's kept up to date at the end of every work session. Last updated: 2026-09-28.
 
 - Repo: `github.com/landenm999-coder/sloane`, branch `main` (CI runs on push).
 - landenm999-coder/sloane#12 (skills, partner, colleges, DECA), landenm999-coder/sloane#13 (capture recall,
-  Groq model) and landenm999-coder/sloane#14 (memory, control room, think, local models) are **merged**.
-  **The workshop (she builds on herself) is on branch `claude/continue-previous-work-k8coat`, draft PR
-  landenm999-coder/sloane#15, not yet on main** (see "The workshop" below).
+  Groq model), landenm999-coder/sloane#14 (memory, control room, think, local models) and
+  landenm999-coder/sloane#15 (the workshop: she builds on herself) are **merged**. The control room
+  rebuild is draft PR landenm999-coder/sloane#16.
 - Separate from **Capture** (`landenm999-coder/capture`), a voice-capture PWA that will later feed Sloane
   through an API. Keep them in separate repos. The old `claude/sloane-personal-assistant-nodd15` branch on
   capture is stale and can be deleted by Landen.
@@ -178,6 +178,27 @@ or deny them." Built (`sloane/workshop.py`, `sql/031`, the control room's Worksh
 
 Suites: 54/54.
 
+**The control room, rebuilt (after PR #15).** Landen: "make the app dashboard as good as possible".
+- *Today* opens with her line on the day, written by rule from the agenda's rows (never a model, so never
+  wrong about a time), a "Next: Work in 5 h 16 min" chip, the rail redrawn in lanes (work, events, due
+  and reminder pins that never collide or clip), and an agenda from `views.day_items` (the same rows
+  and clashes as /today, now as data): past quieter, now highlighted, next with a countdown.
+- *Needs you* is one list: approvals, alerts, unreadable parts, failed jobs (Run again), overdue work,
+  workshop builds ready (Review). The top bar's light counts failed jobs (`overview.health`); it used
+  to say "All systems normal" while the inbox job was failing (regression test in test_web).
+- *Talk*: a microphone (`POST /api/voice`: WebM/Ogg/MP4 from the browser's recorder, 8 MB cap, the
+  Telegram voice path's transcriber via `Bot.transcribe`, logged as a voice note in words, never the
+  audio; shown only when `Bot.hears` and the page is https), **Read aloud** (the browser's own speech,
+  British when her Piper voice is), starters from what's on today, `/` to jump to the message box.
+- *Phone*: the five tabs fit (icon bar; the fifth used to be cut off), badges on the icons, 44px touch
+  targets, home-screen icons (`icon-180/192/512.png`, manifest, apple-touch-icon).
+- *Memory* filter and counts; *Workshop* pipeline counts and files labelled skill/test/data/docs;
+  *Engine* status tiles, friendly job names, failed first.
+- *Verified*: screenshots at desktop, laptop and phone, dark and light, console clean; the microphone
+  end to end in Chromium (fake mic → WebM → stub Whisper → her real reply via `claude -p`); every
+  colour pair computed (all ≥ 4.5:1 text, ≥ 3:1 borders and markers, both themes); keyboard order,
+  accessible names, ARIA references and heading order checked in the browser.
+
 **She has never run against the real services.** This sandbox can't reach Telegram, Groq, Canvas, Google or
 Supabase. Everything external is tested against local stubs, and the real-model eval (via `claude -p`) scores
 58/58. The next real milestone is Landen deploying it.
@@ -235,7 +256,7 @@ Supabase. Everything external is tested against local stubs, and the real-model 
 | Reminders+ (PR #14) | repeating (`sql/029`: rule + series; delivering one makes the next; `/unremind` stops it), timers ("set a timer for 1 hour 30 minutes"; woken on the second; delivered even in quiet hours), calendar dates via `dates.py`, "starting tomorrow" | `reminders.py`, `jobs/briefs.py`, `tests/test_reminders.py` |
 | Forwards (PR #14) | a forward is someone else's words: logged untrusted, answered as INGESTED (no actions), his note is the question, follow-ups see it for 10 minutes | `telegram.py`, `tests/test_forward.py` |
 | Memory upgrade (PR #14) | lasting recall seats; STATE priority + cut note; "remember that" at once; learner: captures, updates, retires, diary (`put_diary`); CONVERSATION 24h/40; de-dup on real chat channels; `env_migrate.py` | `memory/store.py`, `tiers.py`, `learn.py`, `skills/memory.py`, `skills/__init__.py`, `agent.py`; tests in store, tiers, learn, agent, actions, env_check |
-| Control room (PR #14) | `/app` + `/api/*`: chat (NDJSON stream through `Bot.respond` via an `Outlet`), overview (rail, needs-you, due, reminders, grades, panels, memory, diary, jobs, trust, usage, system), controls (cancel reminder, approve/deny, revoke, forget, close loose end, run job) | `web.py`, `webui/`, `telegram.py` `Outlet`, `tests/test_web.py` |
+| Control room (PR #14, rebuilt after #15) | `/app` + `/api/*`: chat (NDJSON stream through `Bot.respond` via an `Outlet`) typed or by microphone (`/api/voice`), read aloud in the browser; overview (her line, agenda + clashes, rail, one needs-you list, health, due, reminders, grades, panels, memory, diary, jobs, trust, usage, system), controls (cancel reminder, approve/deny, revoke, forget, close loose end, run job); installable (icons, manifest) | `web.py`, `views.day_items`, `webui/`, `telegram.py` `Outlet`/`hears`/`transcribe`, `tests/test_web.py` |
 | Think (PR #14) | `think` 10:25/12:25/16:25/20:25, not in class or on a shift, NOTHING = silent and not remembered | `jobs/briefs.py`, `sql/030`, `tests/test_jobs.py` |
 | Workshop | ideas → plan → build in a clone (Claude Code, Sonnet, scoped tools) → guard in code (`deploy/protected.txt`, locked definitions, secrets, tests kept) → tests + pyflakes → PR + CI → his Accept → merge → host upgrader (`scripts/upgrade.sh` via a systemd path unit: protected re-check, build, migrate, health, rollback) → live, Undo; nightly builds + her own ideas; `/idea`, `/workshop`, the control room's Workshop tab | `sloane/workshop.py`, `skills/workshop.py`, `sql/031`, `scripts/upgrade.sh`, `deploy/`, `web.py`, `webui/`, `tests/test_workshop.py` |
 | Local models (PR #14) | `LOCAL_BASE_URL`/`LOCAL_MODEL` (+ `LOCAL_STT_*`), `Provider.configured` so an unset fallback isn't a failure, doctor + paste checks, compose `host.docker.internal` | `providers/local.py`, `router.py`, `LOCAL_MODELS.md`, `tests/test_local.py` |
@@ -259,10 +280,22 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
 
 ## In flight
 
-- **PR landenm999-coder/sloane#15**, the workshop (branch `claude/continue-previous-work-k8coat`): everything under "The workshop" above.
-  After merging, rerunning `install.sh` on the box installs the upgrader (`.deploy/`, `host.json`,
-  `sloane-upgrade.path`), applies `sql/031` and asks for `GITHUB_TOKEN`. Until the token is there the
-  Workshop tab still takes ideas and plans; it just doesn't build.
+- **PR landenm999-coder/sloane#16**: the control room rebuilt (see "The control room, rebuilt" above) and
+  this file's post-#15 corrections. Plus a real bug CI found: the `test` job on main after the #15
+  merge sat in `tests/run.py` for 22 minutes and was cancelled with no output. `tests/run.py` now
+  stops a suite past 300 s (`SUITE_SECONDS`), names it and prints every thread's stack
+  (faulthandler), and on its first CI run it caught it: `Workshop.settle()` spinning. A finished
+  task leaves the set by a callback on the loop's next turn, and on Python 3.12 `gather()` of
+  finished tasks returns without yielding, so `while tasks: await gather(...)` never gave that
+  callback its turn. A timing race (a few CI runs in ten). `Agent.settle()` had the same loop, and
+  it runs at shutdown inside `wait_for(..., 10)`, which can't time out a coroutine that never yields.
+  Both now drop finished tasks themselves; `test_agent` and `test_workshop` force the race
+  deterministically (they fail on the old code). Rerunning the installer after it merges is all the box needs (no
+  migration, no new setting; the microphone uses the `GROQ_API_KEY` she already has).
+- **The workshop reaching the box** (landenm999-coder/sloane#15 is merged): rerunning `install.sh` installs
+  the upgrader (`.deploy/`, `host.json`, `sloane-upgrade.path`), applies `sql/031` and asks for
+  `GITHUB_TOKEN`. Until the token is there the Workshop tab still takes ideas and plans; it just doesn't
+  build. Its first real builds haven't happened yet (backlog item 1).
 - **PR landenm999-coder/capture#2**: the Capture → Sloane client (Settings → Sloane, an IndexedDB outbox,
   memory-only by default). Tested in Chromium against a real Sloane server; not yet on a phone. Merging it
   deploys it (Vercel); then DEPLOY §7d on the box (`CAPTURE_TOKEN`, `CORS_ORIGINS`, `tailscale serve`).
@@ -280,13 +313,13 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
    lock the account.
 4. P5 phone calls, beyond v1.
 5. Streaming for the Groq and Anthropic providers (`claude_code` and `local` stream; the others answer whole).
-6. The control room: a microphone button (browser recording → Whisper → voice reply), and approvals there
-   when Telegram isn't set up (today the agency needs `TELEGRAM_CHAT_ID`).
+6. The control room: her replies in her own voice (Groq/Piper audio, not the browser's), and approvals
+   there when Telegram isn't set up (today the agency needs `TELEGRAM_CHAT_ID`).
 7. A weekday lunch slot for `think`, if Landen wants one (school hours are skipped today).
 
 ## Only Landen can do (the whole list; see DEPLOY.md)
 
-0. Merge landenm999-coder/sloane#15 (the workshop) and landenm999-coder/capture#2 (the installer deploys `main`).
+0. Merge landenm999-coder/sloane#16 (the control room) and landenm999-coder/capture#2 (the installer deploys `main`).
 0b. Make the workshop's GitHub token (DEPLOY §7h: fine-grained, this repo only; Contents and Pull requests
    read and write, Actions read), then rerun the installer on the box and paste it when asked.
 0c. Optional: the control room (START_HERE step 7). Local models are optional too: he has no Raspberry Pi
