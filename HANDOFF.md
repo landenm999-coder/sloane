@@ -281,11 +281,16 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
 ## In flight
 
 - **PR landenm999-coder/sloane#16**: the control room rebuilt (see "The control room, rebuilt" above) and
-  this file's post-#15 corrections. Also `tests/run.py` now stops a suite that runs past 300 s
-  (`SUITE_SECONDS`), prints every thread's stack (faulthandler) and names it: the `test` job on main
-  after the #15 merge sat in `tests/run.py` for 22 minutes and was cancelled, with no output (the
-  runner's prints were buffered). The same code passed on the PR, four local runs and six CI runs, so
-  the stuck suite is still unknown; the next time it happens the log will say which one and where. Rerunning the installer after it merges is all the box needs (no
+  this file's post-#15 corrections. Plus a real bug CI found: the `test` job on main after the #15
+  merge sat in `tests/run.py` for 22 minutes and was cancelled with no output. `tests/run.py` now
+  stops a suite past 300 s (`SUITE_SECONDS`), names it and prints every thread's stack
+  (faulthandler), and on its first CI run it caught it: `Workshop.settle()` spinning. A finished
+  task leaves the set by a callback on the loop's next turn, and on Python 3.12 `gather()` of
+  finished tasks returns without yielding, so `while tasks: await gather(...)` never gave that
+  callback its turn. A timing race (a few CI runs in ten). `Agent.settle()` had the same loop, and
+  it runs at shutdown inside `wait_for(..., 10)`, which can't time out a coroutine that never yields.
+  Both now drop finished tasks themselves; `test_agent` and `test_workshop` force the race
+  deterministically (they fail on the old code). Rerunning the installer after it merges is all the box needs (no
   migration, no new setting; the microphone uses the `GROQ_API_KEY` she already has).
 - **The workshop reaching the box** (landenm999-coder/sloane#15 is merged): rerunning `install.sh` installs
   the upgrader (`.deploy/`, `host.json`, `sloane-upgrade.path`), applies `sql/031` and asks for

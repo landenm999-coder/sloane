@@ -267,6 +267,40 @@ if shutil.which("git") and shutil.which("python3"):
         check("no request, nothing done", (quiet.returncode, (box / ".deploy" / "result.json").exists()), (0, False))
 
 
+# settle() spun forever when a background task had finished but its clean-up callback hadn't run
+# yet: gather() of finished tasks returns without yielding (3.12), so the callback never got a turn.
+# It hung CI on main after #15 (the workshop suite); in the agent it could hang shutdown, whose
+# wait_for(settle(), 10) can't time out a coroutine that never yields. Forced here, deterministically.
+def settles(owner, add) -> bool:  # noqa: ANN001
+    import signal
+
+    async def main() -> None:
+        async def quick() -> int:
+            return 1
+        add(quick())
+        await asyncio.sleep(0)  # the task finishes on this turn; its clean-up waits for the next
+        await owner.settle()
+
+    def stuck(signum, frame):  # noqa: ANN001
+        raise TimeoutError("settle() spun")
+
+    old = signal.signal(signal.SIGALRM, stuck)
+    signal.alarm(3)
+    try:
+        asyncio.run(main())
+        return True
+    except TimeoutError:
+        return False
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, old)
+
+
+racer = ws.Workshop(None, isolated(), None)
+check("settle() returns when a background task finished a moment ago", settles(racer, racer.background), True)
+check("and leaves nothing behind", len(racer._tasks), 0)
+
+
 # -- the pipeline --------------------------------------------------------------------------------------
 class GitHubStub:
     """Pull requests, check runs and merges, over httpx.MockTransport. Merging moves the bare repo's main."""

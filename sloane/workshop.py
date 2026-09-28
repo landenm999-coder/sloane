@@ -491,8 +491,12 @@ class Workshop:
         task.add_done_callback(self._tasks.discard)
 
     async def settle(self) -> None:
+        """Wait for everything started in the background, and anything that starts meanwhile."""
         while self._tasks:
             await asyncio.gather(*list(self._tasks), return_exceptions=True)
+            # A finished task leaves the set by a callback on the loop's next turn, and gather()
+            # of finished tasks returns without yielding: take them out here, or this spins forever.
+            self._tasks.difference_update([task for task in self._tasks if task.done()])
 
     def _quiet(self) -> bool:
         local = self.clock().astimezone(ZoneInfo(self.config.timezone))
