@@ -281,7 +281,11 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
 ## In flight
 
 - **PR landenm999-coder/sloane#16**: the control room rebuilt (see "The control room, rebuilt" above) and
-  this file's post-#15 corrections. Rerunning the installer after it merges is all the box needs (no
+  this file's post-#15 corrections. Also `tests/run.py` now stops a suite that runs past 300 s
+  (`SUITE_SECONDS`), prints every thread's stack (faulthandler) and names it: the `test` job on main
+  after the #15 merge sat in `tests/run.py` for 22 minutes and was cancelled, with no output (the
+  runner's prints were buffered). The same code passed on the PR, four local runs and six CI runs, so
+  the stuck suite is still unknown; the next time it happens the log will say which one and where. Rerunning the installer after it merges is all the box needs (no
   migration, no new setting; the microphone uses the `GROQ_API_KEY` she already has).
 - **The workshop reaching the box** (landenm999-coder/sloane#15 is merged): rerunning `install.sh` installs
   the upgrader (`.deploy/`, `host.json`, `sloane-upgrade.path`), applies `sql/031` and asks for

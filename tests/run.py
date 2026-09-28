@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -51,26 +53,46 @@ INTEGRATION = [
 ]
 
 
+# No suite takes more than a minute or two. One that runs past this is stuck: it is
+# named, every thread's stack is printed (faulthandler, on SIGABRT), and it fails,
+# instead of silently eating CI's twenty minutes (as one did on main after #15).
+SUITE_SECONDS = int(os.environ.get("SUITE_SECONDS", "300"))
+
+
 def run(name: str) -> bool:
-    proc = subprocess.run(
-        [sys.executable, str(HERE / name)],
-        capture_output=True,
+    started = time.monotonic()
+    proc = subprocess.Popen(
+        [sys.executable, "-u", "-X", "faulthandler", str(HERE / name)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         text=True,
     )
-    ok = proc.returncode == 0
-    print(f"  [{'ok  ' if ok else 'FAIL'}] {name}")
+    try:
+        output, _ = proc.communicate(timeout=SUITE_SECONDS)
+        ok = proc.returncode == 0
+        label = "ok  " if ok else "FAIL"
+    except subprocess.TimeoutExpired:
+        proc.send_signal(signal.SIGABRT)
+        try:
+            output, _ = proc.communicate(timeout=15)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            output, _ = proc.communicate()
+        ok, label = False, "STUCK"
+        output = (output or "") + f"\n(still running after {SUITE_SECONDS} s: stopped, with every thread's stack above)"
+    print(f"  [{label}] {name} ({time.monotonic() - started:.0f} s)", flush=True)
     if not ok:
-        for line in (proc.stdout + proc.stderr).strip().splitlines():
-            print(f"         {line}")
+        for line in (output or "").strip().splitlines()[-80:]:
+            print(f"         {line}", flush=True)
     return ok
 
 
 def main() -> int:
-    print("unit")
+    print("unit", flush=True)
     results = [run(name) for name in UNIT]
 
     if os.environ.get("DATABASE_URL"):
-        print("integration")
+        print("integration", flush=True)
         results += [run(name) for name in INTEGRATION]
     else:
         print("integration")
