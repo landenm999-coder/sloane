@@ -196,10 +196,16 @@ async def main() -> None:
                                    headers={"Authorization": f"Bearer {TOKEN}"})
         check("so is one with no declared length", sneaky.status_code, 413)
 
-    # -- the route exists and is the only POST besides the loopback admin ones ----
+    # -- the route exists; every other POST is a loopback admin one or the control
+    # room's (each of those refuses without a session and the X-Sloane header:
+    # tests/test_web.py). A new POST anywhere must be added here on purpose.
     from sloane.main import create_app
     posts = sorted(r.path for r in create_app().routes if "POST" in getattr(r, "methods", set()))
-    check("POST routes", posts, ["/capture", "/jobs/{name}/run", "/sync"])
+    check("POST routes", posts, [
+        "/api/chat", "/api/followups/{item_id}/close", "/api/jobs/{name}/run", "/api/memory/forget",
+        "/api/proposals/{proposal_id}/{decision}", "/api/reminders/{reminder_id}/cancel", "/api/trust/revoke",
+        "/app/login", "/app/logout", "/capture", "/jobs/{name}/run", "/sync",
+    ])
 
 
 asyncio.run(main())

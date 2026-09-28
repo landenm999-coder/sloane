@@ -56,6 +56,13 @@ HARD_LINES: frozenset[tuple[str, str]] = frozenset(
 )
 
 
+# The channels a turn of chat is stored under: what CONVERSATION already shows.
+# Telegram answers are stored as "text" or "voice" (the kind he sent), so a
+# check for "telegram" alone never matched one, and every recent exchange came
+# back a second time as RECALL, crowding out older memories.
+CHAT_CHANNELS = frozenset({"telegram", "text", "voice", "dashboard"})
+
+
 def _stamp(moment: datetime) -> str:
     """'Tuesday September 22, 2026, 8:04 PM' -- unambiguous, and portable."""
     hour = moment.hour % 12 or 12
@@ -246,7 +253,7 @@ class Agent:
             episodes = [
                 e for e in episodes
                 if not (
-                    e.get("channel", "telegram") == "telegram"
+                    e.get("channel", "telegram") in CHAT_CHANNELS
                     and e.get("occurred_at")
                     and e["occurred_at"] >= start
                 )

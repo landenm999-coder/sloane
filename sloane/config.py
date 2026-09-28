@@ -156,6 +156,13 @@ class Settings(BaseSettings):
     # Scoped to the token-checked endpoints only; see sloane/cors.py.
     cors_origins: str = ""
 
+    # --- the control room: /app (sloane/web.py) ----------------------------------
+    # A password for the dashboard where he sees everything, runs things and
+    # talks to her. Unset, or shorter than 32 characters, and /app is off.
+    # Reach it the way Capture does: tailscale serve (DEPLOY section 7e).
+    #   python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+    dashboard_token: str = ""
+
     # --- telegram ------------------------------------------------------------
     telegram_bot_token: str = ""
     telegram_chat_id: int = 0

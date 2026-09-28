@@ -294,7 +294,30 @@ checks a password, and it stays off until you set one.
      -d '{"check": true}'          # {"ok": true}: connected, nothing stored
    ```
 
-## 7e. Optional: the TV dashboard (2 minutes)
+## 7e. The control room: talk to her and run everything from a browser (2 minutes)
+
+`/app` is a private page where you talk to her (the same conversation as
+Telegram: commands, reminders and actions all work) and see and steer
+everything she runs:
+
+- **Today:** your day on a rail, what needs you, what's due, reminders, grades.
+- **Memory:** what she knows about you, loose ends, her diary. Forget anything.
+- **Engine:** jobs you can run now, what she may do without asking, model use.
+
+The installer makes its password, `DASHBOARD_TOKEN`, for you. Read it on the
+box with:
+
+```bash
+grep DASHBOARD_TOKEN /opt/sloane/.env
+```
+
+With `tailscale serve` from 7d running, open `https://<box>.<tailnet>.ts.net/app`
+on your phone or laptop and paste it. You stay signed in for 30 days. On a
+phone, use **Add to Home Screen** and it opens like an app. It is reachable only
+from your own tailnet devices, and even there it needs the password. Changing
+`DASHBOARD_TOKEN` (and restarting) signs every device out.
+
+## 7f. Optional: the TV dashboard (2 minutes)
 
 With `tailscale serve` from 7d running, open `https://<box>.<tailnet>.ts.net/tv`
 on any device signed in to your tailnet: an old tablet on the wall, a laptop, a
@@ -304,7 +327,7 @@ skill, and refreshes itself every minute. It never loads anything from the
 internet and needs no token (it is as private as `/facts`: your tailnet only).
 Put it in full screen and leave it.
 
-## 7f. Skill settings (optional)
+## 7g. Skill settings (optional)
 
 The skills need nothing to start. Three settings in `.env` make them better:
 

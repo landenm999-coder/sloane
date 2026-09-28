@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#14161f">
+<title>Sloane · Sign in</title>
+<link rel="icon" href="/app/static/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/app/static/app.css">
+</head>
+<body class="login">
+<main class="door">
+  <div class="mark big" aria-hidden="true">S</div>
+  <h1>Sloane</h1>
+  <p class="hint">Private. Enter your dashboard password (DASHBOARD_TOKEN in her .env).</p>
+  <!--MESSAGE-->
+  <form method="post" action="/app/login">
+    <label for="token">Password</label>
+    <input id="token" name="token" type="password" autocomplete="current-password" required autofocus>
+    <button type="submit" class="send">Sign in</button>
+  </form>
+</main>
+</body>
+</html>

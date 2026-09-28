@@ -325,6 +325,35 @@ class _Live:
             chat_id=self.chat_id, direction="out", kind="text", body=text[:4000], trusted=not reply.tainted))
         return True
 
+class Outlet:
+    """Where one exchange's replies go: his Telegram chat, or the dashboard.
+
+    `live()` is the reply in progress ("typing…", then the text as she writes
+    it); `send()` is a finished one. Everything else about answering him --
+    the rules, commands, skills, actions, the model -- is the same either way
+    (Bot.respond), so she is one person on both.
+    """
+
+    async def send(self, reply: Reply, *, as_voice: bool = False) -> None:
+        raise NotImplementedError
+
+    def live(self):  # noqa: ANN201 - start_typing / stop_typing / update / finish, like _Live
+        raise NotImplementedError
+
+
+class TelegramOutlet(Outlet):
+    def __init__(self, bot: "Bot", chat_id: int) -> None:
+        self.bot = bot
+        self.chat_id = chat_id
+
+    async def send(self, reply: Reply, *, as_voice: bool = False) -> None:
+        # Bot.reply is Bot.send unless it's a voice note: one path either way.
+        await self.bot.reply(self.chat_id, reply, as_voice=as_voice)
+
+    def live(self) -> _Live:
+        return _Live(self.bot, self.chat_id)
+
+
 # Telegram holds the connection open for poll_timeout seconds; the HTTP read
 # timeout has to outlast that or every idle poll looks like a failure.
 TIMEOUT_MARGIN = 15
@@ -1159,29 +1188,39 @@ class Bot:
             return
         if not body or hold:
             return
+        await self.respond(chat_id, body, TelegramOutlet(self, chat_id), voice=bool(voice))
 
+    async def respond(self, chat_id: int, body: str, out: Outlet, *, voice: bool = False,
+                      channel: str = "") -> None:
+        """Answer one message of his, already logged: on Telegram or the dashboard.
+
+        `voice`: he spoke it, so the answer is read back (on Telegram). The
+        order is the same wherever he says it: an edit in progress, reminders
+        and timers by rule, commands, skills, then her.
+        """
+        kind = channel or ("voice" if voice else "text")
         # While a proposal is being edited, his next plain message is the
         # replacement, not a question. /cancel keeps the original.
         if self.agency is not None and body and not body.startswith("/"):
             revised = await self.agency.submit_edit(body)
             if revised is not None:
-                await self.send(chat_id, Reply(speech=revised.message, detail=""))
+                await out.send(Reply(speech=revised.message, detail=""))
                 return
 
         # "Remind me at 5 to call Keegan" -- typed or spoken -- is handled by
         # rules, not the model, so it works when every provider is down.
         asked = REMIND_ME.match(body)
         if asked:
-            await self.send(chat_id, await self._remind(asked.group(1)))
+            await out.send(await self._remind(asked.group(1)))
             return
         timer = parse_timer(body, self._now())
         if timer is not None:
-            await self.send(chat_id, await self._timer(timer))
+            await out.send(await self._timer(timer))
             return
 
         # Most commands and skill rules answer at once; a few think (a role-play's
         # judge, /cards make), and those show "typing…" while they do.
-        thinking = _Live(self, chat_id)
+        thinking = out.live()
         if body.startswith("/"):
             await thinking.start_typing(after=SLOW_SKILL_SECONDS)
             try:
@@ -1189,7 +1228,7 @@ class Bot:
             finally:
                 thinking.stop_typing()
             if reply is not None:
-                await self.send(chat_id, reply)
+                await out.send(reply)
                 return
         elif self.skills is not None:
             # An open session (a quiz) first, then each skill's own rules
@@ -1200,12 +1239,12 @@ class Bot:
             finally:
                 thinking.stop_typing()
             if answer is not None:
-                await self.reply(chat_id, _reply(answer), as_voice=bool(voice))
+                await out.send(_reply(answer), as_voice=voice)
                 return
 
         # Typing at once, then the reply as she writes it. A voice note waits
         # for the whole answer (it is read aloud), so it only gets the typing.
-        live = _Live(self, chat_id)
+        live = out.live()
         await live.start_typing()
         # A follow-up to something he forwarded sees it, as INGESTED (and so
         # can't act: the agent turns that off with outside text in the prompt).
@@ -1219,7 +1258,7 @@ class Bot:
             reply = await self._act(reply, chat_id, body)
         if not voice and await live.finish(reply):
             return
-        await self.reply(chat_id, reply, as_voice=bool(voice))
+        await out.send(reply, as_voice=voice)
 
     async def poll_forever(self) -> None:
         """Long-poll until stopped. Network trouble backs off, it does not exit."""

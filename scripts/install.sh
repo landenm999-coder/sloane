@@ -144,6 +144,11 @@ main() {
     # longer memory window): changed only where .env still holds the old one.
     python3 scripts/env_migrate.py .env
   fi
+  # The control room's password (DEPLOY 7e): made once, never shown here.
+  if ! grep -Eq '^DASHBOARD_TOKEN=.{32,}' .env; then
+    set_env .env DASHBOARD_TOKEN "$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+    echo "Made a password for the control room (/app). Read it with: grep DASHBOARD_TOKEN $DIR/.env"
+  fi
 
   # -- 4. Image and migrations --------------------------------------------------------
   say "Building the image (first time: a few minutes)"

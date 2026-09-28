@@ -2227,6 +2227,13 @@ class Store:
                                       embedding=embedding, occurred_at=occurred_at, trusted=True,
                                       source=f"diary {day.isoformat()}")
 
+    async def recent_diary(self, limit: int = 7) -> list[Row]:
+        """Her diary of the last few days (the learn job writes one a night)."""
+        return await self._fetch(
+            "select occurred_at, content from episodes where channel = 'diary' order by occurred_at desc limit %s",
+            (limit,),
+        )
+
     async def open_follow_ups(self) -> list[Row]:
         return await self._fetch(
             """

@@ -83,6 +83,22 @@ case(
     "The second one is the longer of the two.",
 )
 
+# A plan in prose: the lead sentence is speech, the rest is detail, said once.
+# (It used to flatten the whole list into "speech" and repeat it all as detail.)
+plan = parse("The lab report first, it's due at 11:59.\n\n**Tonight, in order:**\n1. Lab report\n2. Problem set 4")
+check("prose with a lead: the lead is speech", plan.speech, "The lab report first, it's due at 11:59.")
+check("and the rest is the detail, without the lead again", plan.detail,
+      "**Tonight, in order:**\n1. Lab report\n2. Problem set 4")
+long_lead = parse("One. Two. Three.\n\nMore here.")
+check("a lead too long to say whole keeps everything in detail",
+      (long_lead.speech, long_lead.detail), ("One. Two.", "One. Two. Three.\n\nMore here."))
+
+from sloane.contract import partial_reply  # noqa: E402
+
+check("streamed prose is shown as it comes", partial_reply("The lab report fir"), ("The lab report fir", ""))
+check("streamed JSON still shows its speech", partial_reply('{"speech": "The lab', ), ("The lab", ""))
+check("nothing yet is nothing", partial_reply("  "), ("", ""))
+
 # --- the speech invariant ----------------------------------------------------
 check(
     "speech caps at two sentences",

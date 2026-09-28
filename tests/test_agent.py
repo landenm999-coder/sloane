@@ -155,6 +155,13 @@ class ChatStore(EmptyStore):
              "trusted": True, "source": "capture", "text": "key time at 9 am", "rrf": 1.0, "score": 1.0},
             {"id": 2, "occurred_at": now - timedelta(minutes=9), "role": "user", "channel": "telegram",
              "trusted": True, "source": None, "text": "zzchatzz echo", "rrf": 0.9, "score": 0.9},
+            # What the bot really stores: the kind he sent, not "telegram".
+            {"id": 3, "occurred_at": now - timedelta(minutes=9), "role": "user", "channel": "text",
+             "trusted": True, "source": None, "text": "zztypedzz echo", "rrf": 0.9, "score": 0.9},
+            {"id": 4, "occurred_at": now - timedelta(minutes=8), "role": "user", "channel": "voice",
+             "trusted": True, "source": None, "text": "zzspokenzz echo", "rrf": 0.9, "score": 0.9},
+            {"id": 5, "occurred_at": now - timedelta(minutes=7), "role": "user", "channel": "dashboard",
+             "trusted": True, "source": None, "text": "zzwebzz echo", "rrf": 0.9, "score": 0.9},
         ]
 
 
@@ -165,6 +172,8 @@ agent = Agent(ChatStore(), config, router=Router(config, factory=lambda n, c, b:
 asyncio.run(agent.answer("what did I just capture?"))
 check("a capture from inside the chat window stays in RECALL", "key time at 9 am" in recorder.prompts[0], True)
 check("a chat episode CONVERSATION already shows is still dropped", "zzchatzz" in recorder.prompts[0], False)
+check("under the channels the bot really stores (text, voice, dashboard) too",
+      [w in recorder.prompts[0] for w in ("zztypedzz", "zzspokenzz", "zzwebzz")], [False, False, False])
 
 if FAILURES:
     print(f"FAIL ({len(FAILURES)})")

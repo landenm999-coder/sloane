@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#14161f">
+<title>Sloane</title>
+<link rel="icon" href="/app/static/icon.svg" type="image/svg+xml">
+<link rel="manifest" href="/app/static/manifest.json">
+<link rel="stylesheet" href="/app/static/app.css">
+<script src="/app/static/app.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#composer-input">Skip to the message box</a>
+
+<header class="top">
+  <div class="mark" aria-hidden="true">S</div>
+  <div class="who">
+    <span class="name">Sloane</span>
+    <span class="date" id="date"></span>
+  </div>
+  <span class="clock" id="clock" aria-label="Time now"></span>
+  <span class="pulse" id="pulse" role="status" aria-live="polite">Connecting…</span>
+  <button type="button" class="quiet" id="signout">Sign out</button>
+</header>
+
+<nav class="tabs" aria-label="Sections">
+  <button type="button" class="tab talk-tab" data-view="talk" aria-current="page">Talk</button>
+  <button type="button" class="tab" data-view="today">Today</button>
+  <button type="button" class="tab" data-view="memory">Memory</button>
+  <button type="button" class="tab" data-view="engine">Engine</button>
+</nav>
+
+<main class="room">
+  <section class="pane talk" id="talk" aria-label="Talk to Sloane">
+    <ol class="thread" id="thread" aria-live="polite" aria-relevant="additions"></ol>
+    <div class="starters" id="starters" aria-label="Things to ask">
+      <button type="button" class="chip">What's due tomorrow?</button>
+      <button type="button" class="chip">Help me plan tonight</button>
+      <button type="button" class="chip">/today</button>
+      <button type="button" class="chip">/reminders</button>
+      <button type="button" class="chip">What do you remember about me?</button>
+    </div>
+    <form class="composer" id="composer">
+      <label for="composer-input" class="sr">Message Sloane</label>
+      <textarea id="composer-input" rows="1" maxlength="4000"
+        placeholder="Talk to her, or type a command" autocomplete="off"></textarea>
+      <button type="submit" class="send" id="send">Send</button>
+    </form>
+  </section>
+
+  <section class="pane view" id="today" aria-label="Today" hidden>
+    <div class="rail-card">
+      <div class="rail-head">
+        <h2>Today</h2>
+        <span class="legend" aria-hidden="true">
+          <span class="k shift">work</span><span class="k event">event</span><span class="k due">due</span><span class="k reminder">reminder</span>
+        </span>
+      </div>
+      <div class="rail" id="rail" aria-hidden="true"></div>
+      <ul class="lines" id="schedule-today"></ul>
+    </div>
+    <div class="grid">
+      <article class="card attention" id="needs">
+        <h2>Needs you</h2>
+        <ul class="lines" id="needs-list"></ul>
+      </article>
+      <article class="card"><h2>Tomorrow</h2><ul class="lines" id="schedule-tomorrow"></ul></article>
+      <article class="card"><h2>Due soon</h2><ul class="lines" id="due"></ul></article>
+      <article class="card"><h2>Overdue</h2><ul class="lines" id="overdue"></ul></article>
+      <article class="card"><h2>Reminders</h2><ul class="lines" id="reminders"></ul></article>
+      <article class="card"><h2>Grades</h2><ul class="lines" id="grades"></ul></article>
+      <article class="card"><h2>Promises</h2><ul class="lines" id="promises"></ul></article>
+      <div class="panels" id="panels"></div>
+    </div>
+  </section>
+
+  <section class="pane view" id="memory" aria-label="Memory" hidden>
+    <div class="grid">
+      <article class="card wide">
+        <h2>What she knows about you</h2>
+        <p class="hint">Learned from what you say, and whatever you tell her to remember. Forget anything that's wrong.</p>
+        <ul class="lines" id="learned"></ul>
+      </article>
+      <article class="card">
+        <h2>Loose ends</h2>
+        <p class="hint">Things you said you'd do. She asks how they went.</p>
+        <ul class="lines" id="loose"></ul>
+      </article>
+      <article class="card diary-card">
+        <h2>Her diary</h2>
+        <p class="hint">One entry a night, so last month is still findable.</p>
+        <ol class="diary" id="diary"></ol>
+      </article>
+    </div>
+  </section>
+
+  <section class="pane view" id="engine" aria-label="Engine" hidden>
+    <div class="grid">
+      <article class="card wide">
+        <div class="card-head">
+          <h2>How she's running</h2>
+          <button type="button" class="act" id="sync-now">Sync Canvas and calendar now</button>
+        </div>
+        <dl class="facts" id="system"></dl>
+      </article>
+      <article class="card wide">
+        <h2>Jobs</h2>
+        <div class="table-wrap"><table class="table" id="jobs">
+          <thead><tr><th scope="col">Job</th><th scope="col">Last run</th><th scope="col">Next</th><th scope="col"><span class="sr">Run</span></th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+      </article>
+      <article class="card">
+        <h2>What she may do without asking</h2>
+        <ul class="lines" id="trust"></ul>
+      </article>
+      <article class="card">
+        <h2>Model calls, last 24 hours</h2>
+        <ul class="lines" id="usage"></ul>
+      </article>
+    </div>
+  </section>
+</main>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

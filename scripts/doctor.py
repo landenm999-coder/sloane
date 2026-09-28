@@ -473,6 +473,15 @@ def check_extras(config: Settings) -> None:
         else:
             record("capture: cors", PASS, f"/capture answers {config.cors_origins.strip()}")
 
+    from sloane import web
+
+    if not config.dashboard_token:
+        record("control room", SKIP, "DASHBOARD_TOKEN unset, so /app is off (DEPLOY §7e; the installer makes one)")
+    elif not web.enabled(config):
+        record("control room", FAIL, f"DASHBOARD_TOKEN is under {web.MIN_TOKEN} characters, so /app stays off")
+    else:
+        record("control room", PASS, "/app is on (open it over Tailscale: https://<box>.<tailnet>.ts.net/app)")
+
     folder = config.backup_dir or (str(Path(config.embed_cache_dir) / "backups")
                                    if config.embed_cache_dir else "")
     if not folder:
