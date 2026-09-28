@@ -6,9 +6,9 @@ Always-on personal assistant for Landen. Reached by Telegram text and voice
 notes. She runs the day: what's due, what shift, what slipped, what's next.
 
 **v1 is built: P0 (the spine), P1 (memory + school), P2 (rhythm), P3 (voice)
-and P4 (agency, including Gmail).** On top of it sit fourteen **skills** (lists,
+and P4 (agency, including Gmail).** On top of it sit fifteen **skills** (lists,
 countdowns, weather, flashcards, habits, clients, a study plan, focus,
-birthdays, money, memory, college applications, DECA role-play practice, the workshop), a **heartbeat** that lets them speak up once when it
+birthdays, money, memory, college applications, DECA role-play practice, a coin flip, the workshop), a **heartbeat** that lets them speak up once when it
 matters, and a **TV dashboard**. And she is built to feel like a **partner**
 rather than a help desk: she follows the conversation, has a character, answers
 fast (streamed), does what he asks, looks things up, and remembers what he tells
@@ -58,7 +58,7 @@ Total running cost: **$0/mo**, every layer on a free tier.
 | Voice briefs | `VOICE_BRIEFS=morning_brief` sends that brief as a voice note (text if voice fails) |
 | Status | `/status`: open problems, last sync, provider health, last brief, Gmail — from her own bookkeeping, no model |
 | Gmail | triage every 3h in one batched call; replies drafted in his voice, sent only on Approve |
-| Skills | fourteen plug-in skills (below): lists, countdowns, weather, flashcards + quizzes, habits, clients, a study plan, focus, birthdays, money, memory, college applications, DECA role-plays, and the workshop's Telegram side. Each adds its own commands, plain-English rules, FACTS lines, a TV card and nudges, without touching the core |
+| Skills | fifteen plug-in skills (below): lists, countdowns, weather, flashcards + quizzes, habits, clients, a study plan, focus, birthdays, money, memory, college applications, DECA role-plays, a coin flip, and the workshop's Telegram side. Each adds its own commands, plain-English rules, FACTS lines, a TV card and nudges, without touching the core |
 | Heartbeat | every quarter hour, 7 AM–10 PM, no model: what the skills think is worth saying now (rain before your shift, a streak about to break, a follow-up due), each said once |
 | Control room | `/app`: a private page (phone or laptop, over Tailscale, with its own password) where he talks to her — the same conversation as Telegram, streamed, commands and actions included, typed or spoken into the microphone (transcribed like a Telegram voice note), and read aloud if he likes — and sees and steers everything. **Today** opens with her line on the day ("Work at 3 PM, until 7 PM. The lab report is due at 11:59 PM.", by rule from the same rows, never a model), what's next with a countdown, the day on a rail and as an agenda (past, now, next, clashes), one **Needs you** list (approvals, what's broken, failed jobs, overdue work, workshop builds ready), due work, reminders (cancel), grades. **Memory**: what she knows (filter, forget), loose ends, her diary. **Workshop**: the pipeline. **Engine**: status, jobs (run now), trust (take back), model use. Add it to the home screen and it opens like an app, with its own icon |
 | Workshop | she builds features on herself, with his say at every step. He writes down what he wants (the control room's Workshop tab, `/idea`, or in words); she plans it; he says build; Claude Code builds it in a clone of her repo on its own branch (file tools scoped to the clone, no secrets in its environment), a guard in code refuses anything touching her safety rules (`deploy/protected.txt`, the hard lines, the owner checks) or carrying a credential, the tests and GitHub CI must pass; then it waits in **Ready for you**. **Accept** merges it and the box upgrades itself (`scripts/upgrade.sh`: health check, automatic rollback); **Undo** reverts it; **Deny** (with why) teaches her. At 1:10 AM she builds what he queued and one idea of her own, on Sonnet (`WORKSHOP_MODEL`), so there's a pipeline in the morning. Needs a GitHub token (DEPLOY 7h) |
@@ -103,6 +103,7 @@ with `SKILLS_DISABLED`.
 | Memory | `/memory`, `/forget 2`, `/followup call the dentist friday`, `/followup done dentist` | what she's learned about you and the loose ends, where you can see and correct them |
 | Money | "spent 12 on lunch", `/spent`, `/budget 100` | spending by category against a weekly budget; with `PAY_RATE`, an estimate of what this week's shifts earned. Tracking only |
 | Colleges | `/college add CU Boulder EA nov 1`, `/colleges`, `/college boulder done essays`, `/college boulder submitted`, "what's left for Boulder?", "just finished my Boulder essays", "sent my Boulder app", "got into Boulder", "Boulder deferred me" | each application's plan, deadline and checklist (application, essays, recs, transcript, scores, fee, plus your own items); heads-up 14, 7, 3 and 1 days out (evenings) and the morning of; one nudge if a deadline passes unsubmitted. Those plain phrases are rules, so they're recorded every time and only when they name one of your schools. Looser wording goes to her, and she runs the command. Tracking only: she never submits anything |
+| Coin | `/coin`, "flip a coin", "heads or tails?" | Heads or Tails, from `secrets`. The whole message has to be the request, so nothing else is caught. Stores nothing |
 | DECA | `/roleplay`, `/roleplay finance`, `/roleplays`, "let's do a marketing roleplay" | a practice role-play with her as the judge: a fresh scenario and five performance indicators, the judge in character while you present (typed or by voice), two follow-up questions, then a score on the DECA form (indicators 0–14, 21st Century Skills 0–6, overall 0–6; totalled in code). Your recent scores and what to work on are in FACTS; before a DECA countdown she suggests one if you haven't practised in three days |
 
 Everything a skill puts in FACTS is a row from SQL or a number from an API,
@@ -565,7 +566,7 @@ sloane/
   skills/
     __init__.py  the contract and the registry
     lists.py countdowns.py weather.py cards.py habits.py clients.py
-    plan.py focus.py birthdays.py money.py memory.py colleges.py deca.py
+    plan.py focus.py birthdays.py money.py memory.py colleges.py deca.py coin.py
   memory/
     store.py     THE ONLY FILE THAT TALKS SQL
     embed.py     fastembed, 384-dim, local

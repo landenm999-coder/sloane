@@ -28,6 +28,7 @@ UNIT = [
     "test_cors.py",
     "test_dates.py",
     "test_weather.py",
+    "test_coin.py",
     "test_dashboard.py",  # its integration half runs when DATABASE_URL is set
     "test_conversation.py",  # likewise
     "test_claude_stream.py",
