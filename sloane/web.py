@@ -4,8 +4,11 @@
              Commands, skill phrases, reminders, actions: all of it works here,
              through the same `Bot.respond`, and the exchange lands in the same
              log, so CONVERSATION, recall and the nightly learner see it too.
-    Today    the day on a rail, what needs him (alerts, approvals), what's due,
-             reminders, grades, and every skill's panel.
+             Typed, or spoken into the microphone (transcribed like a Telegram
+             voice note); the page can read her replies aloud in the browser.
+    Today    her line on the day, the day on a rail and as an agenda, what
+             needs him (approvals, alerts, failed jobs, overdue work, workshop
+             builds), what's due, reminders, grades, and every skill's panel.
     Memory   what she's learned about him (forget any), loose ends (close
              them), and her diary of the last week.
     Engine   jobs (run one now), trust (take one back), the models and what
@@ -63,7 +66,13 @@ PARTIAL_EVERY = 0.12
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 _JOB = re.compile(r"^[a-z_]{1,40}$")
 ASSETS = {"app.js": "text/javascript", "app.css": "text/css", "icon.svg": "image/svg+xml",
-          "manifest.json": "application/manifest+json"}
+          "manifest.json": "application/manifest+json", "icon-180.png": "image/png", "icon-192.png": "image/png",
+          "icon-512.png": "image/png"}
+# What a browser's recorder makes (Chrome and Firefox: WebM or Ogg; Safari: MP4),
+# as the extension the transcriber reads the format from.
+AUDIO = {"audio/webm": "webm", "audio/ogg": "ogg", "audio/mp4": "m4a", "audio/x-m4a": "m4a", "audio/aac": "m4a",
+         "audio/mpeg": "mp3", "audio/wav": "wav"}
+MAX_AUDIO = 8 * 1024 * 1024
 
 HEADERS = {
     "Content-Security-Policy": (
@@ -266,6 +275,26 @@ def rail(data: dict, zone: ZoneInfo, today: date) -> list[dict]:
     return sorted(items, key=lambda i: i["start"])
 
 
+def agenda(data: dict, tz: str, day: date) -> dict:
+    """One day for the page's agenda: /today's rows as data, with that day's reminders."""
+    from sloane import views
+
+    zone = ZoneInfo(tz)
+    items, clashes = views.day_items(day, assignments=data.get("assignments") or [], shifts=data.get("shifts") or [],
+                                     events=data.get("events") or [], tz=tz)
+    for r in data.get("reminders") or []:
+        moment = r.get("due_at")
+        if isinstance(moment, datetime) and moment.astimezone(zone).date() == day:
+            minute = _minutes(moment, zone)
+            items.append({"kind": "reminder", "title": str(r.get("text") or ""), "sub": "", "time": _clock(moment, zone),
+                          "start": minute, "end": minute, "all_day": False})
+    items.sort(key=lambda i: (not i["all_day"], i["start"], i["kind"] != "shift"))
+    for item in items:
+        item["title"] = item["title"][:160]
+        item["sub"] = item["sub"][:80]
+    return {"items": items, "clashes": clashes}
+
+
 async def overview(store, config, state: dict, now: datetime) -> dict:  # noqa: ANN001
     """Everything the page shows, in one read. A failed part is named, not fatal."""
     from sloane import dashboard, views
@@ -301,14 +330,19 @@ async def overview(store, config, state: dict, now: datetime) -> dict:  # noqa: 
     due = []
     for a in data.get("assignments") or []:
         due.append({"title": a.get("title"), "course": a.get("course"),
-                    "when": _when(a.get("due_at"), zone, today)})
+                    "when": _when(a.get("due_at"), zone, today), "at": a.get("due_at")})
     return {
         "now": {"clock": _clock(now, zone), "date": f"{now:%A, %B} {now.day}", "minutes": _minutes(now, zone),
                 "tz": config.timezone},
         "name": config.address_as or "Landen",
         "unreadable": data["unreadable"],
         "alerts": [{"message": a.get("message")} for a in data.get("alerts") or []],
+        # The top bar's light: anything broken, and any job whose last run failed. A failed job
+        # isn't an alert until the watchdog's hour of grace, but the page shouldn't say "all normal".
+        "health": {"broken": len(data.get("alerts") or []) + len(data["unreadable"]),
+                   "failed_jobs": [j["name"] for j in extra["jobs"] if j.get("last_status") == "failed"]},
         "rail": rail(data, zone, today),
+        "agenda": {"today": agenda(data, config.timezone, today), "tomorrow": agenda(data, config.timezone, tomorrow)},
         "schedule": {
             "today": [line.removeprefix("• ") for line in views.day_lines(
                 today, assignments=data["assignments"], shifts=data["shifts"], events=data["events"],
@@ -323,6 +357,7 @@ async def overview(store, config, state: dict, now: datetime) -> dict:  # noqa: 
         "grades": [{"course": c.get("name"), "score": c.get("current_score"), "grade": c.get("current_grade")}
                    for c in data.get("courses") or [] if c.get("current_score") is not None],
         "reminders": [{"id": str(r["id"]), "text": r.get("text"), "when": _when(r.get("due_at"), zone, today),
+                       "at": r.get("due_at"),
                        "repeats": repeat_spoken(r["repeat"], r["due_at"].astimezone(zone)) if r.get("repeat") else ""}
                       for r in data.get("reminders") or []],
         "promises": [{"what": c.get("what"), "to": c.get("person"), "when": _when(c.get("due_at"), zone, today)}
@@ -354,6 +389,12 @@ async def overview(store, config, state: dict, now: datetime) -> dict:  # noqa: 
             "quiet": f"{config.quiet_start_hour}:00–{config.quiet_end_hour}:{config.quiet_end_minute:02d}",
             "web_lookup": config.web_lookup,
             "skills": skills.names if skills is not None else [],
+        },
+        "talk": {
+            # The microphone shows only when a voice note can become words.
+            "hears": bool(getattr(state.get("responder"), "hears", False)),
+            # Read aloud in the browser's own voice: British when she is.
+            "lang": "en-GB" if "en_GB" in (config.piper_voice or "") else "en-US",
         },
     }
 
@@ -460,7 +501,7 @@ def install(app: FastAPI, state: dict, store, config) -> None:  # noqa: ANN001, 
         today = datetime.now(zone).date()
         return JSONResponse([{"from": "him" if r["direction"] == "in" else "her",
                               "text": r.get("body") or "", "when": _when(r.get("at"), zone, today),
-                              "forwarded": r.get("kind") == "forward",
+                              "forwarded": r.get("kind") == "forward", "voice": r.get("kind") == "voice",
                               "outside": r.get("direction") == "out" and r.get("trusted") is False}
                              for r in rows], headers={"Cache-Control": "no-store"})
 
@@ -482,7 +523,48 @@ def install(app: FastAPI, state: dict, store, config) -> None:  # noqa: ANN001, 
             return JSONResponse({"error": "she isn't ready yet"}, status_code=503)
         # Logged first, like a Telegram message: it's his words, in the one conversation.
         await store.log_message(chat_id=owner(), direction="in", kind="text", body=text)
+        return converse(bot, text)
+
+    @app.post("/api/voice")
+    async def api_voice(request: Request) -> Response:
+        """A voice note from the page's microphone: words by the Telegram voice path's
+        transcriber, then the same conversation as a typed message. The audio is
+        never stored or logged; the transcript is, like a Telegram voice note's."""
+        stop = refuse(request, change=True)
+        if stop is not None:
+            return stop
+        bot = state.get("responder")
+        if bot is None:
+            return JSONResponse({"error": "she isn't ready yet"}, status_code=503)
+        if not getattr(bot, "hears", False):
+            return JSONResponse({"error": "voice needs GROQ_API_KEY, or a local Whisper (LOCAL_MODELS.md)"},
+                                status_code=400)
+        kind = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
+        if kind not in AUDIO:
+            return JSONResponse({"error": "that isn't audio I can read"}, status_code=415)
+        audio = bytearray()
+        async for chunk in request.stream():
+            audio += chunk
+            if len(audio) > MAX_AUDIO:
+                return JSONResponse({"error": "keep voice notes under two minutes"}, status_code=413)
+        if not audio:
+            return JSONResponse({"error": "nothing was recorded"}, status_code=400)
+        try:
+            text = (await bot.transcribe(bytes(audio), f"note.{AUDIO[kind]}")).strip()
+        except Exception as exc:  # noqa: BLE001 - a failed transcription is said, never a hung spinner
+            log.warning("dashboard voice note not transcribed: %s", exc)
+            return JSONResponse({"error": "I couldn't make that out. Try again, or type it."}, status_code=502)
+        if not text:
+            return JSONResponse({"error": "That came back empty. Try again, a little closer?"}, status_code=422)
+        text = text[:MAX_MESSAGE]
+        await store.log_message(chat_id=owner(), direction="in", kind="voice", body=text)
+        return converse(bot, text, heard=True)
+
+    def converse(bot, text: str, *, heard: bool = False) -> StreamingResponse:  # noqa: ANN001
+        """Her answer to one message of his (already logged), streamed to the page as NDJSON."""
         outlet = WebOutlet(store, owner())
+        if heard:
+            outlet.emit({"t": "heard", "text": text})
 
         async def run() -> None:
             try:

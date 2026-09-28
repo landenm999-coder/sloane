@@ -181,6 +181,8 @@ what she remembers about you, her jobs.
 
 3. On your phone or laptop, open `https://….ts.net/app` (the address from step 6), paste it,
    and sign in. On a phone: **Share → Add to Home Screen**, and it opens like an app.
+4. Tap the microphone next to the message box to talk to her out loud (allow the microphone
+   when the phone asks), and **Read aloud** if you want her replies spoken back.
 
 ---
 

@@ -386,6 +386,15 @@ class Bot:
         self._stop = asyncio.Event()
         self._timers: set[asyncio.Task] = set()
 
+    @property
+    def hears(self) -> bool:
+        """Whether a voice note can become words: a local Whisper, or Groq's with its key."""
+        return isinstance(self._stt, LocalProvider) or bool(self._config.groq_api_key)
+
+    async def transcribe(self, audio: bytes, filename: str = "note.ogg") -> str:
+        """His voice note as text, by the transcriber Telegram's voice notes use."""
+        return await self._stt.transcribe(audio, filename)
+
     # -- transport -------------------------------------------------------------
 
     def _url(self, method: str) -> str:

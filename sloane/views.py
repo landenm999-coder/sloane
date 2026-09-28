@@ -49,6 +49,65 @@ def _covers(event: Row, day: date, zone: ZoneInfo) -> bool:
     return start <= day <= last
 
 
+def _on_day(day: date, *, assignments: Sequence[Row], shifts: Sequence[Row], events: Sequence[Row],
+            zone: ZoneInfo) -> tuple[list[Row], list[Row], list[Row]]:
+    """(shifts, events, due work) on one day: what /today and the control room both show."""
+    day_shifts = [s for s in shifts if _local_day(s.get("starts_at"), zone) == day
+                  and not s.get("cancelled")]
+    day_events = [e for e in events if _covers(e, day, zone)]
+    day_due = [a for a in assignments if _local_day(a.get("due_at"), zone) == day]
+    return day_shifts, day_events, day_due
+
+
+def day_items(
+    day: date,
+    *,
+    assignments: Sequence[Row],
+    shifts: Sequence[Row],
+    events: Sequence[Row],
+    tz: str,
+) -> tuple[list[Row], list[Row]]:
+    """One day as data, for a page to lay out: (items in time order, conflicts).
+
+    Each item: kind (shift, event, due), title, sub (course or place), time
+    (as /today says it), start and end in minutes after that day's midnight
+    (an event that began yesterday starts at 0; one running past midnight
+    ends at 1440), all_day. The same rows and the same conflicts as day_lines.
+    """
+    zone = ZoneInfo(tz)
+    day_shifts, day_events, day_due = _on_day(day, assignments=assignments, shifts=shifts, events=events, zone=zone)
+    midnight = datetime.combine(day, datetime.min.time(), tzinfo=zone)
+
+    def minutes(moment: Any, default: int) -> int:
+        if not isinstance(moment, datetime):
+            return default
+        return max(0, min(1440, int((moment.astimezone(zone) - midnight).total_seconds() // 60)))
+
+    items: list[Row] = []
+    for s in day_shifts:
+        start = minutes(s["starts_at"], 0)
+        items.append({"kind": "shift", "title": "Work", "sub": "", "time": _span(s["starts_at"], s.get("ends_at"), zone),
+                      "start": start, "end": minutes(s.get("ends_at"), start), "all_day": False})
+    for e in day_events:
+        whole = bool(e.get("all_day"))
+        start = 0 if whole else minutes(e["starts_at"], 0)
+        items.append({"kind": "event", "title": str(e.get("title") or "Event"), "sub": str(e.get("location") or ""),
+                      "time": "all day" if whole else _span(e["starts_at"], e.get("ends_at"), zone),
+                      "start": start, "end": 1440 if whole else max(minutes(e.get("ends_at"), start + 30), start),
+                      "all_day": whole})
+    for a in day_due:
+        whole = bool(a.get("all_day"))
+        start = minutes(a["due_at"], 0)
+        items.append({"kind": "due", "title": str(a.get("title") or "Due"), "sub": str(a.get("course") or ""),
+                      "time": "today" if whole else _clock(a["due_at"], zone), "start": start, "end": start,
+                      "all_day": whole})
+    items.sort(key=lambda i: (not i["all_day"], i["start"], i["kind"] != "shift"))
+    clashes = [{"hard": c.severity == HARD, "what": c.what, "against": c.against}
+               for c in find(assignments=day_due, shifts=day_shifts,
+                             events=[e for e in day_events if not e.get("all_day")])]
+    return items, clashes
+
+
 def day_lines(
     day: date,
     *,
@@ -61,11 +120,7 @@ def day_lines(
     zone = ZoneInfo(tz)
     items: list[tuple[datetime, str]] = []
     midnight = datetime.combine(day, datetime.min.time(), tzinfo=zone)
-
-    day_shifts = [s for s in shifts if _local_day(s.get("starts_at"), zone) == day
-                  and not s.get("cancelled")]
-    day_events = [e for e in events if _covers(e, day, zone)]
-    day_due = [a for a in assignments if _local_day(a.get("due_at"), zone) == day]
+    day_shifts, day_events, day_due = _on_day(day, assignments=assignments, shifts=shifts, events=events, zone=zone)
 
     for s in day_shifts:
         items.append((s["starts_at"], f"• WORK {_span(s['starts_at'], s.get('ends_at'), zone)}"))
