@@ -280,6 +280,10 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
 
 ## In flight
 
+- **The coin skill** (`sloane/skills/coin.py`, workshop item `/coin`): `/coin`, "flip a coin", "heads or tails?"
+  give Heads or Tails from `secrets`. No SQL, no setting, no migration. `tests/test_coin.py` pins the
+  command, both sides, and phrases it must not catch. Awaiting Landen's review.
+
 - **PR landenm999-coder/sloane#16**: the control room rebuilt (see "The control room, rebuilt" above) and
   this file's post-#15 corrections. Plus a real bug CI found: the `test` job on main after the #15
   merge sat in `tests/run.py` for 22 minutes and was cancelled with no output. `tests/run.py` now
