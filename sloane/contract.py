@@ -140,6 +140,28 @@ def _try_json(blob: str) -> Reply | None:
         return None
 
 
+def _each_object(text: str) -> Reply | None:
+    """The first JSON object in `text` that is a reply, read where it starts and no further.
+
+    For a reply followed by more text with a brace in it (a second object, the
+    "{}" a stray tag leaves): the greedy first-to-last-brace match spans all of
+    it and reads as nothing, and the command she wrote was lost.
+    """
+    decoder = json.JSONDecoder()
+    at = text.find("{")
+    while at >= 0:
+        try:
+            data, end = decoder.raw_decode(text, at)
+        except ValueError:
+            at = text.find("{", at + 1)
+            continue
+        found = _from_mapping(data) if isinstance(data, dict) else None
+        if found is not None:
+            return found
+        at = text.find("{", end)
+    return None
+
+
 def closed(text: str) -> str | None:
     """`text` with the string and brackets it left open closed; None if nothing
     was left open, or if what's there is malformed rather than merely short.
@@ -282,7 +304,7 @@ def parse(raw: str) -> Reply:
     # 3 -- a JSON object embedded in prose. Greedy, so nested braces survive.
     match = _FIRST_OBJECT.search(text)
     if match is not None:
-        found = _try_json(match.group(0))
+        found = _try_json(match.group(0)) or _each_object(text)
         if found is not None:
             return found
 

@@ -166,6 +166,17 @@ check("streaming: prose, a fragment, then the JSON: once the JSON starts, its sp
       partial_reply('On it.\n\n<answer>\n</answer>\n\nSorry, a stray fragment. As intended:\n\n{"speech": "On it, batt'),
       ("On it, batt", ""))
 
+# Prose, then the JSON, then more with a brace in it: the eval's critical "just
+# finished my Boulder essays" came back with its /college command as text in the
+# detail, because the first-to-last-brace match took in what followed the reply.
+COLLEGE = '{"speech": "Marking the Boulder essays done.", "detail": "Marking the Boulder essays done.", "do": ["/college CU Boulder done Essays"]}'
+for label, tail in (("a second object", '\n\n{"speech": "Marking them done.", "detail": "Marking them done."}'),
+                    ("the {} a stray tag leaves", '\n\n<invoke name="noop">{}</invoke>'),
+                    ("a stray closing brace", "\n\n}")):
+    got = parse("Marking the essays done for CU Boulder.\n\n" + COLLEGE + tail)
+    check(f"the reply, then {label}: its command still runs", (got.speech, got.actions),
+          ("Marking the Boulder essays done.", ("/college CU Boulder done Essays",)))
+
 # --- speech never carries a URL, whatever the shape -------------------------
 for raw in [
     '{"speech": "See https://x.test/a", "detail": "d"}',

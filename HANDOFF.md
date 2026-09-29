@@ -396,7 +396,11 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
   critical "put AA batteries on my grocery list" failed on it), and the streamed draft (and a call's
   voice) read the raw JSON after the tag. `contract.unstray` drops those tags, by name only, in `parse` and
   `partial_reply`; `partial_reply` also switches to the JSON once it starts after prose. Pinned in
-  `tests/test_contract.py`. If new tag names turn up, add them to `_STRAY`.
+  `tests/test_contract.py`. If new tag names turn up, add them to `_STRAY`. The same days showed prose,
+  then the JSON, then more with a brace in it (a second object, a tag's leftover `{}`): shape 3's
+  first-to-last-brace match took it all in and read as nothing, so the eval's critical "just finished my
+  Boulder essays" lost its `/college` command. `contract._each_object` now reads each object where it
+  starts and takes the first that's a reply.
 - **The coin skill** (`sloane/skills/coin.py`, workshop item `/coin`): `/coin`, "flip a coin", "heads or tails?"
   give Heads or Tails from `secrets`. No SQL, no setting, no migration. `tests/test_coin.py` pins the
   command, both sides, and phrases it must not catch. Awaiting Landen's review.
