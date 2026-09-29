@@ -96,6 +96,8 @@ class Scheduler:
         self._sched = AsyncIOScheduler(timezone=self._zone)
         self.registered: list[str] = []
         self.skipped: list[str] = []
+        # Jobs running right now, and since when: the control room's orb says what she's doing.
+        self.running: dict[str, datetime] = {}
 
     async def start(self) -> None:
         rows = await self._ctx.store.jobs()
@@ -141,6 +143,7 @@ class Scheduler:
             return JobResult(name, ran=False, reason="no such job")
 
         scheduled = SCHEDULED.set(True)
+        self.running[name] = datetime.now(self._zone)
         try:
             result = await handler(self._ctx, now)
         except Exception as exc:  # noqa: BLE001 - a job must never kill the scheduler
@@ -151,6 +154,7 @@ class Scheduler:
             status = ("partial" if result.partial else "ok") if result.ran else "deferred"
         finally:
             SCHEDULED.reset(scheduled)
+            self.running.pop(name, None)
 
         try:
             await self._ctx.store.mark_job(

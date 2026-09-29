@@ -80,6 +80,10 @@ async def integration() -> None:
         check("drop", await cmd("drop 1"), "Dropped the countdown to DECA districts.")
         check("drop out of range", await cmd("drop 5"), "Use /countdown drop with a number from /countdown.")
         check("panel", (await skill.panel())["lines"], ["graduation: 238 days (Sat May 22, 2027)"])
+        item = (await skill.panel())["items"][0]
+        check("with the day it was set, for the control room's bar",
+              (item["name"], item["days"], item["created_on"]),
+              ("graduation", 238, datetime.now(DEN).date().isoformat()))
         await cmd("ACT prep today")
         check("his capitals are kept", (await reg.route("how many days until ACT prep")).speech, "ACT prep is today.")
         check("in the listing too", await cmd(""), "ACT prep is today, and 1 more after it.")

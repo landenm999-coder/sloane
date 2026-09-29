@@ -316,7 +316,10 @@ class Planner(Skill):
         if not plan.slots:
             return None
         return {"title": "Tonight" if now.hour >= 12 else "Today's plan",
-                "lines": [f"{clock(s.start)} {s.title.split(' [')[0]}" for s in plan.slots[:8]]}
+                "lines": [f"{clock(s.start)} {s.title.split(' [')[0]}" for s in plan.slots[:8]],
+                # Today's stretches as blocks, for the control room's timeline.
+                "slots": [{"start": s.start.isoformat(), "end": s.end.isoformat(), "title": s.title.split(" [")[0],
+                           "part": s.part} for s in plan.slots if s.start.date() == now.date()]}
 
 
 def build(ctx: SkillContext) -> Skill:

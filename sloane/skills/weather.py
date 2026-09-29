@@ -365,7 +365,12 @@ class Weather(Skill):
             if d is not None:
                 lines.append(f"{label}: {self.t(d.high)} / {self.t(d.low)}, {describe(d.code)}"
                              + (f", {d.chance}%" if d.chance else ""))
-        return {"title": "Weather", "lines": lines, "temp": f.temp, "code": f.code}
+        # The next eight hours from this one, for the control room's curve.
+        hour = self.ctx.now().replace(minute=0, second=0, microsecond=0)
+        hours = [{"at": h.at.isoformat(), "temp": h.temp, "chance": h.chance}
+                 for h in f.hours if h.at >= hour and h.temp is not None][:8]
+        return {"title": "Weather", "lines": lines, "temp": f.temp, "code": f.code,
+                "sky": describe(f.code), "unit": self.deg, "hours": hours}
 
     async def nudges(self) -> list[Nudge]:
         now = self.ctx.now()

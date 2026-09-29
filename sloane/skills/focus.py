@@ -140,7 +140,11 @@ class Focus(Skill):
         lines = [f"{_minutes(today)} today"]
         if running is not None:
             lines.insert(0, f"Now: {running['what']} until {_clock(running['ends_at'].astimezone(now.tzinfo))}")
-        return {"title": "Focus", "lines": lines}
+        return {"title": "Focus", "lines": lines, "today_minutes": today,
+                "goal_minutes": self.ctx.config.focus_goal_minutes,
+                "running": None if running is None else {
+                    "what": running["what"], "started_at": running["started_at"].astimezone(now.tzinfo).isoformat(),
+                    "ends_at": running["ends_at"].astimezone(now.tzinfo).isoformat()}}
 
 
 def build(ctx: SkillContext) -> Skill:

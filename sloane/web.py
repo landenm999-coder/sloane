@@ -6,13 +6,19 @@
              log, so CONVERSATION, recall and the nightly learner see it too.
              Typed, or spoken into the microphone (transcribed like a Telegram
              voice note); the page can read her replies aloud in the browser.
-    Today    her line on the day, the day on a rail and as an agenda, what
-             needs him (approvals, alerts, failed jobs, overdue work, workshop
-             builds), what's due, reminders, grades, and every skill's panel.
+    Today    the day as a timeline (classes, shifts, reminders, focus blocks,
+             what's due) with a line at now, what's waiting on him (approvals,
+             alerts, failed jobs, overdue work, workshop builds), and panels:
+             weather, countdowns, the workshop, habits, focus, grades, the
+             week, what she learned today, colleges, and every skill's own.
+    The orb  what she's doing right now (GET /api/activity): idle, thinking,
+             building, needs you; and on the page, listening and speaking.
     Memory   what she's learned about him (forget any), loose ends (close
              them), and her diary of the last week.
+    Workshop what she's building on herself (sloane/workshop.py).
     Engine   jobs (run one now), trust (take one back), the models and what
-             they've cost, and her settings as they stand.
+             they've cost, her settings as they stand, and which panels show
+             (kept in dashboard_prefs, so they follow him between devices).
 
 Who may use it: whoever has DASHBOARD_TOKEN, a password of 32+ characters
 (unset or shorter, /app is off). The login page trades it for a session
@@ -68,6 +74,9 @@ _JOB = re.compile(r"^[a-z_]{1,40}$")
 ASSETS = {"app.js": "text/javascript", "app.css": "text/css", "icon.svg": "image/svg+xml",
           "manifest.json": "application/manifest+json", "icon-180.png": "image/png", "icon-192.png": "image/png",
           "icon-512.png": "image/png"}
+# IBM Plex, served from here (the page loads nothing from outside). OFL: fonts/LICENSE.txt.
+FONTS = frozenset({"plex-sans-400.woff2", "plex-sans-500.woff2", "plex-sans-600.woff2", "plex-mono-400.woff2",
+                   "plex-mono-500.woff2"})
 # What a browser's recorder makes (Chrome and Firefox: WebM or Ogg; Safari: MP4),
 # as the extension the transcriber reads the format from.
 AUDIO = {"audio/webm": "webm", "audio/ogg": "ogg", "audio/mp4": "m4a", "audio/x-m4a": "m4a", "audio/aac": "m4a",
@@ -76,7 +85,7 @@ MAX_AUDIO = 8 * 1024 * 1024
 
 HEADERS = {
     "Content-Security-Policy": (
-        "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
+        "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; "
         "connect-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'self'; "
         "frame-ancestors 'none'"
     ),
@@ -246,33 +255,93 @@ def _minutes(moment: datetime, zone: ZoneInfo) -> int:
     return local.hour * 60 + local.minute
 
 
-def rail(data: dict, zone: ZoneInfo, today: date) -> list[dict]:
-    """Today's items on the day rail: blocks (shifts, events) and marks (due, reminders)."""
-    items: list[dict] = []
+def _focus_blocks(panels: dict, zone: ZoneInfo, day: date) -> list[dict]:
+    """Focus blocks for the timeline: the study plan's stretches, and a focus session running now."""
+    blocks: list[dict] = []
 
-    def on_today(moment: Any) -> bool:
-        return isinstance(moment, datetime) and moment.astimezone(zone).date() == today
+    def block(title: str, sub: str, start_iso: str, end_iso: str) -> None:
+        try:
+            start, end = datetime.fromisoformat(start_iso), datetime.fromisoformat(end_iso)
+        except (TypeError, ValueError):
+            return
+        if start.astimezone(zone).date() != day:
+            return
+        first = _minutes(start, zone)
+        last = _minutes(end, zone) if end.astimezone(zone).date() == day else 24 * 60
+        blocks.append({"kind": "focus", "title": title, "sub": sub,
+                       "time": f"{_clock(start, zone)}–{_clock(end, zone)}", "start": first, "end": max(last, first),
+                       "all_day": False})
+
+    plan = panels.get("plan") if isinstance(panels.get("plan"), dict) else {}
+    for slot in plan.get("slots") or []:
+        if isinstance(slot, dict):
+            part = f" {slot['part']}" if slot.get("part") else ""
+            block(f"Focus: {slot.get('title') or 'study'}{part}", "in her plan", slot.get("start"), slot.get("end"))
+    focus = panels.get("focus") if isinstance(panels.get("focus"), dict) else {}
+    running = focus.get("running")
+    if isinstance(running, dict):
+        block(f"Focus: {running.get('what') or 'focus'}", "running now", running.get("started_at"), running.get("ends_at"))
+    return blocks
+
+
+def week(data: dict, zone: ZoneInfo, today: date) -> list[dict]:
+    """Monday to Sunday, and how packed each day is: its shifts, events and due work."""
+    monday = today - timedelta(days=today.weekday())
+    days = [monday + timedelta(days=i) for i in range(7)]
+    counts = {d: 0 for d in days}
+
+    def local(moment: Any) -> date | None:
+        return moment.astimezone(zone).date() if isinstance(moment, datetime) else None
 
     for s in data.get("shifts") or []:
-        start, end = s.get("starts_at"), s.get("ends_at")
-        if on_today(start) and isinstance(end, datetime) and not s.get("cancelled"):
-            items.append({"kind": "shift", "label": "Work", "start": _minutes(start, zone),
-                          "end": _minutes(end, zone) if on_today(end) else 24 * 60})
+        on = local(s.get("starts_at"))
+        if on in counts and not s.get("cancelled"):
+            counts[on] += 1
     for e in data.get("events") or []:
-        start, end = e.get("starts_at"), e.get("ends_at")
-        if on_today(start) and not e.get("all_day"):
-            finish = _minutes(end, zone) if on_today(end) else _minutes(start, zone) + 60
-            items.append({"kind": "event", "label": str(e.get("title") or "Event")[:60],
-                          "start": _minutes(start, zone), "end": max(finish, _minutes(start, zone) + 15)})
+        first, last = local(e.get("starts_at")), local(e.get("ends_at"))
+        if first is None:
+            continue
+        if last is None or last < first:
+            last = first
+        elif e.get("all_day") and last > first:
+            last -= timedelta(days=1)  # an all-day event ends at the next midnight
+        for d in days:
+            if first <= d <= last:
+                counts[d] += 1
     for a in data.get("assignments") or []:
-        if on_today(a.get("due_at")):
-            items.append({"kind": "due", "label": str(a.get("title") or "Due")[:60],
-                          "start": _minutes(a["due_at"], zone)})
-    for r in data.get("reminders") or []:
-        if on_today(r.get("due_at")):
-            items.append({"kind": "reminder", "label": str(r.get("text") or "")[:60],
-                          "start": _minutes(r["due_at"], zone)})
-    return sorted(items, key=lambda i: i["start"])
+        on = local(a.get("due_at"))
+        if on in counts:
+            counts[on] += 1
+    return [{"date": d.isoformat(), "day": f"{d:%a}", "count": counts[d],
+             "level": 0 if not counts[d] else 1 if counts[d] <= 2 else 2 if counts[d] <= 4 else 3,
+             "today": d == today} for d in days]
+
+
+def work(shifts: list[dict], zone: ZoneInfo, now: datetime) -> dict | None:
+    """The next shift (or the one he's on), and his hours this week and last."""
+    live = [s for s in shifts or [] if isinstance(s.get("starts_at"), datetime) and isinstance(s.get("ends_at"), datetime)
+            and not s.get("cancelled")]
+    if not live:
+        return None
+    monday = now.astimezone(zone).date() - timedelta(days=now.astimezone(zone).weekday())
+
+    def hours(first: date, *, until: datetime | None = None) -> float:
+        total = 0.0
+        for s in live:
+            if first <= s["starts_at"].astimezone(zone).date() < first + timedelta(days=7):
+                end = s["ends_at"] if until is None else min(s["ends_at"], until)
+                total += max(0.0, (end - s["starts_at"]).total_seconds() / 3600)
+        return round(total, 1)
+
+    current = next((s for s in live if s["starts_at"] <= now < s["ends_at"]), None)
+    upcoming = next((s for s in sorted(live, key=lambda s: s["starts_at"]) if s["starts_at"] > now), None)
+
+    def shift(s: dict | None) -> dict | None:
+        return None if s is None else {"starts_at": s["starts_at"], "ends_at": s["ends_at"],
+                                       "when": _when(s["starts_at"], zone, now.astimezone(zone).date())}
+
+    return {"now": shift(current), "next": shift(upcoming), "week_hours": hours(monday),
+            "done_hours": hours(monday, until=now), "last_week_hours": hours(monday - timedelta(days=7))}
 
 
 def agenda(data: dict, tz: str, day: date) -> dict:
@@ -287,7 +356,8 @@ def agenda(data: dict, tz: str, day: date) -> dict:
         if isinstance(moment, datetime) and moment.astimezone(zone).date() == day:
             minute = _minutes(moment, zone)
             items.append({"kind": "reminder", "title": str(r.get("text") or ""), "sub": "", "time": _clock(moment, zone),
-                          "start": minute, "end": minute, "all_day": False})
+                          "start": minute, "end": minute, "all_day": False, "id": str(r["id"]) if r.get("id") else None})
+    items.extend(_focus_blocks(data.get("panels") or {}, zone, day))
     items.sort(key=lambda i: (not i["all_day"], i["start"], i["kind"] != "shift"))
     for item in items:
         item["title"] = item["title"][:160]
@@ -303,6 +373,7 @@ async def overview(store, config, state: dict, now: datetime) -> dict:  # noqa: 
     zone = ZoneInfo(config.timezone)
     now = now.astimezone(zone)
     today = now.date()
+    monday = today - timedelta(days=today.weekday())
     skills = state.get("skills")
     data = await dashboard.collect(store, config, skills, now)
     reads = {
@@ -314,6 +385,12 @@ async def overview(store, config, state: dict, now: datetime) -> dict:  # noqa: 
         "diary": store.recent_diary(7),
         "usage": store.usage_summary(24),
         "database": store.healthy(),
+        # This week for the heat strip; last week to next week for the work panel.
+        "week_shifts": store.shifts_between(monday - timedelta(days=7), monday + timedelta(days=13)),
+        "week_events": store.events_between(monday, monday + timedelta(days=6)),
+        "week_due": store.assignments_due(monday, monday + timedelta(days=6)),
+        "used": store.usage_today(),
+        "prefs": store.dashboard_prefs(),
     }
     settled = await asyncio.gather(*reads.values(), return_exceptions=True)
     extra: dict[str, Any] = {}
@@ -321,7 +398,7 @@ async def overview(store, config, state: dict, now: datetime) -> dict:  # noqa: 
         if isinstance(result, BaseException):
             log.warning("control room read %s failed: %s", name, result)
             data["unreadable"].append(name)
-            extra[name] = False if name == "database" else []
+            extra[name] = {"database": False, "used": {}, "prefs": None}.get(name, [])
         else:
             extra[name] = result
 
@@ -331,17 +408,19 @@ async def overview(store, config, state: dict, now: datetime) -> dict:  # noqa: 
     for a in data.get("assignments") or []:
         due.append({"title": a.get("title"), "course": a.get("course"),
                     "when": _when(a.get("due_at"), zone, today), "at": a.get("due_at")})
+    this_week = [s for s in extra["week_shifts"] if monday <= s["starts_at"].astimezone(zone).date() <= monday + timedelta(days=6)]
+    used = extra["used"] or {}
+    started = state.get("started_at")
     return {
         "now": {"clock": _clock(now, zone), "date": f"{now:%A, %B} {now.day}", "minutes": _minutes(now, zone),
                 "tz": config.timezone},
         "name": config.address_as or "Landen",
         "unreadable": data["unreadable"],
         "alerts": [{"message": a.get("message")} for a in data.get("alerts") or []],
-        # The top bar's light: anything broken, and any job whose last run failed. A failed job
-        # isn't an alert until the watchdog's hour of grace, but the page shouldn't say "all normal".
+        # Anything broken, and any job whose last run failed. A failed job isn't an alert until
+        # the watchdog's hour of grace, but the page shouldn't say "all normal".
         "health": {"broken": len(data.get("alerts") or []) + len(data["unreadable"]),
                    "failed_jobs": [j["name"] for j in extra["jobs"] if j.get("last_status") == "failed"]},
-        "rail": rail(data, zone, today),
         "agenda": {"today": agenda(data, config.timezone, today), "tomorrow": agenda(data, config.timezone, tomorrow)},
         "schedule": {
             "today": [line.removeprefix("• ") for line in views.day_lines(
@@ -352,6 +431,14 @@ async def overview(store, config, state: dict, now: datetime) -> dict:  # noqa: 
                 tz=config.timezone)],
         },
         "due": due,
+        # Still to hand in this week, from now to Sunday night.
+        "due_week": sum(1 for a in extra["week_due"] if isinstance(a.get("due_at"), datetime) and a["due_at"] >= now),
+        "week": week({"shifts": this_week, "events": extra["week_events"], "assignments": extra["week_due"]}, zone, today),
+        "work": work(extra["week_shifts"], zone, now),
+        "engine": {"calls_today": sum(used.values()), "job_calls": used.get("job", 0),
+                   "job_budget": config.daily_job_budget, "bulk_calls": used.get("bulk", 0),
+                   "bulk_budget": config.daily_bulk_budget,
+                   "up_since": datetime.fromtimestamp(started, zone) if started else None},
         "overdue": [{"title": o.get("title"), "course": o.get("course"), "when": _when(o.get("due_at"), zone, today)}
                     for o in data.get("overdue") or []],
         "grades": [{"course": c.get("name"), "score": c.get("current_score"), "grade": c.get("current_grade")}
@@ -364,10 +451,16 @@ async def overview(store, config, state: dict, now: datetime) -> dict:  # noqa: 
                      for c in data.get("commitments") or []],
         "proposals": [{"id": str(p["id"]), "preview": p.get("preview"), "status": p.get("status")}
                       for p in extra["proposals"]],
-        "panels": [{"skill": name, "title": panel.get("title") or name, "lines": [str(x) for x in panel.get("lines") or []]}
+        # Each skill's panel: its lines (what /tv and Telegram show) and, beside them, the
+        # structured fields the page draws from. The page falls back to the lines.
+        "panels": [{**{k: v for k, v in panel.items() if k not in ("title", "lines", "error")},
+                    "skill": name, "title": panel.get("title") or name, "lines": [str(x) for x in panel.get("lines") or []]}
                    for name, panel in (data.get("panels") or {}).items()
                    if isinstance(panel, dict) and panel.get("lines") and not panel.get("error")],
-        "learned": [{"key": f["key"], "value": f["value"], "source": f.get("source") or ""} for f in extra["learned"]],
+        "prefs": prefs(extra["prefs"]),
+        "learned": [{"key": f["key"], "value": f["value"], "source": f.get("source") or "",
+                     "today": isinstance(f.get("updated_at"), datetime) and f["updated_at"].astimezone(zone).date() == today}
+                    for f in extra["learned"]],
         "loose": [{"id": str(r["id"]), "summary": r["summary"],
                    "when": f"{r['due_on']:%a %b} {r['due_on'].day}" if r.get("due_on") else ""} for r in extra["loose"]],
         "diary": [{"when": f"{d['occurred_at'].astimezone(zone):%A %b} {d['occurred_at'].astimezone(zone).day}",
@@ -399,11 +492,176 @@ async def overview(store, config, state: dict, now: datetime) -> dict:  # noqa: 
     }
 
 
+# -- the panels ------------------------------------------------------------------------------
+
+# The panels the page draws itself, in the grid's order, and whether each is on until he says.
+# Every other skill panel (lists, flashcards, money...) comes after these, on, drawn from its lines.
+PANELS: dict[str, bool] = {
+    "weather": True, "countdowns": True, "workshop": True, "habits": True, "focus": True, "grades": True,
+    "week": True, "learned": True, "colleges": True, "engine": False, "work": False,
+    # Already on the page elsewhere: the plan's stretches are on the timeline, loose ends in Memory.
+    "plan": False, "memory": False,
+}
+PHONE_PANELS = ("countdowns", "habits", "workshop")
+PHONE_COUNT = 3
+MAX_PANELS = 40
+_PANEL = re.compile(r"^[a-z_]{1,40}$")
+
+
+def prefs(row: Any) -> dict:
+    """His panel choices, and the defaults for everything he hasn't chosen."""
+    phone = [p for p in (row["phone"] if row else []) or []][:PHONE_COUNT]
+    return {"shown": list(row["shown"]) if row else [], "hidden": list(row["hidden"]) if row else [],
+            "phone": phone or list(PHONE_PANELS), "defaults": PANELS, "phone_count": PHONE_COUNT}
+
+
+def clean_prefs(body: Any) -> tuple[dict | None, str]:
+    """(shown, hidden, phone) from the page, or None and why not."""
+    if not isinstance(body, dict):
+        return None, "Send the panels as JSON."
+    out: dict[str, list[str]] = {}
+    for key in ("shown", "hidden", "phone"):
+        values = body.get(key) or []
+        if not isinstance(values, list) or len(values) > MAX_PANELS:
+            return None, f"{key} should be a list of panel names."
+        names: list[str] = []
+        for value in values:
+            if not isinstance(value, str) or not _PANEL.match(value):
+                return None, f"{str(value)[:40]!r} isn't a panel."
+            if value not in names:
+                names.append(value)
+        out[key] = names
+    if set(out["shown"]) & set(out["hidden"]):
+        return None, "A panel can't be both on and off."
+    if len(out["phone"]) > PHONE_COUNT:
+        return None, f"The phone shows {PHONE_COUNT} panels."
+    return out, ""
+
+
+# -- what she's doing right now: the orb -------------------------------------------------------
+
+# The workshop's five steps, as the orb's progress arc counts them.
+STEPS = ("plan", "code", "test", "ci", "ready")
+STEP_WORDS = {"plan": "planning", "code": "building", "test": "testing", "ci": "waiting on CI", "ready": "ready"}
+# Jobs that only tick (every minute, every quarter hour): never "what she's doing".
+TICKS = frozenset({"reminders", "heartbeat", "watchdog"})
+DOING = {
+    "entity_sync": "Syncing Canvas and the calendar", "morning_brief": "Writing the morning brief",
+    "pre_shift": "Getting you ready for work", "post_shift": "Wrapping up your shift", "wrap": "Writing the night wrap",
+    "reflection": "Looking back on the day", "inbox": "Reading your inbox", "learn": "Learning from today",
+    "backup": "Backing up", "weekly_review": "Writing the weekly review", "think": "Thinking things over",
+    "workshop": "In the workshop",
+}
+NEXT = {
+    "entity_sync": "Next check: Canvas", "morning_brief": "Next: the morning brief", "pre_shift": "Next: the pre-shift brief",
+    "post_shift": "Next: the post-shift check-in", "wrap": "Next: the night wrap", "reflection": "Next: reflection",
+    "inbox": "Next check: the inbox", "learn": "Next: nightly learning", "backup": "Next: the backup",
+    "weekly_review": "Next: the weekly review", "think": "Next: a think", "workshop": "Next: the workshop night shift",
+}
+JOB_NAMES = {
+    "entity_sync": "The Canvas and calendar sync", "morning_brief": "The morning brief", "pre_shift": "The pre-shift brief",
+    "post_shift": "The post-shift check-in", "wrap": "The night wrap", "reflection": "Reflection",
+    "reminders": "Reminders", "heartbeat": "The heartbeat", "inbox": "Inbox triage", "learn": "Nightly learning",
+    "backup": "The backup", "watchdog": "The watchdog", "weekly_review": "The weekly review", "think": "Thinking",
+    "workshop": "The workshop night shift",
+}
+# Workshop statuses the orb looks at.
+MOVING = ("ready", "building", "deploying", "accepted", "idea", "planned")
+
+
+def _said(count: int, one: str, many: str) -> str:
+    return one if count == 1 else many.format(n=count)
+
+
+async def activity(store, state: dict, config, now: datetime) -> dict:  # noqa: ANN001, C901
+    """{state, label, detail, step, steps}: what she's doing now, for the orb. Cheap: polled every 5 s.
+
+    Needs you (a build to accept, an approval, something broken) beats building, which beats a
+    job running, which beats idle. The page puts its own states on top: listening, speaking,
+    and thinking while a message of his is in flight.
+    """
+    zone = ZoneInfo(config.timezone)
+    now = now.astimezone(zone)
+    reads = {"proposals": store.open_proposals(), "alerts": store.open_alerts(), "jobs": store.jobs(),
+             "workshop": store.workshop_items(MOVING, limit=40)}
+    settled = await asyncio.gather(*reads.values(), return_exceptions=True)
+    got: dict[str, list] = {}
+    for name, result in zip(reads, settled):
+        if isinstance(result, BaseException):
+            log.warning("activity read %s failed: %s", name, result)
+            got[name] = []
+        else:
+            got[name] = list(result)
+    items = got["workshop"]
+    ready = [r for r in items if r["status"] == "ready"]
+    failed = [j for j in got["jobs"] if j.get("last_status") == "failed"]
+    base = {"step": None, "steps": len(STEPS), "ready": len(ready),
+            "waiting": len(ready) + len(got["proposals"]) + len(got["alerts"]) + len(failed)}
+
+    needs = []
+    if ready:
+        needs.append(_said(len(ready), "A Workshop change is ready to accept", "{n} Workshop changes are ready to accept"))
+    if got["proposals"]:
+        needs.append(_said(len(got["proposals"]), "An approval is waiting on you", "{n} approvals are waiting on you"))
+    for alert in got["alerts"]:
+        needs.append(str(alert.get("message") or "Something is broken")[:120])
+    for job in failed:
+        needs.append(f"{JOB_NAMES.get(job['name'], job['name'].replace('_', ' ').capitalize())} failed")
+    if needs:
+        more = f" (and {len(needs) - 1} more)" if len(needs) > 1 else ""
+        return {**base, "state": "needs", "label": "Needs you", "detail": needs[0] + more,
+                "step": len(STEPS) if ready else None}
+
+    phase = getattr(state.get("workshop"), "phase", None) or {}
+
+    def step_of(row: dict) -> str | None:
+        if row["status"] in ("deploying", "accepted"):
+            return "ready"
+        if row["status"] == "building":
+            return phase.get(str(row["id"])) or ("ci" if row.get("commit_sha") else "code")
+        return "plan" if phase.get(str(row["id"])) == "plan" else None
+
+    for row in sorted(items, key=lambda r: MOVING.index(r["status"])):
+        at = step_of(row)
+        if at is None:
+            continue
+        word = "going live" if row["status"] in ("deploying", "accepted") else STEP_WORDS[at]
+        title = str(row.get("title") or "a change")
+        title = title if len(title) <= 60 else title[:59] + "…"
+        return {**base, "state": "building", "label": "Building", "detail": f"Workshop: “{title}”, {word}",
+                "step": STEPS.index(at) + 1}
+
+    scheduler = state.get("scheduler")
+    running = [n for n in getattr(scheduler, "running", {}) if n not in TICKS]
+    if running:
+        name = running[0]
+        return {**base, "state": "thinking", "label": "Thinking",
+                "detail": DOING.get(name, name.replace("_", " ").capitalize())}
+
+    upcoming = []
+    if scheduler is not None:
+        try:
+            upcoming = [(when, name) for name, when in scheduler.next_runs().items()
+                        if when is not None and name not in TICKS]
+        except Exception:  # noqa: BLE001 - the orb is decoration; never a 500
+            log.exception("activity: next runs unreadable")
+    if not upcoming:
+        return {**base, "state": "idle", "label": "Idle", "detail": "Nothing running"}
+    when, name = min(upcoming)
+    local = when.astimezone(zone)
+    day = "" if local.date() == now.date() else (" tomorrow" if local.date() == now.date() + timedelta(days=1)
+                                                  else f" {local:%a}")
+    return {**base, "state": "idle", "label": "Idle",
+            "detail": f"{NEXT.get(name, 'Next: ' + name.replace('_', ' '))}{day} at {_clock(local, zone)}"}
+
+
 # -- routes -------------------------------------------------------------------------------
 
 def install(app: FastAPI, state: dict, store, config) -> None:  # noqa: ANN001, C901
     """Mount /app and /api on the app. Off (404) without a DASHBOARD_TOKEN."""
     guesses = Guesses()
+    # Since when she's been up: the Engine panel's uptime.
+    state.setdefault("started_at", time.time())
 
     def page(name: str) -> HTMLResponse:
         return HTMLResponse((UI / name).read_text(), headers=HEADERS)
@@ -423,6 +681,11 @@ def install(app: FastAPI, state: dict, store, config) -> None:  # noqa: ANN001, 
 
     def owner() -> int:
         return int(config.telegram_chat_id or 0)
+
+    @app.get("/")
+    async def root() -> Response:
+        """The address on its own is the control room (which sends a stranger to its door)."""
+        return RedirectResponse("/app", status_code=303)
 
     @app.get("/app")
     async def app_page(request: Request) -> Response:
@@ -483,6 +746,13 @@ def install(app: FastAPI, state: dict, store, config) -> None:  # noqa: ANN001, 
         return Response((UI / name).read_bytes(), media_type=ASSETS[name],
                         headers={**HEADERS, "Cache-Control": "no-cache"})
 
+    @app.get("/app/static/fonts/{name}")
+    async def font(name: str) -> Response:
+        if name not in FONTS:
+            return Response(status_code=404)
+        return Response((UI / "fonts" / name).read_bytes(), media_type="font/woff2",
+                        headers={**HEADERS, "Cache-Control": "public, max-age=604800"})
+
     @app.get("/api/overview")
     async def api_overview(request: Request) -> Response:
         stop = refuse(request, change=False)
@@ -490,6 +760,30 @@ def install(app: FastAPI, state: dict, store, config) -> None:  # noqa: ANN001, 
             return stop
         body = await overview(store, config, state, datetime.now(ZoneInfo(config.timezone)))
         return JSONResponse(jsonable_encoder(body), headers={"Cache-Control": "no-store"})
+
+    @app.get("/api/activity")
+    async def api_activity(request: Request) -> Response:
+        """What she's doing right now, for the orb. Polled every 5 s while the page is open."""
+        stop = refuse(request, change=False)
+        if stop is not None:
+            return stop
+        body = await activity(store, state, config, datetime.now(ZoneInfo(config.timezone)))
+        return JSONResponse(jsonable_encoder(body), headers={"Cache-Control": "no-store"})
+
+    @app.post("/api/prefs")
+    async def api_prefs(request: Request) -> Response:
+        """Which panels show, and the phone's three. Kept server-side so every device has them."""
+        async def doing():  # noqa: ANN202
+            try:
+                body = await request.json()
+            except ValueError:
+                body = None
+            chosen, why = clean_prefs(body)
+            if chosen is None:
+                return why, False
+            await store.set_dashboard_prefs(**chosen)
+            return "Panels saved.", True
+        return await act(request, doing)
 
     @app.get("/api/history")
     async def api_history(request: Request) -> Response:

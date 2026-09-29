@@ -113,8 +113,12 @@ async def main() -> None:
           ("fahrenheit", "America/Denver", "39.5200"))
 
     await skill.facts()
-    await skill.panel()
+    panel = await skill.panel()
     check("cached: one fetch for three reads", len(Stub.calls), 1)
+    check("the control room's curve: the next eight hours", [(h["at"][11:16], h["temp"], h["chance"]) for h in panel["hours"]],
+          [("09:00", 54, 0), ("10:00", 55, 0), ("11:00", 56, 0), ("12:00", 57, 0), ("13:00", 58, 0),
+           ("14:00", 59, 0), ("15:00", 60, 0), ("16:00", 59, 70)])
+    check("and the sky in words", (panel["temp"], panel["sky"], panel["unit"]), (58.4, "partly cloudy", "°F"))
 
     check("what's the weather", (await reg.route("What's the weather?")).speech,
           "It's 58 and partly cloudy. Rain likely around 4 PM, high of 71.")

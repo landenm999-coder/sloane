@@ -211,6 +211,10 @@ class Settings(BaseSettings):
     # week" from the shifts. 0 leaves earnings out.
     pay_rate: float = 0.0
 
+    # Focus (skills/focus.py): a day's focus goal in minutes, the ring on the
+    # control room's Focus panel.
+    focus_goal_minutes: int = 135
+
     # --- the workshop: features she builds on herself (sloane/workshop.py) ----------
     # A fine-grained GitHub token for her own repo only (Contents and Pull
     # requests read/write; Actions and Checks read-only). Blank: the Workshop

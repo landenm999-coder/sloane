@@ -15,3 +15,5 @@ tests/
 .models/
 .local_cache/
 .claude/
+# The design mockup and screenshots: for people, not the running image.
+docs/

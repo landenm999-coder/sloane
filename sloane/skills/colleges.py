@@ -710,7 +710,17 @@ class Colleges(Skill):
                                                     progress) if p))
             else:
                 lines.append(f"{r.get('nickname') or r['name']} · {self._when(r, today)}")
-        return {"title": "Applications", "lines": lines}
+        # The schools he's still applying to, each with its checklist, for the control room's pips.
+        schools = []
+        for r in rows:
+            if r["status"] != "applying":
+                continue
+            needed = [t for t in tasks.get(str(r["id"]), []) if t["state"] != "skipped"]
+            schools.append({"name": r.get("nickname") or r["name"], "plan": PLAN_SHORT.get(r.get("plan") or "", ""),
+                            "deadline": r["deadline"].isoformat() if r.get("deadline") else None,
+                            "days": (r["deadline"] - today).days if r.get("deadline") else None,
+                            "checklist": [{"task": t["task"], "done": t["state"] == "done"} for t in needed]})
+        return {"title": "Applications", "lines": lines, "schools": schools}
 
     async def nudges(self) -> list[Nudge]:
         now = self.ctx.now()

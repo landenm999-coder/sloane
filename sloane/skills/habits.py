@@ -24,6 +24,7 @@ from sloane.skills import Answer, cap, Nudge, Skill, SkillContext
 MAX_NAME = 60
 HISTORY_DAYS = 400  # long enough for a year-long streak
 FACTS_HABITS = 10
+PANEL_DAYS = 14  # the control room's dot grid, oldest first, today last
 
 _DID = re.compile(
     r"^\s*(?:i\s+)?(?:did|done|finished|completed|knocked\s+out)\s+(?:with\s+)?(?:my\s+|the\s+)?"
@@ -193,9 +194,12 @@ class Habits(Skill):
         if not habits:
             return None
         today = self.ctx.today()
+        window = [today - timedelta(days=i) for i in range(PANEL_DAYS - 1, -1, -1)]
         return {"title": "Habits", "lines": [
             f"{'✓' if today in logged[str(h['id'])] else '·'} {h['name']} — "
-            f"{_days(streak(logged[str(h['id'])], today))}" for h in habits]}
+            f"{_days(streak(logged[str(h['id'])], today))}" for h in habits],
+            "habits": [{"name": h["name"], "days": [d in logged[str(h["id"])] for d in window],
+                        "streak": streak(logged[str(h["id"])], today)} for h in habits]}
 
     async def nudges(self) -> list[Nudge]:
         now = self.ctx.now()

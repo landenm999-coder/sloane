@@ -209,11 +209,16 @@ async def integration() -> None:
             "3. CU Boulder — admitted",
         ])
         panel = await colleges.panel()
-        check("the TV panel", panel, {"title": "Applications", "lines": [
+        check("the TV panel", (panel["title"], panel["lines"]), ("Applications", [
             "Colorado School of Mines · ED · Nov 1 (late) · 1 of 6 done",
             "CSU · ED II · Jan 15 (74 days) · 0 of 6 done",
             "CU Boulder · admitted",
-        ]})
+        ]))
+        check("the control room's pips: the schools still applying, each with its checklist",
+              [(s["name"], s["plan"], s["deadline"], s["days"], [t["done"] for t in s["checklist"]])
+               for s in panel["schools"]],
+              [("Colorado School of Mines", "ED", "2026-11-01", -1, [True] + [False] * 5),
+               ("CSU", "ED II", "2027-01-15", 74, [False] * 6)])
 
         # -- said in words: recorded by rules, every time, and only for his schools -----------
         await store._exec("truncate colleges, college_tasks cascade")

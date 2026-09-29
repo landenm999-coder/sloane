@@ -98,6 +98,10 @@ async def integration() -> None:
             "• Unit test study guide [Physics] — due Sun 11:59 PM (about 1h left)",
         ])
         check("the DECA meeting is carved out", "8:00 PM–8:30 PM" in plan.detail, False)
+        check("the control room's timeline gets tonight's blocks",
+              [(s["start"][11:16], s["end"][11:16], s["title"]) for s in (await planner.panel())["slots"]],
+              [("19:30", "20:00", "Old worksheet"), ("20:30", "21:30", "Lab 4 writeup"),
+               ("21:40", "22:20", "Chapter 3 reading")])
 
         check("an estimate", (await reg.command("estimate", "lab 4 writeup 1h 30m")).speech,
               "Got it: Lab 4 writeup takes about 1h 30m.")

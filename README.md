@@ -60,7 +60,7 @@ Total running cost: **$0/mo**, every layer on a free tier.
 | Gmail | triage every 3h in one batched call; replies drafted in his voice, sent only on Approve |
 | Skills | fifteen plug-in skills (below): lists, countdowns, weather, flashcards + quizzes, habits, clients, a study plan, focus, birthdays, money, memory, college applications, DECA role-plays, a coin flip, and the workshop's Telegram side. Each adds its own commands, plain-English rules, FACTS lines, a TV card and nudges, without touching the core |
 | Heartbeat | every quarter hour, 7 AM–10 PM, no model: what the skills think is worth saying now (rain before your shift, a streak about to break, a follow-up due), each said once |
-| Control room | `/app`: a private page (phone or laptop, over Tailscale, with its own password) where he talks to her — the same conversation as Telegram, streamed, commands and actions included, typed or spoken into the microphone (transcribed like a Telegram voice note), and read aloud if he likes — and sees and steers everything. **Today** opens with her line on the day ("Work at 3 PM, until 7 PM. The lab report is due at 11:59 PM.", by rule from the same rows, never a model), what's next with a countdown, the day on a rail and as an agenda (past, now, next, clashes), one **Needs you** list (approvals, what's broken, failed jobs, overdue work, workshop builds ready), due work, reminders (cancel), grades. **Memory**: what she knows (filter, forget), loose ends, her diary. **Workshop**: the pipeline. **Engine**: status, jobs (run now), trust (take back), model use. Add it to the home screen and it opens like an app, with its own icon |
+| Control room | `/app` (and `/`): a private page (phone or laptop, over Tailscale, with its own password) where he talks to her — the same conversation as Telegram, streamed, commands and actions included, typed or spoken into the microphone (transcribed like a Telegram voice note), and read aloud if he likes — and sees and steers everything. Dark, IBM Plex (served by her, nothing loaded from outside), built from `docs/design/dashboard-mockup.html`. **The orb** by the clock shows what she's doing now (`GET /api/activity`, polled every 5 s: idle with her next check, thinking while a job runs, building with the Workshop's step, needs you; on the page, listening, with its bars following his voice, and speaking). **Today**: the day as a timeline (classes, shifts, reminders, focus blocks, due work) with a moving now line and a Tomorrow toggle; the header's countdown to work, what's **waiting on him** (approvals, what's broken, failed jobs, overdue work, workshop builds ready) and what's due this week; panels drawn from each skill's structured `panel()` (weather's next hours, countdowns, the workshop's step, habits' 14 days, the focus ring, grades, the week's heat, learned today, colleges' checklists; engine and work off by default) with the rest falling back to their lines. On a laptop the chat stays open on the right; on a phone, Today/Talk/Workshop/More tabs and three panels to swipe. **Memory**: what she knows (filter, forget), loose ends, her diary. **Workshop**: the pipeline. **Engine**: status, jobs (run now), trust (take back), model use, and which panels show (`dashboard_prefs`, so every device agrees). Add it to the home screen and it opens like an app, with the orb as its icon |
 | Workshop | she builds features on herself, with his say at every step. He writes down what he wants (the control room's Workshop tab, `/idea`, or in words); she plans it; he says build; Claude Code builds it in a clone of her repo on its own branch (file tools scoped to the clone, no secrets in its environment), a guard in code refuses anything touching her safety rules (`deploy/protected.txt`, the hard lines, the owner checks) or carrying a credential, the tests and GitHub CI must pass; then it waits in **Ready for you**. **Accept** merges it and the box upgrades itself (`scripts/upgrade.sh`: health check, automatic rollback); **Undo** reverts it; **Deny** (with why) teaches her. At 1:10 AM she builds what he queued and one idea of her own, on Sonnet (`WORKSHOP_MODEL`), so there's a pipeline in the morning. Needs a GitHub token (DEPLOY 7h) |
 | Thinking | `think`, a few times a day (evenings on weekdays, through the day at weekends; never in class or on a shift): she looks over everything and says the one thing worth saying — a clash coming, a deadline at risk, how the thing he was worried about went — or nothing. She only *offers* to act; his yes runs it. `THINK=false` turns it off |
 | Local models | `LOCAL_BASE_URL` + `LOCAL_MODEL`: Ollama (or llama.cpp, LM Studio) on hardware he owns — a Raspberry Pi 5 — as a lane: the last fallback when every cloud model is down, or `BULK_PROVIDER=local` for the nightly work. Voice notes can be transcribed locally too. `LOCAL_MODELS.md` |
@@ -98,7 +98,7 @@ with `SKILLS_DISABLED`.
 | Habits | `/habit add reading`, "did reading", `/habits` | streaks counted in code; one evening nudge for a streak about to break |
 | Clients | `/client add Bella's Bakery $1200 follow up friday: send mockups`, `/clients`, `/client bella signed` | the website business pipeline: stages, values, follow-ups (a morning nudge), notes |
 | Study plan | `/plan`, `/plan tomorrow`, "plan my night", `/estimate lab 2h` | tonight's free time (after school, minus the shift and commute and calendar) filled with what's due soonest; says what won't fit |
-| Focus | `/focus 25 essay`, `/focus`, `/focus stop` | a timer whose end is a real reminder; the day's focus time |
+| Focus | `/focus 25 essay`, `/focus`, `/focus stop` | a timer whose end is a real reminder; the day's focus time, as a ring against `FOCUS_GOAL_MINUTES` (135) in the control room |
 | Birthdays | `/birthday Keegan mar 3`, "Keegan's birthday is March 3" | on the same people your promises point at; a week out, the evening before, the morning of |
 | Memory | `/memory`, `/forget 2`, `/followup call the dentist friday`, `/followup done dentist` | what she's learned about you and the loose ends, where you can see and correct them |
 | Money | "spent 12 on lunch", `/spent`, `/budget 100` | spending by category against a weekly budget; with `PAY_RATE`, an estimate of what this week's shifts earned. Tracking only |
@@ -471,7 +471,7 @@ python tests/test_dates.py      # dates from words, by rules
 python tests/test_weather.py    # the weather skill against a stub Open-Meteo
 python tests/test_dashboard.py  # /tv: every card, everything escaped
 python tests/test_local.py      # a local model over the OpenAI API, against a stub server
-python tests/test_web.py        # the control room: sessions, refusals, the shared chat (DB half too)
+python tests/test_web.py        # the control room: sessions, refusals, the shared chat, the orb, panels (DB half too)
 python tests/test_workshop.py   # the guard, the upgrader (stubbed docker); the pipeline with a DB
 
 # integration — needs a Postgres with pgvector and the schema applied
@@ -538,9 +538,9 @@ sloane/
   dates.py       "may 22", "the 30th", "next friday" -> a date, by rules
   actions.py     the commands she may run for him in conversation, and the rules
   dashboard.py   the /tv page: SQL + skill panels, escaped, self-contained
-  web.py         the control room: /app + /api, sessions, the chat through Bot.respond
+  web.py         the control room: /app + /api, sessions, the chat through Bot.respond, /api/activity (the orb)
+  webui/         its page, script, styles, icons and fonts (IBM Plex, OFL; CSP 'self', nothing from outside)
   workshop.py    features she builds on herself: plan, build in a clone, the guard, PR, CI, accept, deploy, undo
-  webui/         its page, script and styles (CSP 'self', nothing from outside)
   providers/     claude_code · groq · anthropic_api · local (Ollama & co.) · tts (groq, piper)
   jobs/
     conflicts.py collisions computed in code, and what they refuse to flag
@@ -597,6 +597,7 @@ sql/
   029_repeating_reminders.sql  a reminder's repeat rule and series
   030_think.sql    the think job: one thing worth saying, or nothing
   031_workshop.sql the workshop's items, idea to live, and its night shift
+  032_dashboard_prefs.sql the control room's panels: which show, and the phone's three
   999_lock_public.sql  row-level security on every table; always last
 scripts/
   doctor.py      validates every credential
