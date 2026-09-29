@@ -47,6 +47,7 @@ UNIT = [
     "test_markets.py",  # likewise
     "test_news.py",
     "test_whoop.py",
+    "test_brainstorm.py",
 ]
 INTEGRATION = [
     "test_store.py", "test_school.py", "test_jobs.py", "test_agency.py", "test_mail.py",

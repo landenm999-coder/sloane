@@ -343,6 +343,11 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
 
 ## In flight
 
+- **Brainstorm skill** (`sloane/skills/brainstorm.py`, `tests/test_brainstorm.py`; no SQL). `/brainstorm <topic>`
+  and "come up with a bunch of ideas for X": one `ctx.router` call, a numbered list, nothing stored. Written in
+  the workshop sandbox where the shell was denied, so **its suite and pyflakes have not been run**: run
+  `python tests/run.py` and `python -m pyflakes sloane scripts tests` before merging.
+
 - **Talking to her in the control room** (branch `claude/nifty-thompson-5h6l2x`, draft
   landenm999-coder/sloane#20). Landen: "an assistant for anything I need... speak in conversations, quick,
   not a long wait". Built so far:
