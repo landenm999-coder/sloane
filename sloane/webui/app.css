@@ -20,6 +20,8 @@
 }
 
 * { box-sizing: border-box; }
+/* Thin, dark scrollbars: Windows draws grey ones with arrows otherwise. */
+* { scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
 html, body { height: 100%; }
 body {
   margin: 0; background: var(--bg); color: var(--fg);
@@ -146,6 +148,7 @@ h1, h2, h3, h4, p { margin: 0; }
 .ev { border-left: 2px solid var(--c, var(--dim)); padding: 0 0 10px 10px; min-width: 0; overflow-wrap: anywhere;
   display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
 .ev small { display: block; color: var(--mut); font-size: 11.5px; }
+.ev .t { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .ev .x { flex: none; background: none; border: 0; color: var(--mut); font-size: 11.5px; padding: 0 2px; }
 .ev .x:hover { color: var(--due); }
 .row.past { opacity: .45; }
@@ -267,6 +270,9 @@ button.pn:hover { border-color: var(--dim); }
 .lr button::before { content: "+ "; color: var(--now); font-family: var(--mono); }
 .lr button:hover { text-decoration: underline; text-decoration-color: var(--dim); text-underline-offset: 3px; }
 .lr .confirm { display: flex; gap: 6px; align-items: center; color: var(--mut); }
+/* add to your day: a dashed panel, not one of the real ones */
+.pn.setup { background: transparent; border-style: dashed; }
+.starts { display: flex; flex-wrap: wrap; gap: 6px; }
 /* engine */
 .en { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 11.5px; color: var(--mut); }
 .en .mono { display: block; font-size: 16px; color: var(--fg); }
@@ -405,6 +411,7 @@ button.pn:hover { border-color: var(--dim); }
 .job-name { font-weight: 500; }
 .job-id { display: block; font: 11px var(--mono); color: var(--mut); }
 .job-error { display: block; color: var(--due); font-size: 12px; margin-top: 2px; }
+.job-note { display: block; color: var(--mut); font-size: 12px; margin-top: 2px; }
 .pill { font: 10.5px var(--mono); padding: 0 6px; border-radius: 999px; border: 1px solid var(--line); margin-left: 6px; white-space: nowrap; color: var(--mut); }
 .pill.ok { color: var(--good); }
 .pill.failed { color: var(--due); }
@@ -423,7 +430,7 @@ button.pn:hover { border-color: var(--dim); }
 .pop::backdrop { background: rgba(0, 0, 0, .45); }
 .pop-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
 .pop-head .kicker { margin: 0; }
-.pop #due-title { margin-top: 18px; }
+.pop #due-title, .pop #overdue-title { margin-top: 18px; }
 
 .toast {
   position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 8px); z-index: 40;

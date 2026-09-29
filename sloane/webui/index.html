@@ -63,6 +63,7 @@
           <span class="next" id="next-up" hidden></span>
           <span class="links" id="links" hidden>
             <button type="button" class="link" id="waiting-open" hidden></button>
+            <button type="button" class="link" id="overdue-open" hidden></button>
             <button type="button" class="link" id="due-open" hidden></button>
           </span>
         </div>
@@ -219,6 +220,10 @@
     </button>
   </div>
   <ul class="plain" id="needs-list"></ul>
+  <div id="overdue-wrap" hidden>
+    <h2 class="kicker" id="overdue-title">Overdue <span class="count mono" id="overdue-count"></span></h2>
+    <ul class="plain" id="overdue-list"></ul>
+  </div>
   <h2 class="kicker" id="due-title">Due soon</h2>
   <ul class="plain" id="due-list"></ul>
 </dialog>
