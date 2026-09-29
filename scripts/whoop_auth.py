@@ -39,11 +39,14 @@ BASE = os.environ.get("WHOOP_API_BASE", "https://api.prod.whoop.com").rstrip("/"
 AUTH_URL = f"{BASE}/oauth/oauth2/auth"
 TOKEN_URL = f"{BASE}/oauth/oauth2/token"
 REDIRECT = "http://localhost:8765"
+# Whoop sits behind Cloudflare, which turns urllib's own user-agent away (403, "error code: 1010").
+AGENT = "Mozilla/5.0 (compatible; Sloane/1.0)"
 SCOPES = "offline read:recovery read:cycles read:sleep read:workout read:profile"
 
 
-def main() -> int:
-    env_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(".env")
+def main(argv: list[str] | None = None) -> int:
+    args = sys.argv[1:] if argv is None else argv
+    env_path = Path(args[0]) if args else Path(".env")
     env = read_env(env_path)
     client_id = env.get("WHOOP_CLIENT_ID") or os.environ.get("WHOOP_CLIENT_ID", "")
     client_secret = env.get("WHOOP_CLIENT_SECRET") or os.environ.get("WHOOP_CLIENT_SECRET", "")
@@ -79,7 +82,8 @@ def main() -> int:
         "client_secret": client_secret, "redirect_uri": REDIRECT,
     }).encode()
     try:
-        with urllib.request.urlopen(urllib.request.Request(TOKEN_URL, data=body), timeout=30) as resp:
+        request = urllib.request.Request(TOKEN_URL, data=body, headers={"User-Agent": AGENT, "Accept": "application/json"})
+        with urllib.request.urlopen(request, timeout=30) as resp:
             token = json.load(resp)
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode(errors="replace")[:300]

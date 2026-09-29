@@ -459,10 +459,13 @@ workouts on their own. Read-only: she can't change anything in Whoop.
    cd /opt/sloane && python3 scripts/whoop_auth.py
    ```
 
-   Open the link it prints (on your PC is fine), sign in, allow it. The browser
-   lands on a localhost page that won't load; that's expected. Copy that whole
-   address from the address bar and paste it into the box. It saves
-   `WHOOP_REFRESH_TOKEN` to `.env`.
+   Open the link it prints (on your PC is fine) **in an incognito window**, sign
+   in, allow it. (In a normal window, Whoop can answer "400 Request Header Or
+   Cookie Too Large" once its developer site has left a pile of cookies.) The
+   browser lands on a localhost page that won't load; that's expected. Copy that
+   whole address from the address bar and paste it into the box. It saves
+   `WHOOP_REFRESH_TOKEN` to `.env`. Keep that address to yourself: it carries a
+   one-time code.
 4. `sudo systemctl restart sloane`. The Whoop panel fills in within a minute.
 
 Whoop replaces the refresh token every time it's used, so she keeps the
