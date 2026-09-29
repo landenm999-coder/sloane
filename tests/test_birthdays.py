@@ -72,6 +72,8 @@ async def integration() -> None:
         check("and nothing was saved", (await store._one("select count(*) as n from people where birth_month = 5"))["n"], 0)
         check("list", await cmd(), "Next up: Keegan Hart, in 7 days on Thu Oct 1.")
         check("FACTS: only the next two weeks", await skill.facts(), ["- BIRTHDAY Keegan Hart: Thu Oct 1 (in 7 days)"])
+        check("the widget's rows, no emoji", (await skill.panel())["items"][:1],
+              [{"name": "Keegan Hart", "date": "Oct 1", "days": 7}])
         check("a week out", [n.text for n in await skill.nudges()],
               ["🎂 Keegan Hart's birthday is a week from today (Thursday, Oct 1)."])
         now["at"] = datetime(2026, 9, 30, 12, 0, tzinfo=DEN)

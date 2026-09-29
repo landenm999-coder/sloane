@@ -1463,7 +1463,7 @@ class Store:
     async def recent_emails(self, limit: int = 20) -> list[Row]:
         return await self._fetch(
             """
-            select e.gmail_id, e.sender, e.sender_name, e.subject, e.category,
+            select e.gmail_id, e.thread_id, e.sender, e.sender_name, e.subject, e.category,
                    e.why, e.received_at, e.triaged_at, p.status as proposal_status
               from emails e
               left join proposals p on p.id = e.proposal_id

@@ -143,7 +143,9 @@ class Birthdays(Skill):
         if not soon:
             return None
         return {"title": "Birthdays", "lines": [f"🎂 {row['name']}: {when:%b} {when.day} ({_in(days)})"
-                                                for row, when, days in soon]}
+                                                for row, when, days in soon],
+                "items": [{"name": row["name"], "date": f"{when:%b} {when.day}", "days": days}
+                          for row, when, days in soon]}
 
     async def nudges(self) -> list[Nudge]:
         now = self.ctx.now()

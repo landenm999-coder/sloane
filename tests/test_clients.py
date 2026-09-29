@@ -114,6 +114,8 @@ async def integration() -> None:
         check("a closed client can still be named", (await cmd("bella")).speech, "Bella's Bakery: paid, $1,200.")
         check("drop", (await cmd("peak drop")).speech, "Took Peak Plumbing off the pipeline.")
         check("panel", (await clients.panel())["lines"], ["Lead: Parker Dental"])
+        check("the widget's rows", [(i["name"], i["stage"]) for i in (await clients.panel())["items"]],
+              [("Parker Dental", "lead")])
         now["at"] = datetime(2026, 9, 28, 15, 0, tzinfo=DEN)
         check("no nudge in the afternoon", await clients.nudges(), [])
         for i in range(8):

@@ -194,7 +194,9 @@ class Money(Skill):
         return [line]
 
     async def panel(self) -> dict | None:
-        week = await self._week_cents()
+        start, end = self._week()
+        rows = await self.ctx.store.expenses_between(start, end)
+        week = sum(r["cents"] for r in rows)
         budget = await self._budget()
         earned = await self._earned()
         if not week and not budget and earned is None:
@@ -202,7 +204,11 @@ class Money(Skill):
         lines = [f"Spent this week: {dollars(week)}" + (f" / {dollars(budget)}" if budget else "")]
         if earned is not None:
             lines.append(f"Earned (est.): {dollars(earned[1])}")
-        return {"title": "Money", "lines": lines}
+        # The control room draws the week against the budget, and the latest few.
+        return {"title": "Money", "lines": lines, "spent_cents": week, "budget_cents": budget,
+                "earned_cents": earned[1] if earned is not None else None,
+                "recent": [{"what": r["what"], "cents": r["cents"], "day": f"{r['spent_on']:%a}"}
+                           for r in reversed(rows[-4:])]}
 
     async def nudges(self) -> list[Nudge]:
         now = self.ctx.now()

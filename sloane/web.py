@@ -74,9 +74,15 @@ _JOB = re.compile(r"^[a-z_]{1,40}$")
 ASSETS = {"app.js": "text/javascript", "app.css": "text/css", "icon.svg": "image/svg+xml",
           "manifest.json": "application/manifest+json", "icon-180.png": "image/png", "icon-192.png": "image/png",
           "icon-512.png": "image/png"}
-# IBM Plex, served from here (the page loads nothing from outside). OFL: fonts/LICENSE.txt.
-FONTS = frozenset({"plex-sans-400.woff2", "plex-sans-500.woff2", "plex-sans-600.woff2", "plex-mono-400.woff2",
-                   "plex-mono-500.woff2"})
+# Onest, served from here (the page loads nothing from outside). OFL: fonts/LICENSE.txt.
+FONTS = frozenset({"onest-400.woff2", "onest-500.woff2", "onest-600.woff2"})
+# What the widgets' buttons may run through /api/do: adding, ticking, starting and stopping --
+# each one a command he could type, handled the same way. Nothing that reaches outside (no /sync,
+# /brief, /inbox), and nothing about her permissions (/trust, /revoke).
+BUTTONS = frozenset({"did", "habit", "list", "focus", "watch", "unwatch", "workout", "spent", "budget",
+                     "countdown", "birthday", "client", "news", "done", "remind", "remember"})
+MAX_BUTTON = 300
+_BUTTON = re.compile(r"^/([a-z]+)(?:\s|$)", re.I)
 # What a browser's recorder makes (Chrome and Firefox: WebM or Ogg; Safari: MP4),
 # as the extension the transcriber reads the format from.
 AUDIO = {"audio/webm": "webm", "audio/ogg": "ogg", "audio/mp4": "m4a", "audio/x-m4a": "m4a", "audio/aac": "m4a",
@@ -507,15 +513,19 @@ def inbox(rows: list, config, zone: ZoneInfo, now: datetime) -> dict:  # noqa: A
         at = r.get("received_at") or r.get("triaged_at")
         if r.get("category") not in INBOX_SHOWN or not isinstance(at, datetime) or at < since:
             continue
+        thread = str(r.get("thread_id") or "")
         items.append({"from": safe_field(r.get("sender_name") or r.get("sender") or "someone", limit=60),
                       "subject": safe_field(r.get("subject") or "(no subject)", limit=140),
                       "category": r["category"], "when": _when(at, zone, now.date()),
-                      "draft": r.get("proposal_status") or ""})
+                      "draft": r.get("proposal_status") or "",
+                      # Gmail's own id for the thread (hex), so the row opens it there; nothing else passes.
+                      "thread": thread if _THREAD.match(thread) else ""})
     return {"ready": bool(config.gmail_refresh_token), "items": items[:8],
             "waiting": sum(1 for i in items if i["category"] in ("urgent", "reply"))}
 
 
 INBOX_SHOWN = ("urgent", "reply", "fyi")
+_THREAD = re.compile(r"^[0-9a-f]{8,32}$")
 
 
 # -- the panels ------------------------------------------------------------------------------
@@ -1009,6 +1019,27 @@ def install(app: FastAPI, state: dict, store, config) -> None:  # noqa: ANN001, 
             return (f"Closed: {row['summary']}.", True) if row else ("That one's already closed.", False)
         return await act(request, doing)
 
+    @app.post("/api/do")
+    async def do_command(request: Request) -> Response:
+        """A widget's button: one of his own commands (BUTTONS), run as if he typed it. His click is
+        the ask (invariant 9); no model, and nothing added to the conversation. Her answer is the toast."""
+        async def doing():  # noqa: ANN202
+            try:
+                command = str((await request.json()).get("command") or "").strip()
+            except (ValueError, AttributeError):
+                command = ""
+            found = _BUTTON.match(command)
+            if not found or "\n" in command or len(command) > MAX_BUTTON or found.group(1).lower() not in BUTTONS:
+                return "That isn't something a button here does.", False
+            bot = state.get("responder")
+            if bot is None:
+                return "She isn't ready yet.", False
+            reply = await bot.run_command(command)
+            if reply is None:
+                return "Nothing answers that.", False
+            return reply.speech, True
+        return await act(request, doing)
+
     @app.post("/api/jobs/{name}/run")
     async def run_job(name: str, request: Request) -> Response:
         async def doing():  # noqa: ANN202
@@ -1016,7 +1047,11 @@ def install(app: FastAPI, state: dict, store, config) -> None:  # noqa: ANN001, 
                 return "No such job.", False
             result = await state["scheduler"].run(name)
             said = result.reply.speech if result.reply else ""
-            return (f"{name}: {result.reason}" + (f" — {said}" if said else "")), bool(result.ran)
+            # Said the way a person would: "Inbox triage ran." / "Thinking didn't run: he's at work."
+            label = JOB_NAMES.get(name, name.replace("_", " ").capitalize())
+            why = "" if result.reason in ("", "ok") else f": {result.reason}"
+            text = f"{label} ran{why}." if result.ran else f"{label} didn't run{why or ''}."
+            return (text + (f" {said}" if said else "")), bool(result.ran)
         return await act(request, doing)
 
     # -- the workshop (sloane/workshop.py) ---------------------------------------------------------
