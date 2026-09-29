@@ -6,7 +6,7 @@ uvicorn[standard]==0.53.0   # the ASGI server
 pydantic-settings==2.15.0   # env -> typed Settings
 psycopg[binary,pool]==3.3.6 # Postgres, with dict_row and an async pool
 httpx==0.28.1               # Telegram and Groq; the only HTTP client
-fastembed==0.8.0            # bge-small-en-v1.5, 384-dim, local, no API key
+fastembed==0.8.1            # bge-small-en-v1.5, 384-dim, local, no API key
 icalendar==7.3.0            # the .ics feed; pulls dateutil, which expands RRULEs
 apscheduler==3.11.3         # the five daily briefs; one small dep (tzlocal)
 piper-tts==1.8.0            # the local voice (British, or the fallback); espeak bundled, onnxruntime shared
