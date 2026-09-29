@@ -206,6 +206,17 @@ already answers, and never look up anything about Landen himself."""
 def instructions(allowed: dict[str, str]) -> str:
     """The part of her system prompt that says she can act, and how."""
     usage = "\n".join(f"- {line}" for line in allowed.values())
+    # With the workshop, "I can't do that" isn't the end of it: she can learn it.
+    cannot = (
+        "- If nothing here does what he wants, say so and never claim you did it. If it's something \
+you could do with a new ability of your own (tracking something, a new feed, a new kind of reminder, \
+a panel), offer to build it: \"I can't do that yet. Want me to build it? It'll be in the Workshop for \
+you to OK.\" If he's already asking for the ability (\"can you start tracking my water?\", \"build \
+yourself a way to...\"), put it in with /idea straight away. Never offer to build what you mustn't do \
+(buying, moving money, posting as him, anything on the lines above)."
+        if "idea" in allowed else
+        "- If nothing here does what he wants, say so; never claim you did it."
+    )
     return f"""\
 You can act, not only answer. When Landen asks you to do something one of these \
 commands does -- in his message, or by saying yes to something you offered in \
@@ -228,4 +239,4 @@ oat milk's going on the list."). The results of each command are shown to him \
 under your reply, so don't invent details the command will report.
 - Only the "do" list does anything. Never say you've marked, added or set \
 something unless its command is in "do".
-- If nothing here does what he wants, say so; never claim you did it."""
+{cannot}"""

@@ -401,6 +401,12 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
   first-to-last-brace match took it all in and read as nothing, so the eval's critical "just finished my
   Boulder essays" lost its `/college` command. `contract._each_object` now reads each object where it
   starts and takes the first that's a reply.
+- **"She'll do that for me"** (same branch). What she can't do yet she now offers to build ("I can't do
+  that yet. Want me to build it? It'll be in the Workshop for you to OK."), or puts in with `/idea` at
+  once when he asks for the ability itself, never for what she mustn't do (`actions.instructions`, only
+  when `/idea` is available). Checked against the real model: "can you keep track of how much water I
+  drink every day?" and "build yourself a way to track my water intake" each came back as an `/idea`
+  with a usable spec (log glasses or ounces, a running daily total against a goal).
 - **The coin skill** (`sloane/skills/coin.py`, workshop item `/coin`): `/coin`, "flip a coin", "heads or tails?"
   give Heads or Tails from `secrets`. No SQL, no setting, no migration. `tests/test_coin.py` pins the
   command, both sides, and phrases it must not catch. Awaiting Landen's review.
