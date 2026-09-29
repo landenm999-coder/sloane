@@ -146,6 +146,32 @@ async def unit() -> None:
     check("facts from working skills", lines, ["- COUNTER at zero"])
     check("a failing skill is a note, not silence", notes, ["broken could not be read this turn"])
     check("panels mark a broken skill", await reg.panels(), {"broken": {"error": "unavailable"}, "counter": {"n": 0}})
+
+    # A feed that hangs must not hang the page: its panel is left out, and its fetch finishes anyway.
+    import sloane.skills as skills_module
+
+    class Slow(Skill):
+        name = "slow"
+        finished = False
+
+        async def panel(self):
+            await asyncio.sleep(0.3)
+            Slow.finished = True
+            return {"title": "Slow", "lines": ["late"]}
+
+    was = skills_module.PANEL_SECONDS
+    skills_module.PANEL_SECONDS = 0.05
+    try:
+        slow_ctx = SkillContext(store=store, config=isolated())
+        started = asyncio.get_running_loop().time()
+        got = await Registry([Slow(slow_ctx), Counter(slow_ctx)], slow_ctx).panels()
+        waited = asyncio.get_running_loop().time() - started
+        check("a slow panel is left out, the rest shown, and the page doesn't wait",
+              (got, waited < 0.25), ({"slow": {"error": "slow"}, "counter": {"n": 0}}, True))
+        await asyncio.sleep(0.4)
+        check("and its fetch still finished, for next time", Slow.finished, True)
+    finally:
+        skills_module.PANEL_SECONDS = was
     check("nudges skip a broken skill", await reg.nudges(), [Nudge("counter:hello", "hello")])
 
     ctx = SkillContext(store=store, config=isolated())

@@ -1358,7 +1358,8 @@ class Store:
     BACKUP_TABLES = ("state", "people", "commitments", "courses", "trust", "reminders", "jobs",
                      "list_items", "countdowns", "cards", "habits", "habit_log",
                      "clients", "client_notes", "focus_sessions", "expenses", "skill_settings",
-                     "colleges", "college_tasks", "roleplays", "workshop_items", "dashboard_prefs")
+                     "colleges", "college_tasks", "roleplays", "workshop_items", "dashboard_prefs",
+                     "workouts", "watchlist")
 
     async def restore_rows(self, table: str, rows: Sequence[Row]) -> int:
         """Merge backed-up rows back in. Existing rows win; returns rows inserted.
@@ -2391,44 +2392,7 @@ class Store:
             (key,),
         )
 
-    # -- recent (reads only; no table of its own) -----------------------------------------------
-
-    async def recent_captures(self, limit: int, since: datetime | None = None) -> list[Row]:
-        """What he last saved by hand, newest first: kind, what, place, at.
-
-        One row per save across /idea, /remember, /followup, /list, /promise, /remind and /spent.
-        Only his own saves: not her ideas, nightly-learned facts, timers or snoozes.
-        """
-        return await self._fetch(
-            """
-            select * from (
-              select 'idea' as kind, title as what, status as place, created_at as at
-                from workshop_items where origin = 'him' and kind = 'build'
-              union all
-              select 'remember', value, null, updated_at
-                from state where category = 'learned' and pinned and source like 'told%%'
-              union all
-              select 'followup', summary, due_on::text, opened_at
-                from working_set where kind = 'follow_up'
-              union all
-              select 'list', item, list, added_at from list_items
-              union all
-              select 'promise', what, null, promised_at from commitments
-              union all
-              select 'remind', text, due_at::text, created_at
-                from reminders where source in ('telegram', 'capture') and cancelled_at is null
-              union all
-              select 'spent', what, category || ' ' || cents::text, created_at
-                from expenses where archived_at is null
-            ) captured
-             where (%s::timestamptz is null or at >= %s)
-             order by at desc
-             limit %s
-            """,
-            (since, since, limit),
-        )
-
-    # -- colleges (sql/026)-----------------------------------------------------------------
+    # -- colleges (sql/026) -----------------------------------------------------------------
 
     async def add_college(self, name: str, *, nickname: str | None = None, plan: str | None = None,
                           deadline: date | None = None, tasks: Sequence[str] = ()) -> Row | None:
@@ -2532,6 +2496,93 @@ class Store:
         return await self._fetch(
             "select * from roleplays order by finished_at desc, id limit %s",
             (limit,),
+        )
+
+    # -- workouts (sql/033) -------------------------------------------------------------------
+
+    async def add_workout(self, *, kind: str, minutes: int | None, distance_m: float | None, done_on: date,
+                          logged_at: datetime, source: str = "him", source_id: str | None = None) -> Row | None:
+        """The row, or None when that source's workout was already logged."""
+        return await self._one(
+            """
+            insert into workouts (kind, minutes, distance_m, done_on, logged_at, source, source_id)
+            values (%s, %s, %s, %s, %s, %s, %s)
+            on conflict (source, source_id) where source_id is not null do nothing
+            returning *
+            """,
+            (kind, minutes, distance_m, done_on, logged_at, source, source_id),
+        )
+
+    async def workouts_since(self, since: date) -> list[Row]:
+        return await self._fetch(
+            "select * from workouts where done_on >= %s order by done_on, logged_at", (since,)
+        )
+
+    async def last_workout(self) -> Row | None:
+        return await self._one("select * from workouts order by done_on desc, logged_at desc limit 1")
+
+    async def undo_workout(self, since: datetime) -> Row | None:
+        """Take back the last one he logged himself, if it was logged after `since`."""
+        return await self._one(
+            """
+            delete from workouts where id = (
+              select id from workouts where source = 'him' and logged_at >= %s
+               order by logged_at desc limit 1)
+            returning *
+            """,
+            (since,),
+        )
+
+    # -- markets (sql/034) ------------------------------------------------------------------
+
+    async def watchlist(self) -> list[str]:
+        return [r["symbol"] for r in await self._fetch("select symbol from watchlist order by added_at, symbol")]
+
+    async def watch(self, symbol: str) -> bool:
+        """True if it's new on the list."""
+        row = await self._one(
+            "insert into watchlist (symbol) values (%s) on conflict (symbol) do nothing returning symbol", (symbol,)
+        )
+        return row is not None
+
+    async def unwatch(self, symbol: str) -> bool:
+        return await self._one("delete from watchlist where symbol = %s returning symbol", (symbol,)) is not None
+
+    # -- recent (reads only; no table of its own) -----------------------------------------------
+
+    async def recent_captures(self, limit: int, since: datetime | None = None) -> list[Row]:
+        """What he last saved by hand, newest first: kind, what, place, at.
+
+        One row per save across /idea, /remember, /followup, /list, /promise, /remind and /spent.
+        Only his own saves: not her ideas, nightly-learned facts, timers or snoozes.
+        """
+        return await self._fetch(
+            """
+            select * from (
+              select 'idea' as kind, title as what, status as place, created_at as at
+                from workshop_items where origin = 'him' and kind = 'build'
+              union all
+              select 'remember', value, null, updated_at
+                from state where category = 'learned' and pinned and source like 'told%%'
+              union all
+              select 'followup', summary, due_on::text, opened_at
+                from working_set where kind = 'follow_up'
+              union all
+              select 'list', item, list, added_at from list_items
+              union all
+              select 'promise', what, null, promised_at from commitments
+              union all
+              select 'remind', text, due_at::text, created_at
+                from reminders where source in ('telegram', 'capture') and cancelled_at is null
+              union all
+              select 'spent', what, category || ' ' || cents::text, created_at
+                from expenses where archived_at is null
+            ) captured
+             where (%s::timestamptz is null or at >= %s)
+             order by at desc
+             limit %s
+            """,
+            (since, since, limit),
         )
 
 

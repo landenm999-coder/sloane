@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     # claude_code | groq | anthropic
     main_provider: str = "claude_code"
     bulk_provider: str = "groq"
+    # Spoken conversation in the control room: a fast model answers quick
+    # back-and-forth, and hands to the main lane anything she has to do (act,
+    # look up, plan, build). Blank: every spoken turn goes to the main lane.
+    quick_provider: str = "groq"
 
     # --- claude code CLI (draws on the Claude Pro subscription, not credits) --
     claude_cli: str = "claude"
@@ -199,6 +203,29 @@ class Settings(BaseSettings):
     weather_units: str = "fahrenheit"  # or celsius
     # Overridable so tests can point it at a local stub.
     weather_api_base: str = "https://api.open-meteo.com/v1"
+
+    # Markets (skills/markets.py): delayed quotes for his watchlist, no key.
+    # Yahoo's chart API for stocks, funds, indexes and crypto; CoinGecko for
+    # crypto when Yahoo won't answer. Overridable for tests.
+    markets_api_base: str = "https://query1.finance.yahoo.com"
+    markets_crypto_base: str = "https://api.coingecko.com/api/v3"
+
+    # News (skills/news.py): Google News RSS, no key. Headlines are outside
+    # text: shown and read out as such, never in FACTS.
+    news_api_base: str = "https://news.google.com"
+    news_region: str = "US"  # the edition: US, GB, CA, AU, IN...
+
+    # Whoop (skills/whoop.py): recovery, sleep, strain and workouts, read-only.
+    # An app at developer.whoop.com and a refresh token minted once by
+    # scripts/whoop_auth.py. Whoop replaces the refresh token every time it's
+    # used, so after the first use she keeps the current one in WHOOP_TOKEN_FILE
+    # (default: <EMBED_CACHE_DIR>/whoop.json, on the box's volume, chmod 600),
+    # never in the database or a backup. All three blank means no Whoop skill.
+    whoop_client_id: str = ""
+    whoop_client_secret: str = ""
+    whoop_refresh_token: str = ""
+    whoop_token_file: str = ""
+    whoop_api_base: str = "https://api.prod.whoop.com"
 
     # Study plan (skills/plan.py): when his own time starts and ends, "HH:MM".
     # School days start after school; the shift and its commute are carved out.

@@ -114,12 +114,26 @@ GROUNDED = [
     ("/roleplay marketing", "let's do a marketing roleplay", "", True),
     ("/roleplay", "quiz me with a DECA roleplay", "", True),
     ("/roleplay", "ugh DECA is stressing me out", "", False),
+    # What she can't do yet, she can learn: asked outright, or a yes to her offer to build it.
+    ("/idea track how much water I drink", "can you start tracking how much water I drink?", "", True),
+    ("/idea a water intake tracker", "yes", "I can't track that yet. Want me to build a water intake tracker?", True),
+    ("/idea a water intake tracker", "no", "I can't track that yet. Want me to build a water intake tracker?", False),
+    ("/idea a crypto trading bot", "how's my water intake looking?", "", False),
 ]
 for command, said, offer, want in GROUNDED:
     check(f"grounded({command!r}, {said!r})", actions.grounded(command, said, offer), want)
 guide = actions.instructions(allowed)
 check("the instructions name the commands and the rules",
       ("/list add" in guide, "Never on your own initiative" in guide, '"do"' in guide), (True, True, True))
+# "Once she's speaking I shouldn't have to build anything else in Claude": what she can't do yet, she
+# offers to build (the workshop), or puts in at once when he's asking for the ability itself.
+shop = actions.instructions(actions.available({"list", "idea"}))
+check("with the workshop: can't do it yet means offer to build it, or put it in when he asks for it",
+      ("Want me to build it?" in shop, "put it in with /idea straight away" in shop,
+       "Never offer to build what you mustn't do" in shop), (True, True, True))
+bare = actions.instructions(actions.available({"list"}))
+check("without it, no offer she couldn't keep", ("Want me to build it?" in bare, "say so; never claim you did it" in bare),
+      (False, True))
 
 # -- the contract carries them ---------------------------------------------------------
 got = parse('{"speech": "On it.", "detail": "On it.", "do": ["/list add grocery: milk", 7, "  ", "/remind 7pm x"]}')

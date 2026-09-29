@@ -45,7 +45,7 @@ h1, h2, h3, h4, p { margin: 0; }
 .count { letter-spacing: 0; }
 
 /* -- the orb: a HUD core with rings, inline SVG from one function (app.js `orb`) ------------------ */
-.orb { --size: 44px; width: var(--size); height: var(--size); position: relative; flex: none; color: #7fd1c1; }
+.orb { --size: 44px; display: block; width: var(--size); height: var(--size); position: relative; flex: none; color: #7fd1c1; }
 .orb svg { width: 100%; height: 100%; overflow: visible; display: block; position: relative; }
 .orb .spin { transform-origin: 50px 50px; transform-box: view-box; }
 .orb .r1 { animation: rot 40s linear infinite; }
@@ -74,6 +74,7 @@ h1, h2, h3, h4, p { margin: 0; }
 .orb[data-state="needs"] { color: #f0a08f; }
 .orb[data-state="needs"] .core { animation: breathe 1.4s ease-in-out infinite; }
 .orb[data-state="needs"] .r1, .orb[data-state="needs"] .r2 { animation-play-state: paused; }
+.orb[data-state="speaking"].live .bars line { opacity: .9; animation: none; transition: transform .08s linear; }
 .orb.sm { --size: 26px; }
 .orb.sm .r1, .orb.sm .bars, .orb.sm .prog { display: none; }
 @keyframes rot { to { transform: rotate(360deg); } }
@@ -288,6 +289,57 @@ button.pn:hover { border-color: var(--dim); }
 .pips i { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid var(--dim); }
 .pips i.y { background: var(--now); border-color: var(--now); }
 .late { color: var(--due); }
+/* packed: a grid of 4px rows, each panel spanning its own height (app.js pack) */
+.panels.packed { grid-auto-rows: 4px; row-gap: 0; }
+.panels.packed > .pn { align-self: start; margin-bottom: 12px; }
+/* a panel with nothing yet: what it's for, and one way to fill it */
+.pn.empty-pn { background: transparent; border-style: dashed; }
+.pn .note { color: var(--dim); }
+.pn .starts .chip { min-height: 26px; font-size: 11.5px; padding: 2px 9px; }
+/* markets */
+.mk { display: grid; gap: 7px; font-size: 12.5px; }
+.mk .r { display: grid; grid-template-columns: minmax(44px, 1fr) 40px auto; gap: 8px; align-items: center; }
+.mk .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mk .px { display: grid; text-align: right; line-height: 1.25; }
+.mk .px b { font-weight: 400; font-size: 12px; }
+.mk .px .chg { font-size: 10.5px; }
+.chg.up { color: var(--good); } .chg.down { color: var(--due); }
+.spark { width: 40px; height: 16px; overflow: visible; }
+.spark polyline { fill: none; stroke-width: 1.4; stroke-linejoin: round; stroke-linecap: round; }
+.spark.up polyline { stroke: var(--good); } .spark.down polyline { stroke: var(--due); }
+/* news: other people's words, as text; links out */
+.nw { gap: 8px !important; }
+.nw li { display: grid; gap: 1px; line-height: 1.35; }
+.nw a { color: var(--fg); text-decoration: none; }
+.nw a:hover { text-decoration: underline; text-decoration-color: var(--dim); text-underline-offset: 3px; }
+/* inbox */
+.ib { gap: 7px !important; }
+.ib li { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; grid-template-areas: "dot who when" ". subj subj"; gap: 0 8px; align-items: center; }
+.ib .dot { grid-area: dot; width: 7px; height: 7px; border-radius: 50%; background: var(--dim); }
+.ib .urgent .dot { background: var(--due); } .ib .reply .dot { background: var(--work); }
+.ib .who { grid-area: who; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib .when { grid-area: when; font-family: var(--mono); font-size: 10.5px; }
+.ib .subj { grid-area: subj; color: var(--mut); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* whoop: the ring is the recovery, in its zone's colour */
+.ring .done.green { stroke: var(--good); } .ring .done.yellow { stroke: var(--work); } .ring .done.red { stroke: var(--due); }
+.wh { display: flex; gap: 16px; font-size: 11.5px; color: var(--mut); }
+.wh b { display: block; font-size: 15px; font-weight: 500; color: var(--fg); }
+/* workouts */
+.big-n .of { font: 400 12px var(--ui); color: var(--mut); letter-spacing: 0; }
+.wo { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; height: 44px; align-items: end; text-align: center;
+  font: 9.5px var(--mono); color: var(--mut); }
+.wo span { display: grid; grid-template-rows: minmax(0, 1fr) auto; height: 100%; align-items: end; gap: 2px; }
+.wo i { display: block; border-radius: 2px; background: var(--raise-2); min-height: 3px; }
+.wo i.y { background: var(--now); }
+.wo .today { color: var(--fg); }
+/* school, small */
+.school-links { display: flex; gap: 10px; font-size: 12px; }
+.school-links .hot-due { color: var(--due); }
+.sc li { display: grid; gap: 0; line-height: 1.35; }
+.sc .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gchips { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 11.5px; color: var(--mut); }
+.gchips b { color: var(--fg); font-weight: 500; }
+.gchips .low b { color: var(--due); }
 
 /* -- the chat, always open on the right ----------------------------------------------------------- */
 .chat { border-left: 1px solid var(--line); background: var(--raise); display: flex; flex-direction: column; min-width: 0; min-height: 0; }
@@ -336,6 +388,25 @@ button.pn:hover { border-color: var(--dim); }
 .composer .send { color: var(--now); }
 .composer .send:disabled { opacity: .4; cursor: default; }
 .mic[aria-pressed="true"] { color: var(--bg); background: var(--due); border-color: var(--due); }
+
+/* -- a call: the orb starts one; the bar says whose turn it is --------------------------------------- */
+.orb-talk { background: none; border: 0; padding: 0; margin: 0; border-radius: 50%; flex: none; color: inherit; cursor: pointer; }
+.orb-talk:disabled { cursor: default; }
+.orb-talk:focus-visible { outline: 2px solid var(--now); outline-offset: 4px; }
+.btn.call { display: inline-flex; align-items: center; gap: 6px; color: var(--now);
+  border-color: color-mix(in srgb, var(--now) 45%, var(--line)); }
+.btn.call .ico { width: 16px; height: 16px; }
+.btn.call[aria-pressed="true"] { color: var(--due); border-color: var(--due); }
+.callbar { margin: 0 12px 8px; display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 12px; flex: none;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--bg); font-size: 12.5px; }
+.callbar b { font-weight: 500; white-space: nowrap; }
+.callbar .hint { color: var(--mut); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.callbar .pulse { width: 8px; height: 8px; border-radius: 50%; flex: none; background: #9ee6d6; animation: breathe 1.4s ease-in-out infinite; }
+.callbar[data-phase="hearing"] .pulse { animation-duration: .45s; }
+.callbar[data-phase="thinking"] .pulse { background: #a9b8f0; }
+.callbar[data-phase="speaking"] .pulse { background: #b6f0e2; animation-duration: .38s; }
+body.calling .starters { display: none; }
+body.calling .chat-head .js-orb { cursor: pointer; }
 .composer.recording { border-color: var(--due); }
 
 /* -- memory, workshop, engine ------------------------------------------------------------------- */

@@ -46,7 +46,7 @@ async def integration() -> None:
     async with Store(config) as store:
         await store._exec("truncate workshop_items, list_items, commitments, reminders, expenses cascade")
         await store._exec("delete from working_set where kind = 'follow_up'")
-        await store._exec("delete from state where key like 'learned.%'")
+        await store._exec("delete from state where key like %s", ("learned.%",))
         ctx = SkillContext(store=store, config=config, clock=lambda: now)
         recent = Recent(ctx)
         reg = Registry([recent], ctx)
@@ -132,7 +132,7 @@ async def integration() -> None:
 
         await store._exec("truncate workshop_items, list_items, commitments, reminders, expenses cascade")
         await store._exec("delete from working_set where kind = 'follow_up'")
-        await store._exec("delete from state where key like 'learned.%'")
+        await store._exec("delete from state where key like %s", ("learned.%",))
         check("nothing yet", (await reg.route("what did I just capture?")).speech,
               "You haven't captured anything yet.")
         check("nothing today", (await reg.route("what did I capture today?")).speech, "Nothing captured today.")

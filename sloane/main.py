@@ -72,6 +72,7 @@ def create_app() -> FastAPI:
         agent = Agent(store, config, router=router, embedder=embedder, skills=skills)
         voice = Voice(router, store, config)
         state["agent"] = agent
+        state["router"] = router  # the control room speaks through it (/api/speak)
         state["embedder"] = embedder
         state["skills"] = skills
 

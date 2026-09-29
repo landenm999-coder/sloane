@@ -239,10 +239,19 @@ Timeline, dark only, an orb that shows what she's doing, more panels) and asked 
   on the phone. Every text colour ≥4.5:1 on every surface (`--dim` is only for strokes). Past timeline rows
   are at 45% opacity, as the design asks, which puts their text under 4.5:1.
 
-**First night on real data (2026-09-28, his Surface under WSL).** Landen installed her (Ubuntu-24.04 under
-WSL; Docker Desktop's `docker` on the Windows PATH made the installer skip installing Docker Engine, so he
-installed it by hand with get.docker.com: the installer's check should look past a `docker` under `/mnt/`,
-backlog). His screenshots showed what the seeded demo hid: the header said "55 waiting on you" (every missed
+**She's live on the Oracle box.** An earlier session (not recorded here until now) set her up on an Oracle
+Cloud ARM instance (`ubuntu@<its public IP>`, hostname `sloane`; the SSH key is `ssh-key-2026-09-27.key` in
+his Downloads). By 2026-09-28 she was running there for real: Telegram polling, the jobs on schedule,
+Canvas and the calendar syncing, the Piper British voice, and the workshop building `/coin` and merging it
+on his Accept. Upgrading is: SSH in, rerun the installer. With no Tailscale set up on his laptop, the control
+room is reached through an SSH tunnel (DEPLOY 7e).
+
+**First night on real data (2026-09-28).** Asked to deploy #18, a session (not knowing about the Oracle box)
+walked him through a second install on his Surface, in Ubuntu-24.04 under WSL. It shared the box's
+Supabase, so it re-seeded the same starting facts and courses (no harm) and, until it was switched off
+(`systemctl disable --now sloane sloane-upgrade.path` there), polled the same Telegram bot. The box was then
+upgraded over SSH. That detour found an installer gap (Docker Desktop's `docker` on the Windows PATH made
+it skip installing Docker Engine; backlog 8). His screenshots showed what the seeded demo hid: the header said "55 waiting on you" (every missed
 Canvas item counted as needing him) and counted down to one of her plan's suggested stretches by its full
 assignment title; most of the grid was empty on a new install; Windows drew grey scrollbars with arrows; a
 deferred job's "gmail is not configured" was red. Fixed: "waiting" is approvals, what's broken, failed jobs
@@ -252,9 +261,9 @@ the /done hint); the countdown is shifts, events and a running focus session, cl
 those panels have nothing; thin dark scrollbars; a deferred job's reason is grey; timeline titles stop at
 two lines; the timeline opens scrolled to now.
 
-**She has never run against the real services.** This sandbox can't reach Telegram, Groq, Canvas, Google or
-Supabase. Everything external is tested against local stubs, and the real-model eval (via `claude -p`) scores
-58/58. The next real milestone is Landen deploying it.
+**Testing here is still against stubs.** This sandbox can't reach Telegram, Groq, Canvas, Google or Supabase:
+everything external is tested against local stubs, and the real-model eval (via `claude -p`) scores 68/68. Her
+real behaviour is on the Oracle box; ask Landen for screenshots or `doctor.py` output when it matters.
 
 ---
 
@@ -299,6 +308,7 @@ Supabase. Everything external is tested against local stubs, and the real-model 
 | Command menu (PR #12) | at every start she sets Telegram's "/" menu for his chat only (scope: his chat), built by `telegram.menu()` from the same lines `/help` shows (`EVERYDAY_HELP`, skills' `help`, `BEHIND_HELP`), so a new skill appears on its own. A failure is logged, never fatal | `sloane/telegram.py`, `main.py`, `tests/test_format.py`, `tests/test_boot.py` |
 | Supabase API lockdown (PR #12) | `sql/999_lock_public.sql`, sorted last and re-applied by every install and upgrade: row-level security on every table in `public` (no policies) and all grants revoked from Supabase's `anon`/`authenticated` roles, so the project's auto REST API sees nothing and the security advisor has nothing to email about. She connects as the tables' owner, which RLS doesn't restrict (verified with a non-superuser owner and Supabase-style default grants). Doctor's `api lockdown` line checks it | `sql/999_lock_public.sql`, `scripts/doctor.py` |
 | Planted entries (PR #12) | `ingest.planted()` (narrow: an override phrase *addressed to her*, or an unmistakable marker); the heartbeat tells him once per calendar entry in the next 14 days (`planted:event:<id>`, skills or none); the entry's FACTS line is marked so she neither obeys it nor repeats the warning. Before this she flagged the eval's planted invite in almost every answer | `ingest.py`, `jobs/briefs.py` `planted_nudges`, `memory/tiers.py`; tests in `test_tiers`, `test_heartbeat` |
+| Life skills (PR #20) | workouts (sql/033: by rule, weekly goal, Whoop's too), markets (sql/034 watchlist; Yahoo chart API, CoinGecko fallback; FACTS from cache), news (Google News RSS; tainted answers, never FACTS), Whoop (API v2, rotating refresh token on the volume) | `skills/{workouts,markets,news,whoop}.py`, `scripts/whoop_auth.py`, `tests/test_{workouts,markets,news,whoop}.py` |
 | DECA (PR #12) | `/roleplay [area]`: a model-written scenario (event, role, judge, situation, five PIs), then a session where the judge stays in character (typed or voice), two follow-up questions after "I'm done", and a score on the DECA form (PIs 0–14, four 21st Century Skills 0–6, overall 0–6) **totalled in code**; `roleplays` table (sql/027), FACTS line with recent scores + "work on", TV panel, an evening nudge when a DECA countdown is ≤14 days out and no practice in 3 days; `/roleplay` on the actions allowlist. Live-checked against the real CLI: a presentation that missed the brief was pushed back on in character and scored 19/100 with specific notes | `sloane/skills/deca.py`, `sql/027`, `tests/test_deca.py` |
 | Slow skills (PR #12) | a command or skill still working after 0.6 s shows "typing…" (a role-play's judge, `/cards make`); instant ones never flash it. The actions instructions now also say recording what he reports isn't initiative, and that only the "do" list does anything (she once said "marking that off" with no command) | `telegram.py` `SLOW_SKILL_SECONDS`, `actions.instructions`; `test_live` |
 | JSON repair (PR #12) | `contract.loads_lenient`/`closed`: the CLI sometimes drops an object's final `}` (1 in 3 scenario calls, live). Unrepaired, a reply came out as raw JSON (read aloud, actions lost). Every model-JSON parser now uses it: `contract.parse`, inbox triage, learn, `/cards make`, deca | `contract.py`; regression checks in test_contract, test_cards, test_learn, test_mail, test_deca |
@@ -333,17 +343,80 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
 
 ## In flight
 
-- **The control room from the mockup** (branch `claude/nifty-thompson-5h6l2x`, draft PR): see "The control
-  room, from the mockup" above. Merging it and rerunning the installer is all the box needs: sql/032
-  applies itself, `FOCUS_GOAL_MINUTES` has a default, nothing new to paste. It replaces the page from #16.
+- **Talking to her in the control room** (branch `claude/nifty-thompson-5h6l2x`, draft
+  landenm999-coder/sloane#20). Landen: "an assistant for anything I need... speak in conversations, quick,
+  not a long wait". Built so far:
+  - *A call*: **Talk** in the chat head, or tap the big orb. Hands-free: an `AnalyserNode` level check every
+    40 ms (the room's noise followed slowly; 160 ms above the line starts his turn, 850 ms below ends it;
+    under 300 ms of voice is a cough, dropped), the recording goes as a voice note (`/api/voice`), she
+    answers out loud and listens again. The mic is off while she thinks and talks (she never hears
+    herself); tap the orb to cut in, End or Esc hangs up, four quiet minutes hang up.
+  - *Her own voice*: `POST /api/speak` (WAV from `Router.speak`, Piper or Groq, accounted as `talk` so
+    Telegram's `DAILY_SPEAK_BUDGET` isn't spent), asked sentence by sentence while the reply streams, one
+    at a time in order (the next is made while this one plays); the browser's voice when the server has
+    none (retried after 5 minutes). The orb's bars follow her audio. The speaker button says every reply.
+  - *The fast lane*: `QUICK_PROVIDER` (Groq, default). A spoken turn with nothing to do in it
+    (`agent.needs_hands`: remind, add, send, plan, build, look up...) goes to the fast model with a slim
+    context (`QUICK_BUDGETS`) and the `persona.QUICK` prompt: short, spoken, and `{"handoff": true}` for
+    anything she'd need to act, look up or think hard about. A hand-off, an attempted action, empty speech
+    or the fast model down (Groq's free-tier cap) all fall through to the main lane, Claude, as before.
+    Typed messages and Telegram are unchanged.
+  - Verified: `tests/test_agent.py` (the lane's routing), `tests/test_router.py` (quick lane, speak
+    purposes), `tests/test_web.py` (`/api/speak`, `quick` only when spoken); a whole call in Chromium
+    with a fake mic at 1440 and 390 wide (two turns, the cut-in, Esc, nothing sent after hanging up).
+  Nothing new to paste on the box: `QUICK_PROVIDER` defaults to groq and uses the existing `GROQ_API_KEY`.
+- **A life dashboard, not a school tracker** (same branch and PR). Landen: "stop trying to do all this school
+  stuff... this dashboard should have everything I need... no empty space". Built:
+  - *Today*: the timeline is his calendar, shifts, reminders and a running focus session (`web.agenda` drops
+    due work and her study-plan stretches; Telegram's `/today` still lists both). The header counts what's
+    waiting on him and emails to answer, nothing from school. Every panel that's on shows (`PANELS`, life
+    first), packed like bricks (`app.js pack`: 4px grid rows, each panel spanning its height), and one with
+    nothing yet is dashed with what it's for and one button to fill it (`EMPTY`). School is one small panel
+    (due soon, overdue and this week's counts opening the list, grades, the next college deadline); grades,
+    the week's heat, colleges, flashcards and DECA are their own panels, off by default.
+  - *Four skills*: **workouts** (sql/033, logged by rule, a weekly goal, FACTS, a week of bars), **markets**
+    (sql/034 `watchlist`, Yahoo chart API + CoinGecko fallback, S&P/Nasdaq/Bitcoin when the list is empty,
+    FACTS from the cache only), **news** (Google News RSS, topics in `skill_settings`, headlines are outside
+    text: `safe_field`, `Answer(tainted=True)`, never FACTS), **Whoop** (API v2, read-only; rotating refresh
+    token kept in `WHOOP_TOKEN_FILE` on the volume, fingerprinted to the .env token it grew from;
+    `scripts/whoop_auth.py`; its workouts into the workouts table once each). All four tested against stub
+    servers (`tests/test_{workouts,markets,news,whoop}.py`); none of their real APIs is reachable from the
+    sandbox, so the first real fetch is on the box. Yahoo is unofficial and may refuse the Oracle box's IP:
+    then stocks say "can't reach the markets" and crypto still comes from CoinGecko.
+  - *Inbox*: the overview's `inbox` (the last three days' triaged mail, never "ignore", senders and
+    subjects flattened); needs Gmail (DEPLOY §7c). *Answers*: `skills.Answer` has `tainted`, carried into the
+    Reply. *Panels*: one slow to answer is left out after `PANEL_SECONDS` (4 s) while its fetch finishes in
+    the background, so a hung feed never hangs the page. `/workout` and `/watch` are on her actions list.
+  - Verified: the suite (59 suites), and the page in Chromium with stub feeds at 1440, 1024 and 390, full
+    and first-night (empty) data; a click-through of the chips, the School links and the packing.
+- **Stray tool-call tags in her replies** (same branch). On 2026-09-29 the model behind `claude -p` (CLI
+  2.1.284, no tools) began writing `<invoke name="noop"></invoke>` before its JSON on most turns, and
+  sometimes `<answer></answer>` or a misspelled `<invoire>` (4 of 6 replies to one question on `main` too).
+  Parsed as it was, a tag after prose became her detail and the command she'd written was lost (the eval's
+  critical "put AA batteries on my grocery list" failed on it), and the streamed draft (and a call's
+  voice) read the raw JSON after the tag. `contract.unstray` drops those tags, by name only, in `parse` and
+  `partial_reply`; `partial_reply` also switches to the JSON once it starts after prose. Pinned in
+  `tests/test_contract.py`. If new tag names turn up, add them to `_STRAY`. The same days showed prose,
+  then the JSON, then more with a brace in it (a second object, a tag's leftover `{}`): shape 3's
+  first-to-last-brace match took it all in and read as nothing, so the eval's critical "just finished my
+  Boulder essays" lost its `/college` command. `contract._each_object` now reads each object where it
+  starts and takes the first that's a reply.
+- **"She'll do that for me"** (same branch). What she can't do yet she now offers to build ("I can't do
+  that yet. Want me to build it? It'll be in the Workshop for you to OK."), or puts in with `/idea` at
+  once when he asks for the ability itself, never for what she mustn't do (`actions.instructions`, only
+  when `/idea` is available). Checked against the real model: "can you keep track of how much water I
+  drink every day?" and "build yourself a way to track my water intake" each came back as an `/idea`
+  with a usable spec (log glasses or ounces, a running daily total against a goal).
 - **The coin skill** (`sloane/skills/coin.py`, workshop item `/coin`): `/coin`, "flip a coin", "heads or tails?"
   give Heads or Tails from `secrets`. No SQL, no setting, no migration. `tests/test_coin.py` pins the
   command, both sides, and phrases it must not catch. Awaiting Landen's review.
 - **The recent skill** (`sloane/skills/recent.py`, workshop item "Show what I just captured"): `/recent`,
   `/recent 5`, `/recent today`, and "what did I just capture?" show his latest hand-saved items (/idea,
   /remember, /followup, /list, /promise, /remind, /spent), newest first, with when and where each went.
-  Reads only: one `Store.recent_captures` query, no table, no migration. `tests/test_recent.py` (integration,
-  listed in run.py). **Not yet run**: this session had no shell for the suite or pyflakes. Awaiting review.
+  Reads only: one `Store.recent_captures` query (in its own section at the end of `Store`), no table, no
+  migration. `tests/test_recent.py` (integration, listed in run.py). Her build had no shell to run it, and
+  its first CI run failed: the test's `like 'learned.%'` with no parameters is a bad placeholder to
+  psycopg. Fixed (the pattern is a parameter), `main` merged in; the whole suite passes. Awaiting review.
 
 - **The workshop reaching the box** (landenm999-coder/sloane#15 is merged): rerunning `install.sh` installs
   the upgrader (`.deploy/`, `host.json`, `sloane-upgrade.path`), applies `sql/031` and asks for
@@ -355,8 +428,9 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
 
 ## Backlog (ideas, in priority order)
 
-1. Whatever the first real week turns up. She has never run against real Telegram, Canvas, the calendar or
-   Groq; expect small fixes (DEPLOY's "try everything" table is the checklist). The workshop's first real
+1. Whatever her first real weeks turn up (she's live on the Oracle box; DEPLOY's "try everything" table is
+   the checklist). His first night with the new control room found real-data gaps the seeded demo hid
+   (fixed in #19); expect more of that kind. The workshop's first real
    builds on the box are part of that: watch the first few (CI time, how often the guard refuses, whether
    Sonnet's builds pass on the first go).
 2. The workshop, next: a "revise" button (his notes → a second build on the same branch, instead of Deny and
@@ -366,9 +440,11 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
    lock the account.
 4. P5 phone calls, beyond v1.
 5. Streaming for the Groq and Anthropic providers (`claude_code` and `local` stream; the others answer whole).
-6. The control room: her replies in her own voice (Groq/Piper audio, not the browser's; the orb's
-   "speaking" would then follow that audio), approvals there when Telegram isn't set up (today the agency
-   needs `TELEGRAM_CHAT_ID`), and the mockup's **Market** panel (needs a market data source first).
+6. The control room: approvals there when Telegram isn't set up (today the agency needs
+   `TELEGRAM_CHAT_ID`). A call that lets him talk over her (barge-in): today the mic is off while she
+   speaks, because echo cancellation on a laptop's speakers isn't reliable enough to keep her from hearing
+   herself. Drag to reorder panels. If Yahoo refuses the box, a second stock source (Stooq's CSV, or a
+   keyed API) behind the same `Quote`.
    Drag to reorder panels (today the order is fixed; Engine → Panels switches them on and off).
 7. A weekday lunch slot for `think`, if Landen wants one (school hours are skipped today).
 8. `scripts/install.sh` under WSL with Docker Desktop installed: `command -v docker` finds Docker Desktop's
@@ -378,22 +454,22 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
 
 ## Only Landen can do (the whole list; see DEPLOY.md)
 
-0. Merge the control-room PR from branch `claude/nifty-thompson-5h6l2x` and landenm999-coder/capture#2 (the
-   installer deploys `main`), then on the box: `bash /opt/sloane/scripts/install.sh`.
-0b. Make the workshop's GitHub token (DEPLOY §7h: fine-grained, this repo only; Contents and Pull requests
-   read and write, Actions read), then rerun the installer on the box and paste it when asked.
-0c. Optional: the control room (START_HERE step 7). Local models are optional too: he has no Raspberry Pi
-   yet, and nothing needs one (`LOCAL_MODELS.md` is there if he ever gets one).
-1. Create the Oracle Cloud ARM instance (DEPLOY §1).
-2. SSH in and run the one-command installer (DEPLOY "The fast way"):
+Done: the Oracle box, the installer, the workshop's GitHub token, the control room, the British voice.
+
+0. After each merge to `main`, upgrade the box: in PowerShell,
+   `ssh -i "C:\Users\lande\Downloads\ssh-key-2026-09-27.key" ubuntu@<the box's IP>`, then
    `curl -fsSL https://raw.githubusercontent.com/landenm999-coder/sloane/main/scripts/install.sh | bash`.
-   It asks for the seven `.env` values and walks him through the one Claude login. It's also the upgrade
-   command. (The manual steps are DEPLOY §2–8.)
-3. Optional Gmail (DEPLOY §7c): a Google Cloud Desktop OAuth client, **published In production** (Testing tokens
+   (Accepted workshop builds upgrade the box by themselves.) Merge landenm999-coder/capture#2 too.
+1. Optional tidy-up on his PC: the second install in WSL is switched off but still holds a copy of `.env`
+   (his credentials). `wsl --unregister Ubuntu-24.04` deletes it, and `wsl --unregister Ubuntu` the empty
+   Ubuntu made by accident. Neither holds anything she needs; her memory is in Supabase.
+2. Optional Gmail (DEPLOY §7c): a Google Cloud Desktop OAuth client, **published In production** (Testing tokens
    die after 7 days), then `python3 scripts/gmail_auth.py` on the box.
-4. Optional British voice: `SPEAK_PROVIDER=piper` and `PIPER_VOICE=en_GB-cori-medium` in `.env` (DEPLOY §7b).
-5. Capture on the phone: Tailscale on the phone, `CAPTURE_TOKEN` + `CORS_ORIGINS` on the box, then
+3. Capture on the phone: Tailscale on the phone, `CAPTURE_TOKEN` + `CORS_ORIGINS` on the box, then
    Capture → Settings → Sloane (DEPLOY §7d).
+4. Optional Whoop (DEPLOY §7j): an app at developer.whoop.com (redirect `http://localhost:8765`), its id and
+   secret in `.env`, `python3 scripts/whoop_auth.py` on the box, restart. Gmail (2) is what fills the
+   control room's Inbox panel.
 
 Security rules he follows: never paste tokens or credentials into chat. Credentials live only in `.env`
 (gitignored, chmod 600). The ICS URL, the Canvas token and the GitHub token are passwords.
