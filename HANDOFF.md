@@ -389,6 +389,14 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
     the background, so a hung feed never hangs the page. `/workout` and `/watch` are on her actions list.
   - Verified: the suite (59 suites), and the page in Chromium with stub feeds at 1440, 1024 and 390, full
     and first-night (empty) data; a click-through of the chips, the School links and the packing.
+- **Stray tool-call tags in her replies** (same branch). On 2026-09-29 the model behind `claude -p` (CLI
+  2.1.284, no tools) began writing `<invoke name="noop"></invoke>` before its JSON on most turns, and
+  sometimes `<answer></answer>` or a misspelled `<invoire>` (4 of 6 replies to one question on `main` too).
+  Parsed as it was, a tag after prose became her detail and the command she'd written was lost (the eval's
+  critical "put AA batteries on my grocery list" failed on it), and the streamed draft (and a call's
+  voice) read the raw JSON after the tag. `contract.unstray` drops those tags, by name only, in `parse` and
+  `partial_reply`; `partial_reply` also switches to the JSON once it starts after prose. Pinned in
+  `tests/test_contract.py`. If new tag names turn up, add them to `_STRAY`.
 - **The coin skill** (`sloane/skills/coin.py`, workshop item `/coin`): `/coin`, "flip a coin", "heads or tails?"
   give Heads or Tails from `secrets`. No SQL, no setting, no migration. `tests/test_coin.py` pins the
   command, both sides, and phrases it must not catch. Awaiting Landen's review.

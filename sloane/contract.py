@@ -30,6 +30,14 @@ _LABELLED = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
+# Tool-call markup her model sometimes writes although `claude -p` gives it no
+# tools: "<invoke name="noop"></invoke>" before the JSON, "<answer></answer>"
+# mid-reply, even "<invoire>". Never part of what she says. Only these names,
+# so "<3" or "a < b" in a real reply is left alone.
+_STRAY = re.compile(r"</?(?:invo\w*|answer|function_calls?|parameters?|tool_\w+|antml:\w+)\b[^<>]*>", re.I)
+# A stray tag still being written at the end of a stream ("<invo").
+_STRAY_OPEN = re.compile(r"</?(?:i(?:n(?:v(?:o\w*)?)?)?|a(?:n(?:s(?:w(?:er?)?)?)?)?)?$", re.I)
+
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 _URL = re.compile(r"(?:https?://|www\.)\S+", re.IGNORECASE)
 _MD_LINK = re.compile(r"\[([^\]]*)\]\(([^)]*)\)")
@@ -61,6 +69,14 @@ class Reply:
     def __post_init__(self) -> None:
         if not isinstance(self.speech, str) or not isinstance(self.detail, str):
             raise TypeError("speech and detail must both be strings")
+
+
+def unstray(text: str) -> str:
+    """The model's output without stray tool-call tags; the blank lines they leave, closed up."""
+    if "<" not in text:
+        return text
+    cleaned = _STRAY.sub("", text)
+    return re.sub(r"\n[ \t]*(?:\n[ \t]*)+", "\n\n", cleaned) if cleaned != text else text
 
 
 def sentences(text: str) -> list[str]:
@@ -222,11 +238,16 @@ def partial_reply(raw: str) -> tuple[str, str]:
     which is what the contract promises. Prose (she sometimes skips the JSON)
     is shown as it comes, as speech.
     """
-    text = (raw or "").lstrip()
+    text = _STRAY_OPEN.sub("", unstray(raw or "")).lstrip()
     if text.startswith("```"):
         text = text.split("\n", 1)[1] if "\n" in text else ""
     if not text:
         return "", ""
+    # Prose, then the JSON after all ("Here is the reply as intended: {..."): once
+    # the JSON starts, it's the reply.
+    start = text.find('{"')
+    if start > 0:
+        text = text[start:]
     if not text.startswith("{"):
         # She answered in prose, not the JSON shape: show it as it comes (parse()
         # still decides what the finished reply is).
@@ -243,7 +264,7 @@ def parse(raw: str) -> Reply:
     Shape 4  labelled plain text -- "Speech: ... Detail: ..."
     Shape 5  unstructured prose -- detail is all of it, speech is derived
     """
-    text = (raw or "").strip()
+    text = unstray(raw or "").strip()
     if not text:
         return Reply(speech="", detail="")
 
