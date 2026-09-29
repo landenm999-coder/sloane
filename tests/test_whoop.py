@@ -7,6 +7,8 @@ Whoop does, so a token that wasn't saved (or was reused) fails here too.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import io
 import json
 import logging
 import os
@@ -63,9 +65,31 @@ class Stub(BaseHTTPRequestHandler):
     refreshes: list[str] = []
     retire_next = False               # the next API call answers 401 once
     refuse = False
+    agents: list[str] = []
+
+    def cloudflare(self) -> bool:
+        """Whoop sits behind Cloudflare, which refuses Python's own user-agents with a 403,
+        "error code: 1010" (his first connect, 2026-09-29). True if this request was turned away."""
+        agent = self.headers.get("User-Agent") or ""
+        Stub.agents.append(agent)
+        if not agent or agent.lower().startswith(("python-urllib", "python-httpx", "python-requests")):
+            raw = b"error code: 1010"
+            self.send_response(403)
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+            return True
+        return False
 
     def do_POST(self):  # noqa: N802
         form = {k: v[0] for k, v in parse_qs(self.rfile.read(int(self.headers["Content-Length"])).decode()).items()}
+        if self.cloudflare():
+            return
+        if form.get("grant_type") == "authorization_code":  # scripts/whoop_auth.py, his one-time consent
+            if form.get("code") != "the-code" or form.get("client_secret") != "shh":
+                return self.reply(400, {"error": "invalid_grant"})
+            return self.reply(200, {"access_token": "access-secret-auth", "refresh_token": "refresh-secret-0000",
+                                    "expires_in": 3600})
         Stub.refreshes.append(form.get("refresh_token", ""))
         if Stub.refuse or form.get("grant_type") != "refresh_token" or form.get("refresh_token") != Stub.current \
                 or form.get("client_secret") != "shh":
@@ -76,6 +100,8 @@ class Stub(BaseHTTPRequestHandler):
                          "refresh_token": Stub.current, "token_type": "bearer"})
 
     def do_GET(self):  # noqa: N802
+        if self.cloudflare():
+            return
         path = urlparse(self.path).path
         Stub.api_calls.append(path)
         if self.headers.get("Authorization") != f"Bearer access-secret-{Stub.issued:04d}" or Stub.retire_next:
@@ -140,6 +166,25 @@ async def main() -> None:
                         whoop_api_base=f"http://127.0.0.1:{server.server_port}", timezone="America/Denver",
                         embed_cache_dir=str(folder))
 
+    # -- his one-time consent (scripts/whoop_auth.py): the code for a refresh token, past Cloudflare -----
+    import builtins
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+    import whoop_auth
+    env = folder / ".env"
+    env.write_text("WHOOP_CLIENT_ID=cid\nWHOOP_CLIENT_SECRET=shh\n")
+    whoop_auth.TOKEN_URL = f"http://127.0.0.1:{server.server_port}/oauth/oauth2/token"
+    whoop_auth.secrets = types.SimpleNamespace(token_urlsafe=lambda n: "state-from-this-run")
+    typed, builtins.input = builtins.input, lambda prompt="": "http://localhost:8765/?code=the-code&state=state-from-this-run"
+    printed = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(printed):
+            status = whoop_auth.main([str(env)])
+    finally:
+        builtins.input = typed
+    check("whoop_auth.py gets past Cloudflare and saves the refresh token, never printing it",
+          (status, "WHOOP_REFRESH_TOKEN=refresh-secret-0000" in env.read_text(), "refresh-secret" in printed.getvalue()),
+          (0, True, False))
+
     store = FakeStore()
     clock = lambda: datetime(2026, 9, 29, 9, 0, tzinfo=DEN)  # noqa: E731
     ctx = SkillContext(store=store, config=config(), clock=clock)
@@ -200,6 +245,8 @@ async def main() -> None:
     check("hours later: said plainly", (await fresh.report()).speech, "I can't reach Whoop right now. Try again in a few minutes.")
     check("and FACTS drops them", await fresh.facts(), [])
 
+    check("every request to Whoop says who it is (Cloudflare turns Python's own user-agents away)",
+          sorted({a.split(" ")[0] for a in Stub.agents}), ["Mozilla/5.0"])
     everything = " ".join(heard) + json.dumps(await fresh.panel())
     check("no token ever in a log line or a panel", "secret" in everything, False)
     server.shutdown()

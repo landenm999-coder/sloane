@@ -45,6 +45,8 @@ STALE_OK_SECONDS = 6 * 3600
 FACTS_FRESH_SECONDS = 2 * 3600
 RETRY_AFTER_SECONDS = 5 * 60
 TIMEOUT_SECONDS = 8.0
+# Whoop sits behind Cloudflare, which turns Python's own user-agents away (403, "error code: 1010").
+AGENT = "Mozilla/5.0 (compatible; Sloane/1.0)"
 SCOPES = "offline read:recovery read:cycles read:sleep read:workout read:profile"
 
 _ASK = re.compile(
@@ -252,7 +254,7 @@ class Whoop(Skill):
                 return self._cache[1], False
             if now >= self._retry_at:
                 try:
-                    async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
+                    async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS, headers={"User-Agent": AGENT}) as client:
                         # One token first, so the four reads don't race to rotate it.
                         await self.tokens.bearer(client)
                         parts = await asyncio.gather(

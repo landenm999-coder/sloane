@@ -425,6 +425,15 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
 
 ## In flight
 
+- **Whoop past Cloudflare** (branch `claude/nifty-thompson-5h6l2x`). Connecting his Whoop on 2026-09-29, the
+  token exchange in `scripts/whoop_auth.py` came back 403 "error code: 1010": Cloudflare, in front of Whoop,
+  turns Python's own user-agents away (urllib's, and so presumably httpx's for the skill's refreshes and
+  reads). Both now send `AGENT` ("Mozilla/5.0 (compatible; Sloane/1.0)"). `tests/test_whoop.py`'s stub
+  refuses Python's user-agents the same way and runs `whoop_auth.main` end to end (it failed on the old
+  code). He finished the consent with a one-off opener carrying that user-agent; the skill's fetches need
+  this merged and the installer rerun. DEPLOY 7j now says to open the link in an incognito window: his
+  normal one got nginx's "400 Request Header Or Cookie Too Large" from Whoop's cookies.
+
 - **The control room, redesigned** (branch `claude/nifty-thompson-5h6l2x`, draft PR). Landen: "still looks
   like AI... bad inconsistent spacings, the page should not scroll on the home, one full page dashboard...
   make the chat be able to pop in and out... make sure all of the widgets are doing something and
