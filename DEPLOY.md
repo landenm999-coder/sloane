@@ -300,37 +300,49 @@ checks a password, and it stays off until you set one.
 Telegram: commands, reminders and actions all work) and see and steer
 everything she runs. The bare address, `/`, opens it too.
 
-- **The orb**, by the clock, shows what she's doing right now: idle (with her
+- **The orb**, top left, shows what she's doing right now: idle (with her
   next check), listening, thinking, speaking, building (the Workshop, with its
-  step), or needs you. The line beside it says what.
-- **Talk:** on a laptop the chat is always open on the right; on a phone it's
-  its own tab. Type, or tap the microphone and speak (it needs the `https://`
+  step), or needs you. The line at the top right says what. It only moves when she does.
+- **Talk:** on a laptop the chat is a drawer on the right. **Chat** (or `/`)
+  opens and closes it; the pop-out button gives it its own window, and closing
+  that window (or **Put back**) brings it home. A question from a widget goes to
+  whichever chat you can see. On a small laptop it slides over the widgets; on a
+  phone it's its own tab. Type, or tap the microphone and speak (it needs the `https://`
   address below, or `localhost` through the SSH tunnel, and `GROQ_API_KEY`, or a
-  local Whisper). **Talk** (or tap the big orb) starts a hands-free call: just
+  local Whisper). **Talk** (or tap the orb) starts a hands-free call: just
   talk, pause when you're done, and she answers out loud in her own voice (the
   one her voice notes use), then listens again. Tap the orb to cut her off;
   **End** or Esc hangs up. The speaker button has her say every reply, typed or
   not. Small talk on a call is answered by her fast model (`QUICK_PROVIDER`,
   Groq), a second or so; anything she has to do or look up goes to Claude.
-- **Today:** your day as a timeline (your calendar, shifts, reminders, a focus
-  session running) with a line at now, and a Tomorrow toggle. The header counts
-  what's **waiting on you** (approvals, anything broken or failed, workshop
-  builds) and emails to answer. Beside the timeline, every panel: weather, Whoop,
+- **Home** is one screen, and it never scrolls. At the top, a hello and her line
+  on the day (what's next, emails waiting on a reply, your recovery), the clock and
+  the weather. On the left, the agenda: your calendar, shifts, reminders and a
+  focus session in order, with a line at now, a Tomorrow toggle, and **Add a
+  reminder**. The rest is widgets, filling the room there is: weather, Whoop,
   workouts, markets, your inbox, habits, news, focus, money, countdowns, lists,
-  birthdays, clients, one small **School** panel (due soon, overdue, grades; tap
-  a count for the list), the workshop, and what she learned today. One with
-  nothing in it yet says what it's for, with a button to start it. A phone
-  shows three you swipe. Grades, the week, colleges, flashcards and DECA have
-  panels of their own, off until you turn them on (Engine → Panels).
+  birthdays, clients, one small **School** widget, the workshop, and what she
+  learned today. When there are more than fit, they go on pages (the dots at
+  the bottom). Every widget does something: tick a habit (again to untick), check
+  off a list item, start or stop a focus block, log a workout or spending, add a
+  ticker, topic, countdown, birthday, client or reminder with its **+**, open an
+  email in Gmail or a headline, mark school work handed in (press twice), or ask
+  her about it (the speech-bubble button). Each button runs the same command you'd
+  type (`POST /api/do`), and her answer pops up at the bottom. A widget with
+  nothing in it yet says what it's for, with a button to start it. **N waiting on
+  you** at the top lists approvals, anything broken or failed, and workshop builds.
+  A phone shows three widgets you swipe. Grades, the week, colleges, flashcards
+  and DECA are widgets of their own, off until you turn them on (**Choose
+  widgets**, or Engine → Widgets).
 - **Memory:** what she knows about you (filter it, forget anything), loose ends, her diary.
 - **Workshop:** what she's building on herself (7h).
 - **Engine:** how she's running, jobs you can run now, what she may do without
-  asking, model use, and **Panels**: which show on Today and which three the
+  asking, model use, and **Widgets**: which show on Home and which three the
   phone shows. They're saved on the box, so every device gets them. On a phone,
   Memory and Engine are under **More**.
 
-Press `/` anywhere to jump to the message box. The page loads nothing from the
-internet (its fonts are served by her), so it works on a tailnet with no internet.
+Press `/` anywhere to open the chat. The page loads nothing from the internet
+(its font, Onest, is served by her), so it works on a tailnet with no internet.
 
 The installer makes its password, `DASHBOARD_TOKEN`, for you. Read it on the
 box with:

@@ -78,6 +78,10 @@ async def integration() -> None:
         check("budget off", (await reg.command("budget", "off")).speech, "Weekly budget cleared.")
         check("no nudges without a budget", await money.nudges(), [])
         check("panel", (await money.panel())["lines"], ["Spent this week: $31.50", "Earned (est.): $240"])
+        drawn = await money.panel()
+        check("the widget's numbers: the week, the budget (cleared), earnings, the latest first",
+              (drawn["spent_cents"], drawn["budget_cents"], drawn["earned_cents"], len(drawn["recent"]) <= 4,
+               drawn["recent"][0]["cents"] > 0), (3150, None, 24000, True, True))
 
         plain = isolated(database_url=os.environ["DATABASE_URL"], timezone="America/Denver")
         quiet = Money(SkillContext(store=store, config=plain, clock=lambda: now["at"]))

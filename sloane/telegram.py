@@ -948,6 +948,11 @@ class Bot:
         )
         return Reply(speech=speech, detail="\n".join(lines))
 
+    async def run_command(self, command: str) -> Reply | None:
+        """A control-room button's command (tick a habit, add to a list): the handler his typed
+        command goes through, with no model and nothing added to the conversation. None: no such command."""
+        return await self._handle_command(command)
+
     async def _handle_command(self, command: str) -> Reply | None:
         name = command.split()[0].lstrip("/").split("@")[0].lower()
         if name == "usage":

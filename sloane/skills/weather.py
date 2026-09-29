@@ -369,8 +369,10 @@ class Weather(Skill):
         hour = self.ctx.now().replace(minute=0, second=0, microsecond=0)
         hours = [{"at": h.at.isoformat(), "temp": h.temp, "chance": h.chance}
                  for h in f.hours if h.at >= hour and h.temp is not None][:8]
+        day = f.day(today)
         return {"title": "Weather", "lines": lines, "temp": f.temp, "code": f.code,
-                "sky": describe(f.code), "unit": self.deg, "hours": hours}
+                "sky": describe(f.code), "unit": self.deg, "hours": hours, "feels": f.feels,
+                "high": day.high if day is not None else None, "low": day.low if day is not None else None}
 
     async def nudges(self) -> list[Nudge]:
         now = self.ctx.now()

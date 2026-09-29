@@ -129,14 +129,27 @@ check("the door has the orb", 'class="orb"' in door, True)
 # to one of her suggested study stretches by its full assignment title.
 needs = re.search(r"function needsCount\(\) \{(.*?)\n\}", js, re.S)
 check("'waiting on you' is what needs him; overdue work is counted in the School panel",
-      (needs is not None and "overdue" not in needs.group(1), 'openWaiting("overdue")' in js, 'id="overdue-open"' in page),
+      (needs is not None and "overdue" not in needs.group(1), 'openWaiting(overdue ? "overdue"' in js, 'id="overdue-open"' in page),
       (True, True, False))
 # "Stop trying to do all this school stuff": the header and the timeline are his life; school is one panel.
 header = re.search(r"function renderHeader\(data\) \{(.*?)\n\}", js, re.S)
 check("the header counts nothing from school", header is not None and "overdue" not in header.group(1)
       and "due_week" not in header.group(1), True)
-check("every panel that's on shows, filled or saying how to fill it", ("buildPanel(id) || emptyPanel(id)" in js,
-                                                                          "DESK_PANELS" in js), (True, False))
+check("every widget that's on shows, filled or saying how to fill it", ("buildPanel(id) || emptyWidget(id)" in js,
+                                                                           "DESK_PANELS" in js), (True, False))
+# "The page should not scroll on the home, one full page dashboard": the home view never scrolls; the
+# widgets fill the room there is, in pages when there are more, and each list shows the rows that fit.
+home = re.search(r"\.view\.today \{([^}]*)\}", css)
+check("the home is one page: it never scrolls, the widgets page instead",
+      (home is not None and "overflow: hidden" in home.group(1), "function paginate(" in js, "function fitLists(" in js),
+      (True, True, True))
+check("the chat pops in and out: close it, open it, give it its own window, put it back",
+      [f'id="{i}"' in page for i in ("chat-toggle", "chat-close", "chat-pop", "chat-dock")] + ['"chat") === "pop"' in js],
+      [True] * 5)
+# Every command a widget's button sends must be one /api/do runs, or the button would do nothing.
+widgets = js[js.index("// -- Home: the widgets"):js.index("// -- memory")]
+sent = set(re.findall(r'[`"]/([a-z]+)[ `$]', widgets)) - {"api", "app"}
+check("every widget button's command is one /api/do runs", (sorted(sent - web.BUTTONS), len(sent) >= 12), ([], True))
 upcoming = re.search(r"function nextUp\(data\) \{(.*?)\n\}", js, re.S)
 check("the header counts down to real things, never her plan's stretches, and keeps titles short",
       (upcoming is not None and 'i.sub === "running now"' in upcoming.group(1) and "clip(" in upcoming.group(1)), True)
@@ -290,7 +303,7 @@ async def integration() -> None:
                      "/api/jobs/entity_sync/run", "/app/logout", "/api/workshop/ideas",
                      "/api/workshop/00000000-0000-0000-0000-000000000000/accept",
                      "/api/workshop/00000000-0000-0000-0000-000000000000/build", "/api/voice", "/api/prefs",
-                     "/api/speak"]
+                     "/api/speak", "/api/do"]
             check("signed out: every read is refused",
                   [(await client.get(p)).status_code for p in ("/api/overview", "/api/history", "/api/workshop",
                                                                 "/api/activity")],
@@ -482,9 +495,29 @@ async def integration() -> None:
                   False)
 
             ran = await client.post("/api/jobs/entity_sync/run", headers={"X-Sloane": "1"})
-            check("run a job now", (ran.json()["ok"], Scheduler.ran), (True, ["entity_sync"]))
+            check("run a job now, said plainly", (ran.json()["ok"], Scheduler.ran, ran.json()["message"]),
+                  (True, ["entity_sync"], "The Canvas and calendar sync ran."))
             check("only a job name", (await client.post("/api/jobs/..%2Fetc/run", headers={"X-Sloane": "1"})).status_code
                   in (400, 404), True)
+
+            # -- a widget's button: his own command, run as typed; no model, nothing in the conversation --------
+            async def button(command):
+                got = await client.post("/api/do", json={"command": command}, headers={"X-Sloane": "1"})
+                return got.status_code, got.json()["ok"]
+
+            asked_before = len(Agent.asked)
+            logged_before = len(await store.recent_messages(5151, datetime.now(DEN) - timedelta(hours=1), 60))
+            pressed = await client.post("/api/do", json={"command": "/remind in 2 hours stretch"}, headers={"X-Sloane": "1"})
+            check("a button runs his command and says what she did", (pressed.status_code, pressed.json()["ok"],
+                                                                    "stretch" in pressed.json()["message"]), (200, True, True))
+            check("the reminder is real", any(r["text"] == "stretch" for r in await store.upcoming_reminders(10)), True)
+            check("with no model and nothing added to the conversation",
+                  (len(Agent.asked) - asked_before,
+                   len(await store.recent_messages(5151, datetime.now(DEN) - timedelta(hours=1), 60)) - logged_before), (0, 0))
+            check("only the buttons' commands: not a sync, a brief, a trust change, or two lines",
+                  [await button(c) for c in ("/sync", "/brief", "/revoke remind", "/remind in 2 hours a\n/sync", "remind me",
+                                             "/remind " + "x" * 400)], [(400, False)] * 6)
+            check("a button's command no skill answers is said so, not run", await button("/did gym"), (400, False))
 
             # -- the orb: what she's doing right now -------------------------------------------------
             live = await client.get("/api/activity")
@@ -544,7 +577,7 @@ async def integration() -> None:
             Scheduler.running = {}
             state.pop("workshop")
 
-            fonts = await client.get("/app/static/fonts/plex-sans-400.woff2")
+            fonts = await client.get("/app/static/fonts/onest-400.woff2")
             check("the fonts are served from here", (fonts.status_code, fonts.headers["content-type"], fonts.content[:4]),
                   (200, "font/woff2", b"wOF2"))
             check("only the fonts", [(await client.get(f"/app/static/fonts/{n}")).status_code

@@ -295,7 +295,11 @@ class Clients(Skill):
         if due:
             lines.insert(0, "Follow up: " + ", ".join(due))
         return {"title": "Clients", "lines": lines,
-                "pipeline_cents": sum(r["value_cents"] or 0 for r in rows)}
+                "pipeline_cents": sum(r["value_cents"] or 0 for r in rows),
+                "items": [{"name": r["name"], "stage": r["stage"], "value_cents": r.get("value_cents"),
+                           "follow_up": dates.spoken(r["follow_up_on"], today) if r.get("follow_up_on") else "",
+                           "late": bool(r.get("follow_up_on") and r["follow_up_on"] <= today),
+                           "next": r.get("next_step") or ""} for r in rows]}
 
     async def nudges(self) -> list[Nudge]:
         now = self.ctx.now()

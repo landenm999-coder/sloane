@@ -79,9 +79,10 @@ function markdown(text) {
   }).join("");
 }
 
-function toast(message) {
+function toast(message, bad = false) {
   const box = $("#toast");
   box.textContent = message;
+  box.classList.toggle("bad", bad);
   box.classList.add("show");
   clearTimeout(toast.timer);
   toast.timer = setTimeout(() => box.classList.remove("show"), 4200);
@@ -103,9 +104,9 @@ async function post(path, body) {
   const response = await api(path, { method: "POST", headers: HEAD, body: JSON.stringify(body || {}) });
   let data = {};
   try { data = await response.json(); } catch { /* an empty body is fine */ }
-  toast(data.message || (response.ok ? "Done." : "That didn't work."));
+  toast(data.message || (response.ok ? "Done." : "That didn't work."), !response.ok);
   refresh();
-  return data;
+  return { ok: response.ok, ...data };
 }
 
 function button(label, onclick, cls = "btn", extra = {}) {
@@ -225,13 +226,14 @@ function currentOrb() {
 function paintOrb() {
   const now = currentOrb();
   const arc = now.state === "building" && now.step ? (RING * now.step) / 5 : 0;
+  document.body.dataset.orb = now.state;
   document.querySelectorAll(".js-orb").forEach((o) => {
     o.dataset.state = now.state;
     o.querySelector(".prog")?.setAttribute("stroke-dasharray", `${arc.toFixed(1)} 220`);
   });
   $("#status-label").textContent = now.label;
   $("#status-detail").textContent = now.detail || "";
-  $("#status-short").textContent = now.label.toLowerCase();
+  $("#status-short").textContent = now.label;
   $("#workshop-dot").hidden = !doing.server.ready;
 }
 
@@ -261,8 +263,8 @@ const VIEWS = ["today", "memory", "workshop", "engine"];
 function show(view) {
   if (view === "more") view = recall("sloane.more", "memory");
   if (wide.matches && view === "talk") {
-    // On a desk the chat is always open: Talk goes to it, and the view stays.
-    input.focus();
+    // On a desk the chat is a drawer beside every view: Talk opens it, and the view stays.
+    openChat(true);
     view = document.body.dataset.view === "talk" ? "today" : document.body.dataset.view || "today";
   }
   document.body.dataset.view = view;
@@ -279,16 +281,128 @@ function show(view) {
   remember("sloane.view", view);
 }
 
-document.querySelectorAll(".nav-item").forEach((item) => item.addEventListener("click", () => {
-  if (item.dataset.view === "talk" && wide.matches) { input.focus(); return; }
-  show(item.dataset.view);
-}));
+document.querySelectorAll(".nav-item").forEach((item) => item.addEventListener("click", () => show(item.dataset.view)));
 document.querySelectorAll(".subnav .seg-b").forEach((b) => b.addEventListener("click", () => show(b.dataset.go)));
 wide.addEventListener("change", () => {
   const view = document.body.dataset.view;
   show(wide.matches && view === "talk" ? "today" : view);
   if (latest) renderPanels();
 });
+
+// -- the chat drawer: open, closed, or in its own window ------------------------------------
+// On a desk the chat sits on the right. He can close it (the widgets take the room), or pop it
+// out into its own window and put it back. The two windows keep in step over a BroadcastChannel:
+// the popped-out one says when it closes, and a widget's question goes to whichever is showing.
+
+const SOLO = new URLSearchParams(location.search).get("chat") === "pop";
+const talkLine = "BroadcastChannel" in window ? new BroadcastChannel("sloane-chat") : null;
+let chatMode = "open";
+let popup = null;
+
+function setChat(mode, focus = false) {
+  if (SOLO) return;
+  const was = chatMode;
+  chatMode = mode;
+  remember("sloane.chat", mode);
+  document.body.dataset.chat = mode;
+  const toggle = $("#chat-toggle");
+  toggle.setAttribute("aria-expanded", String(mode === "open"));
+  $("#chat-toggle-label").textContent = mode === "popped" ? "Chat window" : "Chat";
+  toggle.title = mode === "popped" ? "The chat is in its own window" : mode === "open" ? "Close the chat" : "Open the chat";
+  if (mode === "open") {
+    if (was === "popped") loadHistory();
+    scrollDown();
+    if (focus) input.focus();
+  }
+  requestAnimationFrame(layoutPanels);
+}
+
+function openChat(focus = false) {
+  if (!wide.matches) { show("talk"); if (focus) input.focus(); return; }
+  if (chatMode === "popped" && popup && !popup.closed) { popup.focus(); return; }
+  setChat("open", focus);
+}
+
+function toggleChat() {
+  if (chatMode === "open") setChat("closed");
+  else openChat(true);
+}
+
+function popOut() {
+  const w = 440;
+  const h = Math.min(860, (screen.availHeight || 900) - 80);
+  const left = Math.max(0, (screen.availWidth || 1440) - w - 32);
+  popup = window.open("/app?chat=pop", "sloane-chat", `popup=yes,width=${w},height=${h},left=${left},top=48`);
+  if (!popup) { toast("The browser blocked the window. Allow pop-ups for this page, then try again.", true); return; }
+  if (call.on) endCall();
+  hush();
+  setChat("popped");
+  watchPopup();
+}
+
+// The popped-out window closed (or was put back): the chat comes home.
+function watchPopup() {
+  clearInterval(watchPopup.timer);
+  watchPopup.timer = setInterval(() => {
+    if (popup && !popup.closed) return;
+    clearInterval(watchPopup.timer);
+    popup = null;
+    if (chatMode === "popped") setChat("open");
+  }, 800);
+}
+
+// A question from a widget: into whichever chat he can see.
+function askHer(text) {
+  if (!SOLO && wide.matches && chatMode === "popped" && talkLine) {
+    talkLine.postMessage({ t: "say", text });
+    if (popup && !popup.closed) popup.focus();
+    return;
+  }
+  openChat();
+  say(text);
+}
+
+if (talkLine) {
+  talkLine.addEventListener("message", (event) => {
+    const m = event.data || {};
+    if (SOLO) {
+      if (m.t === "say" && typeof m.text === "string") { window.focus(); say(m.text); }
+      if (m.t === "ping") talkLine.postMessage({ t: "here" });
+      if (m.t === "close") window.close();
+      return;
+    }
+    if (m.t === "dock" || m.t === "closed") { popup = null; if (chatMode === "popped") setChat("open", m.t === "dock"); }
+    if (m.t === "here" && chatMode === "popped") setChat.confirmed = true;
+    if (m.t === "opened" && chatMode !== "popped") { if (call.on) endCall(); hush(); setChat("popped"); }
+  });
+}
+
+// Called once everything below exists (the thread, the message box).
+function initChat() {
+  if (SOLO) {
+    document.body.classList.add("solo");
+    document.title = "Sloane · Chat";
+    $("#chat-dock").hidden = false;
+    $("#chat-dock").addEventListener("click", () => { talkLine?.postMessage({ t: "dock" }); window.close(); });
+    window.addEventListener("pagehide", () => talkLine?.postMessage({ t: "closed" }));
+    talkLine?.postMessage({ t: "opened" });
+  } else {
+    const kept = recall("sloane.chat", "open");
+    if (kept === "popped") {
+      // Reloaded while the chat was popped out: is that window still there?
+      setChat("popped");
+      setChat.confirmed = false;
+      talkLine?.postMessage({ t: "ping" });
+      setTimeout(() => { if (!setChat.confirmed && chatMode === "popped") setChat("open"); }, 700);
+    } else {
+      setChat(kept === "closed" ? "closed" : "open");
+    }
+  }
+}
+
+$("#chat-toggle").addEventListener("click", toggleChat);
+$("#chat-close").addEventListener("click", () => setChat("closed"));
+$("#chat-pop").addEventListener("click", popOut);
 
 // -- the conversation ------------------------------------------------------------------
 
@@ -922,6 +1036,7 @@ async function startCall() {
   }
   hush();
   if (!wide.matches) show("talk");
+  else if (!SOLO && chatMode !== "open") setChat("open");
   callButton.setAttribute("aria-pressed", "true");
   callButton.querySelector("span").textContent = "End";
   document.body.classList.add("calling");
@@ -957,7 +1072,12 @@ function cutIn() {
 callButton.addEventListener("click", () => (call.on ? endCall() : startCall()));
 $("#call-end").addEventListener("click", endCall);
 $(".chat-head .js-orb").addEventListener("click", cutIn);
-$("#orb-talk").addEventListener("click", () => (call.on ? cutIn() : startCall()));
+$("#orb-talk").addEventListener("click", () => {
+  if (call.on) { cutIn(); return; }
+  // The chat is in its own window: a call happens in this one, so it comes home first.
+  if (chatMode === "popped") { popup?.close(); popup = null; talkLine?.postMessage({ t: "close" }); setChat("open"); }
+  startCall();
+});
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && call.on && !recording) { event.preventDefault(); endCall(); }
 });
@@ -968,8 +1088,7 @@ document.addEventListener("keydown", (event) => {
   const tag = document.activeElement?.tagName;
   if (tag === "INPUT" || tag === "TEXTAREA" || document.activeElement?.isContentEditable) return;
   event.preventDefault();
-  if (!wide.matches) show("talk");
-  input.focus();
+  openChat(true);
 });
 
 // What to ask, from what's actually going on: his day, his inbox, his body, the world.
@@ -992,16 +1111,17 @@ function renderStarters(data) {
   box.replaceChildren(...asks.map((text) => el("button", { type: "button", class: "chip", text, onclick: () => say(text) })));
 }
 
-// -- the header: the clock, the day, what's next, what's waiting -------------------------------
+// -- the header: hello, her line on the day, the clock, what's waiting -------------------------
 
 function tick() {
   let text;
   try {
     const parts = new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone: clockState.tz }).formatToParts(new Date());
-    text = `${parts.find((p) => p.type === "hour").value}:${parts.find((p) => p.type === "minute").value}`;
+    const part = (type) => parts.find((p) => p.type === type)?.value || "";
+    text = `${part("hour")}:${part("minute")} ${part("dayPeriod")}`.trim();
   } catch {
     const d = new Date();
-    text = `${d.getHours() % 12 || 12}:${String(d.getMinutes()).padStart(2, "0")}`;
+    text = `${d.getHours() % 12 || 12}:${String(d.getMinutes()).padStart(2, "0")} ${d.getHours() < 12 ? "AM" : "PM"}`;
   }
   const clock = $("#clock");
   if (clock.textContent !== text) clock.textContent = text;
@@ -1021,9 +1141,9 @@ function clip(text, most = 28) {
   return text.length > most ? text.slice(0, most - 1).trimEnd() + "…" : text;
 }
 
-// The header's countdown: work first (on it, or the next shift today), else what's next, else what's on.
+// The countdown in her line: work first (on it, or the next shift today), else what's next, else what's on.
 // Real things only: shifts, events, a focus session he started. Her plan's suggested stretches are on
-// the timeline, not here (the countdown once read "What was your biggest struggle… in 4m").
+// the agenda, not here (the countdown once read "What was your biggest struggle… in 4m").
 function nextUp(data) {
   const now = nowMinutes();
   const blocks = (data.agenda?.today?.items || []).filter((i) => !i.all_day
@@ -1033,30 +1153,44 @@ function nextUp(data) {
   const shiftNext = blocks.find((i) => i.kind === "shift" && i.start > now);
   const next = blocks.find((i) => i.start > now);
   const current = blocks.find(on);
-  const box = $("#next-up");
-  if (shiftNow) box.textContent = `At work until ${short(shiftNow.end)}`;
-  else if (shiftNext) box.textContent = `Work in ${hm(shiftNext.start - now)}`;
-  else if (next) box.textContent = `${clip(jobLabel(next))} in ${hm(next.start - now)}`;
-  else if (current) box.textContent = `${clip(jobLabel(current))} until ${short(current.end)}`;
-  box.hidden = !(shiftNow || shiftNext || next || current);
+  if (shiftNow) return { text: `At work until ${short(shiftNow.end)}`, work: true };
+  if (shiftNext) return { text: `Work in ${hm(shiftNext.start - now)}`, work: true };
+  if (next) return { text: `${clip(jobLabel(next))} in ${hm(next.start - now)}`, work: false };
+  if (current) return { text: `${clip(jobLabel(current))} until ${short(current.end)}`, work: false };
+  return null;
 }
 
+function greeting(minutes) {
+  if (minutes < 4 * 60) return "Up late";
+  if (minutes < 12 * 60) return "Good morning";
+  if (minutes < 17 * 60) return "Good afternoon";
+  return "Good evening";
+}
+
+// Her line on the day, from what's actually going on: what's next, who's waiting on a reply, his body.
 function renderHeader(data) {
+  $("#today-title").textContent = `${greeting(nowMinutes())}, ${data.name || "Landen"}`;
+  const line = $("#brief");
+  const parts = [];
+  const next = nextUp(data);
+  if (next) parts.push(el("b", { class: next.work ? "work" : "", text: `${next.text}.` }));
+  const mail = data.inbox?.waiting || 0;
+  if (mail) parts.push(`${mail} email${mail === 1 ? " needs" : "s need"} a reply.`);
+  const whoop = panelOf("whoop");
+  if (whoop?.recovery != null) parts.push(`Recovery ${whoop.recovery}%${whoop.zone ? `, ${whoop.zone}` : ""}.`);
+  const reminders = (data.agenda?.today?.items || []).filter((i) => i.kind === "reminder" && i.start > nowMinutes()).length;
+  if (reminders) parts.push(`${reminders} reminder${reminders === 1 ? "" : "s"} left today.`);
+  if (!parts.length) parts.push("Nothing pressing right now.");
+  line.replaceChildren(...parts.flatMap((p, i) => (i ? [" ", p] : [p])));
+  line.title = line.textContent;
+
   $("#date").textContent = data.now.date;
   const weather = panelOf("weather");
   $("#weather-short").textContent = weather && weather.temp != null ? `${Math.round(weather.temp)}° ${weather.sky || ""}`.trim() : "";
-  nextUp(data);
   const waiting = needsCount();
   const open = $("#waiting-open");
   open.hidden = !waiting;
   open.textContent = `${waiting} waiting on you`;
-  open.classList.toggle("hot", !!waiting);
-  // Mail that needs a reply is waiting on him too; school's counts are in its own panel.
-  const mail = data.inbox?.waiting || 0;
-  const inbox = $("#inbox-open");
-  inbox.hidden = !mail;
-  inbox.textContent = `${mail} email${mail === 1 ? "" : "s"} to answer`;
-  $("#links").hidden = open.hidden && inbox.hidden;
 }
 
 // -- what's waiting on him: approvals, what's broken, builds to accept; overdue work apart ---------
@@ -1138,7 +1272,6 @@ function openWaiting(at) {
 }
 function closeWaiting() { if (waiting.open) waiting.close(); }
 $("#waiting-open").addEventListener("click", () => openWaiting("needs"));
-$("#inbox-open").addEventListener("click", () => say("Anything in my inbox I need to reply to?"));
 $("#waiting-close").addEventListener("click", closeWaiting);
 waiting.addEventListener("click", (event) => { if (event.target === waiting) closeWaiting(); });
 
@@ -1158,8 +1291,7 @@ function timelineRow(item, now, live) {
   const past = live && !item.all_day && (block ? item.end <= now : item.start <= now);
   const sub = subOf(item);
   const cancel = item.kind === "reminder" && item.id && !past
-    ? el("button", { type: "button", class: "x", text: "Cancel", "aria-label": `Cancel reminder: ${item.title}`,
-      onclick: () => post(`/api/reminders/${item.id}/cancel`) }) : null;
+    ? tool("x", `Cancel reminder: ${item.title}`, () => post(`/api/reminders/${item.id}/cancel`), "icon-btn sm x") : null;
   return el("li", { class: `row ${item.kind}${past ? " past" : ""}${item.all_day ? " all-day" : ""}` },
     el("span", { class: "h" }, el("span", { "aria-hidden": "true", text: item.all_day ? "all day" : short(item.start) }),
       el("span", { class: "sr", text: item.all_day ? "All day" : item.time })),
@@ -1178,17 +1310,17 @@ function renderTimeline() {
   list.replaceChildren();
   let placed = !live;
   const nowbar = () => el("li", { class: "nowbar", "aria-label": `Now, ${$("#clock").textContent}` },
-    el("span", { text: "now" }), el("i"));
+    el("span", { text: "Now" }), el("i"));
   for (const item of items) {
     if (!placed && !item.all_day && item.start > now) { list.append(nowbar()); placed = true; }
     list.append(timelineRow(item, now, live));
   }
   if (!placed) list.append(nowbar());
-  if (!items.length) list.append(el("li", { class: "empty", text: live ? "Nothing on the calendar today." : "A clear day." }));
+  if (!items.length) list.append(el("li", { class: "empty", text: live ? "Nothing on the calendar today." : "A clear day tomorrow." }));
   // Opened late in the day, the morning is behind him: start with now near the top, once.
   if (live && !renderTimeline.scrolled) {
     const bar = list.querySelector(".nowbar");
-    const col = list.closest(".line-col");
+    const col = list.closest(".agenda-body");
     if (bar && col && col.scrollHeight > col.clientHeight) {
       renderTimeline.scrolled = true;
       col.scrollTop = Math.max(0, bar.offsetTop - col.offsetTop - 96);
@@ -1209,7 +1341,7 @@ function renderLater(data) {
     if (today.has(r.id)) continue;
     list.append(el("li", {},
       el("span", { class: "text" }, r.text, el("span", { class: "sub", text: [r.when, r.repeats ? `repeats ${r.repeats}` : ""].filter(Boolean).join(" · ") })),
-      button(r.repeats ? "Stop" : "Cancel", () => post(`/api/reminders/${r.id}/cancel`), "btn danger",
+      button(r.repeats ? "Stop" : "Cancel", () => post(`/api/reminders/${r.id}/cancel`), "btn sm ghost",
         { "aria-label": `${r.repeats ? "Stop" : "Cancel"} reminder: ${r.text}` })));
   }
   for (const c of data.promises || []) {
@@ -1228,7 +1360,11 @@ function setDay(tomorrow) {
 $("#day-today").addEventListener("click", () => setDay(false));
 $("#day-tomorrow").addEventListener("click", () => setDay(true));
 
-// -- today: the panels ----------------------------------------------------------------------
+// -- Home: the widgets -------------------------------------------------------------------------
+// Every widget is the same card: an icon and a name, a word on the right, at most two buttons,
+// then what it shows. Each one does something: ticks, adds, starts, opens, or asks her about it.
+// A button runs his own command through /api/do (the same handler as typing it); a question
+// goes to her in the chat.
 
 const PANEL_NAMES = {
   weather: "Weather", whoop: "Whoop", workouts: "Workouts", markets: "Markets", inbox: "Inbox", habits: "Habits",
@@ -1237,18 +1373,229 @@ const PANEL_NAMES = {
   week: "This week", colleges: "College", cards: "Flashcards", deca: "DECA practice", engine: "Engine",
   work: "Up next at work", plan: "Tonight's plan", memory: "Loose ends",
 };
-// Panels that come from the page's own data, not a skill: shown whatever skills are loaded.
+// Widgets that come from the page's own data, not a skill: shown whatever skills are loaded.
 const CORE_PANELS = new Set(["inbox", "school", "learned", "grades", "week", "engine", "work"]);
+// Two columns wide: the ones that are rows of words.
+const WIDE = new Set(["inbox", "news", "habits"]);
 
-function pn(title, right, ...body) {
-  return el("section", { class: "pn" }, el("h3", {}, title, right ? el("span", { text: right }) : null), ...body);
+const SVG = "http://www.w3.org/2000/svg";
+const ICONS = {
+  whoop: '<path d="M3 12h4l2.2-5 4.2 10 2.2-5H21"/>',
+  workouts: '<path d="M6.5 7v10M17.5 7v10M3.5 9.5v5M20.5 9.5v5M6.5 12h11"/>',
+  markets: '<path d="M4 17l5-5 4 3 7-8"/><path d="M15 7h5v5"/>',
+  weather: '<circle cx="12" cy="12" r="3.8"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4"/>',
+  inbox: '<path d="M4 13.5 6.5 5.5h11l2.5 8V19H4z"/><path d="M4 13.5h4.5l1 2h5l1-2H20"/>',
+  news: '<rect x="4" y="5" width="16" height="14" rx="2"/><path d="M8 9h8M8 12.5h8M8 16h5"/>',
+  habits: '<circle cx="12" cy="12" r="8"/><path d="M8.5 12.2l2.4 2.3 4.6-4.8"/>',
+  focus: '<circle cx="12" cy="13" r="7"/><path d="M12 9.5V13l2.5 1.5M9.5 3.5h5"/>',
+  money: '<rect x="3.5" y="6.5" width="17" height="11" rx="2"/><circle cx="12" cy="12" r="2.2"/>',
+  lists: '<path d="M10 7h9.5M10 12h9.5M10 17h9.5"/><path d="M4.5 7l1 1 2-2M4.5 12l1 1 2-2M4.5 17l1 1 2-2"/>',
+  countdowns: '<path d="M7 3.5h10M7 20.5h10M8 3.5c0 5 8 5 8 8.5s-8 3.5-8 8.5M16 3.5c0 5-8 5-8 8.5s8 3.5 8 8.5"/>',
+  birthdays: '<rect x="4" y="10.5" width="16" height="9.5" rx="2"/><path d="M4 14.5c2.7 1.4 5.3 1.4 8 0s5.3-1.4 8 0M12 10.5V7.5"/><path d="M12 3.8c.9 1 .9 2 0 2.7-.9-.7-.9-1.7 0-2.7z"/>',
+  clients: '<rect x="3.5" y="7.5" width="17" height="12" rx="2"/><path d="M9 7.5v-2h6v2M3.5 12.5h17"/>',
+  school: '<path d="M3 9.5 12 5l9 4.5-9 4.5z"/><path d="M7 11.5v4c1.4 1.2 3 1.8 5 1.8s3.6-.6 5-1.8v-4M21 9.5v5"/>',
+  workshop: '<path d="M14.5 4.5a4.5 4.5 0 0 0-4.2 6.1L4 16.9 7.1 20l6.3-6.3a4.5 4.5 0 0 0 6.1-4.2l-2.7 2.7-3-.3-.3-3z"/>',
+  learned: '<path d="M6 3.5h12v17l-6-4.5-6 4.5z"/>',
+  memory: '<path d="M6 3.5h12v17l-6-4.5-6 4.5z"/>',
+  colleges: '<path d="M4 20h16M6 20v-9M18 20v-9M10 20v-5h4v5M3.5 10.5 12 5l8.5 5.5z"/>',
+  engine: '<path d="M4 17a8 8 0 1 1 16 0"/><path d="M12 17l4-5"/>',
+  work: '<circle cx="12" cy="12" r="8"/><path d="M12 7.5V12l3 2"/>',
+  week: '<rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
+  grades: '<path d="M5 19v-7M10 19V6M15 19v-4M20 19V9"/>',
+  cards: '<rect x="5" y="4" width="14" height="16" rx="2"/><path d="M9 9h6M9 13h4"/>',
+  deca: '<path d="M4 18.5V6.5l8 4 8-4v12M12 10.5v9"/>',
+  plan: '<path d="M5 5h14v14H5zM5 10h14M10 10v9"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  ask: '<path d="M4 5.5h16v10H9.5L5 19.5v-4H4z"/>',
+  open: '<path d="M9.5 6l6 6-6 6"/>',
+  refresh: '<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 4.5v4h-4"/>',
+  check: '<path d="M5.5 12.5l4 4 9-9"/>',
+  x: '<path d="M6 6l12 12M18 6L6 18"/>',
+  box: '<rect x="4" y="4" width="16" height="16" rx="3"/>',
+};
+
+// Constant SVG from the table above: nothing from outside goes in.
+function icon(name, cls = "ico") {
+  const svg = document.createElementNS(SVG, "svg");
+  svg.setAttribute("class", cls);
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  svg.innerHTML = ICONS[name] || ICONS.box;
+  return svg;
 }
 
-function weatherPanel() {
+function tool(name, label, onclick, cls = "icon-btn sm") {
+  return el("button", { type: "button", class: cls, "aria-label": label, title: label, onclick }, icon(name));
+}
+
+function asking(label, question) { return tool("ask", label, () => askHer(question)); }
+function adding(label, form) { return tool("plus", label, (event) => openForm(event.currentTarget.closest(".card"), form)); }
+
+function widget(id, { title, meta = "", metaCls = "", actions = [] } = {}, ...body) {
+  return el("section", { class: "card w", "data-id": id, "aria-label": title || PANEL_NAMES[id] || id },
+    el("div", { class: "card-head" },
+      el("h2", { class: "card-title" }, icon(ICONS[id] ? id : "box"), el("span", { text: title || PANEL_NAMES[id] || id })),
+      meta ? el("span", { class: `card-meta ${metaCls}`, text: meta }) : null,
+      actions.length ? el("div", { class: "card-acts" }, ...actions) : null),
+    el("div", { class: "card-body" }, ...body));
+}
+
+// A row: what on the left (and a second line), a value on the right, controls around it.
+function item({ lead = null, one, two = "", val = null, tail = null, href = "", cls = "", label = "" } = {}) {
+  const middle = el("span", { class: "grow" }, el("span", { class: "one", text: one, title: one }),
+    two ? el("span", { class: "two", text: two, title: two }) : null);
+  const kids = [lead, middle, val, tail];
+  if (href) {
+    return el("li", { class: cls }, el("a", { class: "li", href, target: "_blank", rel: "noopener noreferrer",
+      "aria-label": label || null }, ...kids));
+  }
+  return el("li", { class: `li ${cls}`, "aria-label": label || null }, ...kids);
+}
+
+function valueOf(big, small = "") {
+  return el("span", { class: "val" }, el("span", { text: big }), small ? el("small", { text: small }) : null);
+}
+
+// His command, run: the toast is her answer, and the page catches up.
+async function run(command) {
+  return post("/api/do", { command });
+}
+
+// -- the little forms: over the widget, the fields the command needs ---------------------------
+
+let formOpen = null;
+let redrawWaiting = false;
+
+function closeForms() {
+  if (formOpen) formOpen.remove();
+  formOpen = null;
+  if (redrawWaiting) { redrawWaiting = false; renderPanels(); }
+}
+
+const WORKOUT_KINDS = ["run", "lift", "ride", "walk", "swim", "yoga", "hike", "climb", "basketball", "soccer"];
+const FORMS = {
+  workout: { title: "Log a workout", submit: "Log", fields: [
+    { name: "what", placeholder: "What: run, lift, ride…", size: "wide", list: "workout-kinds" },
+    { name: "minutes", placeholder: "Minutes", inputmode: "numeric" },
+    { name: "miles", placeholder: "Miles", inputmode: "decimal" }],
+  command: (v) => v.what && `/workout ${v.what}${v.miles ? ` ${v.miles} mi` : ""}${v.minutes ? ` ${v.minutes} min` : ""}` },
+  watch: { title: "Watch a ticker", submit: "Watch", fields: [{ name: "what", placeholder: "Ticker or name, like NVDA or bitcoin", size: "wide" }],
+    command: (v) => v.what && `/watch ${v.what}` },
+  follow: { title: "Follow a topic", submit: "Follow", fields: [{ name: "what", placeholder: "Like the Broncos or Formula 1", size: "wide" }],
+    command: (v) => v.what && `/news follow ${v.what}` },
+  habit: { title: "Track a habit", submit: "Track", fields: [{ name: "what", placeholder: "Like reading, or the gym", size: "wide" }],
+    command: (v) => v.what && `/habit add ${v.what}` },
+  spent: { title: "Log spending", submit: "Log", fields: [
+    { name: "amount", placeholder: "Amount", inputmode: "decimal", size: "narrow" }, { name: "what", placeholder: "On what" }],
+  command: (v) => v.amount && `/spent ${v.amount.replace(/^\$/, "")} ${v.what}`.trim() },
+  budget: { title: "Set a weekly budget", submit: "Set", fields: [{ name: "amount", placeholder: "Dollars a week", inputmode: "decimal", size: "wide" }],
+    command: (v) => v.amount && `/budget ${v.amount.replace(/^\$/, "")}` },
+  countdown: { title: "Count down to a day", submit: "Add", fields: [
+    { name: "what", placeholder: "What", size: "wide" }, { name: "when", placeholder: "When, like Dec 3", size: "wide" }],
+  command: (v) => v.what && v.when && `/countdown ${v.what} ${v.when}` },
+  birthday: { title: "Add a birthday", submit: "Add", fields: [
+    { name: "who", placeholder: "Who" }, { name: "when", placeholder: "When, like Mar 3" }],
+  command: (v) => v.who && v.when && `/birthday ${v.who} ${v.when}` },
+  client: { title: "Add a client", submit: "Add", fields: [
+    { name: "who", placeholder: "Name", size: "wide" }, { name: "amount", placeholder: "Worth ($, optional)", inputmode: "decimal", size: "wide" }],
+  command: (v) => v.who && `/client add ${v.who}${v.amount ? ` $${v.amount.replace(/^\$/, "")}` : ""}` },
+  remind: { title: "Add a reminder", submit: "Remind me", fields: [
+    { name: "what", placeholder: "What", size: "wide" }, { name: "when", placeholder: "When: 7pm, tomorrow 9am, in 20 min", size: "wide" }],
+  command: (v) => v.what && v.when && `/remind ${v.when} ${v.what}` },
+  remember: { title: "Tell her something to keep", submit: "Keep it", fields: [{ name: "what", placeholder: "Like: I'm vegetarian now", size: "wide" }],
+    command: (v) => v.what && `/remember ${v.what}` },
+  focus: { title: "Start a focus block", submit: "Start", fields: [
+    { name: "what", placeholder: "On what", size: "wide" }, { name: "minutes", placeholder: "Minutes", inputmode: "numeric", value: "25" }],
+  command: (v) => `/focus ${Number(v.minutes) || 25} ${v.what}`.trim() },
+  idea: { title: "Ask her to build something", submit: "Add idea", fields: [{ name: "what", placeholder: "Like: track how much water I drink", size: "wide" }],
+    send: (v) => v.what && post("/api/workshop/ideas", { text: v.what }).then((data) => { loadWorkshop(); return data; }) },
+};
+function listForm(name) {
+  return { title: `Add to ${name ? `the ${name} list` : "a list"}`, submit: "Add", fields: [
+    { name: "what", placeholder: "Items, separated by commas", size: "wide" },
+    { name: "list", placeholder: "Which list", value: name || "grocery", size: "wide" }],
+  command: (v) => v.what && `/list add ${v.list || "grocery"}: ${v.what}` };
+}
+
+function openForm(host, spec) {
+  if (!host) return;
+  if (formOpen) formOpen.remove();
+  const inputs = spec.fields.map((f) => el("input", { class: `field ${f.size || ""}`, name: f.name, type: "text",
+    placeholder: f.placeholder, "aria-label": f.placeholder, inputmode: f.inputmode || null, list: f.list || null,
+    maxlength: "200", autocomplete: "off", value: f.value ?? null }));
+  const submit = el("button", { type: "submit", class: "btn primary sm", text: spec.submit || "Add" });
+  const form = el("form", { class: "wform", "aria-label": spec.title },
+    el("div", { class: "card-head" }, el("h2", { class: "card-title" }, el("span", { text: spec.title })),
+      el("div", { class: "card-acts" }, tool("x", "Cancel", closeForms))),
+    el("div", { class: "fields" }, ...inputs),
+    el("div", { class: "acts" }, button("Cancel", closeForms, "btn ghost sm"), submit));
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const values = Object.fromEntries(inputs.map((i) => [i.name, i.value.trim()]));
+    const command = spec.send ? null : spec.command(values);
+    if (!spec.send && !command) { (inputs.find((i) => !i.value.trim()) || inputs[0]).focus(); return; }
+    if (spec.send && !values.what) { inputs[0].focus(); return; }
+    submit.disabled = true;
+    const data = await (spec.send ? spec.send(values) : run(command));
+    submit.disabled = false;
+    if (data && data.ok !== false) closeForms();
+  });
+  form.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeForms(); }
+  });
+  host.append(form);
+  formOpen = form;
+  inputs[0].focus();
+}
+
+// A command with a second look: the first press asks, the second does it. For the few buttons
+// that hide something (a deadline marked handed in, a ticker dropped, a fact forgotten). The ask
+// is kept apart from the button, so a refresh that redraws the widget in between doesn't lose it.
+let asked = { key: "", until: 0 };
+function careful(node, command, question) {
+  const key = typeof command === "function" ? question : command;
+  const pending = () => asked.key === key && Date.now() < asked.until;
+  if (pending()) node.classList.add("sure");
+  node.addEventListener("click", () => {
+    if (pending()) {
+      asked = { key: "", until: 0 };
+      if (typeof command === "function") command(); else run(command);
+      return;
+    }
+    asked = { key, until: Date.now() + 5000 };
+    node.classList.add("sure");
+    toast(question);
+    setTimeout(() => { if (!pending()) node.classList.remove("sure"); }, 5100);
+  });
+  return node;
+}
+
+function ring(fraction, size, cls, text) {
+  const r = size / 2 - 5, C = 2 * Math.PI * r;
+  const svg = document.createElementNS(SVG, "svg");
+  svg.setAttribute("width", size); svg.setAttribute("height", size); svg.setAttribute("viewBox", `0 0 ${size} ${size}`);
+  svg.setAttribute("aria-hidden", "true");
+  const circle = (klass, extra = {}) => {
+    const c = document.createElementNS(SVG, "circle");
+    for (const [k, v] of Object.entries({ class: klass, cx: size / 2, cy: size / 2, r, fill: "none", "stroke-width": 6, ...extra })) c.setAttribute(k, v);
+    return c;
+  };
+  svg.append(circle("track"), circle(`done ${cls}`, { "stroke-linecap": "round", "stroke-dasharray": C.toFixed(1),
+    "stroke-dashoffset": (C * (1 - Math.max(0, Math.min(1, fraction)))).toFixed(1), transform: `rotate(-90 ${size / 2} ${size / 2})` }));
+  return el("div", { class: "ring" }, svg, el("b", { class: text.length > 4 ? "long" : "", text }));
+}
+
+// -- each widget -------------------------------------------------------------------------------
+
+function weatherW() {
   const p = panelOf("weather");
   if (!p || p.temp == null) return null;
   const hours = (p.hours || []).filter((h) => h.temp != null).slice(0, 8);
-  const box = pn("Weather", p.sky || "", el("div", { class: "big-n", text: `${Math.round(p.temp)}°` }));
+  const range = p.high != null && p.low != null ? `H ${Math.round(p.high)}°  L ${Math.round(p.low)}°` : "";
+  const top = el("div", { class: "ring-row" }, el("div", { class: "num", text: `${Math.round(p.temp)}°` }),
+    el("div", {}, el("div", { class: "num-md", text: (p.sky || "").replace(/^./, (c) => c.toUpperCase()) }),
+      el("div", { class: "sub", text: [p.feels != null ? `Feels ${Math.round(p.feels)}°` : "", range].filter(Boolean).join(" · ") })));
+  const box = widget("weather", { actions: [asking("Ask about the weather", "What's the weather doing this week?")] }, top);
   if (hours.length) {
     const temps = hours.map((h) => h.temp);
     const lo = Math.min(...temps), hi = Math.max(...temps);
@@ -1256,40 +1603,287 @@ function weatherPanel() {
     const bars = el("div", { class: "wx", "aria-hidden": "true" });
     const labels = el("div", { class: "wx-l", "aria-hidden": "true" });
     for (const h of hours) {
-      bars.append(el("i", { class: h.chance >= 50 ? "wet" : "", style: `height:${hi === lo ? 70 : 35 + ((h.temp - lo) / (hi - lo)) * 65}%` }));
+      bars.append(el("i", { class: h.chance >= 50 ? "wet" : "", style: `height:${hi === lo ? 60 : 30 + ((h.temp - lo) / (hi - lo)) * 70}%` }));
       const [label, isPm] = hourLabel(h.at, pm);
       pm = isPm;
       labels.append(el("span", { text: label }));
     }
     const said = hours.map((h) => `${short(minuteOf(h.at))} ${Math.round(h.temp)}°`).join(", ");
-    box.append(bars, labels, el("span", { class: "sr", text: `Next hours: ${said}` }));
-  } else {
-    box.append(el("div", { class: "sub", text: (p.lines || [])[1] || "" }));
+    box.querySelector(".card-body").append(bars, labels, el("span", { class: "sr", text: `Next hours: ${said}` }));
   }
   return box;
+}
+
+function whoopW() {
+  const p = panelOf("whoop");
+  if (!p || (p.recovery == null && p.sleep_minutes == null && p.strain == null)) {
+    if (!p?.down) return null;
+    return widget("whoop", { meta: "Offline" }, el("div", { class: "w-empty" },
+      el("p", { text: "Whoop isn't answering right now. She'll try again on the next refresh." })));
+  }
+  const zone = { green: "good", yellow: "hot", red: "bad" }[p.zone] || "";
+  const stats = el("div", { class: "stat" });
+  if (p.sleep_minutes != null) stats.append(el("span", {}, el("b", { text: hm(p.sleep_minutes) }), `Sleep${p.sleep_performance != null ? ` · ${p.sleep_performance}%` : ""}`));
+  if (p.strain != null) stats.append(el("span", {}, el("b", { text: p.strain.toFixed(1) }), "Strain"));
+  return widget("whoop", { meta: p.old ? "Earlier" : p.zone ? p.zone[0].toUpperCase() + p.zone.slice(1) : "", metaCls: zone,
+    actions: [asking("Ask how you slept", "How did I sleep, and how recovered am I?")] },
+  el("div", { class: "ring-row" }, ring(p.recovery == null ? 0 : p.recovery / 100, 72, p.zone || "",
+    p.recovery == null ? "—" : `${p.recovery}%`), stats),
+  el("div", { class: "sub", text: [p.hrv != null ? `HRV ${p.hrv} ms` : "", p.rhr != null ? `Resting HR ${p.rhr}` : ""].filter(Boolean).join(" · ") }));
+}
+
+function workoutsW() {
+  const p = panelOf("workouts");
+  if (!p) return null;
+  const most = Math.max(30, ...(p.days || []).map((d) => d.minutes || (d.count ? 30 : 0)));
+  const bars = el("div", { class: "bars7", "aria-hidden": "true" });
+  for (const d of p.days || []) {
+    const minutes = d.minutes || (d.count ? 30 : 0);
+    bars.append(el("span", { class: d.today ? "today" : "" },
+      el("i", { class: d.count ? "y" : "", style: `height:${d.count ? Math.max(20, (minutes / most) * 100).toFixed(0) : 6}%` }), d.day[0]));
+  }
+  const said = `${p.count} workout${p.count === 1 ? "" : "s"} this week${p.goal ? ` of ${p.goal}` : ""}`;
+  return widget("workouts", { meta: p.distance || "", actions: [adding("Log a workout", FORMS.workout)] },
+    el("div", { class: "num", "aria-label": said }, String(p.count), el("small", { text: p.goal ? `of ${p.goal} this week` : "this week" })),
+    bars,
+    p.last ? el("div", { class: "sub", text: `Last: ${p.last.text}, ${p.last.when.toLowerCase()}` }) : null);
+}
+
+function spark(values, up) {
+  if (!values || values.length < 2) return null;
+  const lo = Math.min(...values), hi = Math.max(...values);
+  const points = values.map((v, i) => `${((i / (values.length - 1)) * 48).toFixed(1)},${(hi === lo ? 10 : 19 - ((v - lo) / (hi - lo)) * 18).toFixed(1)}`);
+  const svg = document.createElementNS(SVG, "svg");
+  svg.setAttribute("viewBox", "0 0 48 20");
+  svg.setAttribute("class", `spark ${up ? "up" : "down"}`);
+  svg.setAttribute("aria-hidden", "true");
+  const line = document.createElementNS(SVG, "polyline");
+  line.setAttribute("points", points.join(" "));
+  svg.append(line);
+  return svg;
+}
+
+function marketsW() {
+  const p = panelOf("markets");
+  if (!p) return null;
+  const quotes = p.quotes || [];
+  const list = el("ul", { class: "fit mk" });
+  for (const q of quotes.slice(0, 10)) {
+    const up = (q.change ?? 0) >= 0;
+    const change = q.change == null ? "" : `${up ? "+" : "−"}${Math.abs(q.change).toFixed(2)}%`;
+    const name = q.name === q.symbol ? q.symbol : q.name;
+    const drop = p.mine ? careful(tool("x", `Stop watching ${name}`, null, "icon-btn sm hover"), `/unwatch ${q.symbol}`,
+      `Press again to stop watching ${name}`) : null;
+    list.append(item({ one: name, two: name === q.symbol ? "" : q.symbol, label: `${name}: ${q.price}${change ? `, ${change} today` : ""}`,
+      val: el("span", { class: "val-row" }, spark(q.spark, up),
+        el("span", { class: "val" }, el("span", { text: q.price }), el("small", { class: `chg ${up ? "up" : "down"}`, text: change }))),
+      tail: drop }));
+  }
+  if (!quotes.length) list.append(el("li", { class: "sub", text: (p.lines || [])[0] || "No prices right now." }));
+  return widget("markets", { meta: p.old ? "Delayed" : p.mine ? "" : "Indexes", actions: [
+    adding("Watch a ticker", FORMS.watch), asking("Ask about the market", "How's the market doing today?")] }, list);
+}
+
+function inboxW() {
+  const box = latest?.inbox;
+  if (!box) return null;
+  if (!box.ready && !(box.items || []).length) {
+    return widget("inbox", {}, el("div", { class: "w-empty" },
+      el("p", { text: "She reads your Gmail every few hours and flags what needs you, with a draft reply ready." }),
+      el("p", { class: "note", text: "Connect Gmail on the box: DEPLOY.md, section 7c." })));
+  }
+  const list = el("ul", { class: "fit ib" });
+  const words = { urgent: "Urgent", reply: "Needs a reply", fyi: "For your information" };
+  for (const m of box.items || []) {
+    const row = [el("span", { class: "dot", title: words[m.category] || "" }), el("span", { class: "who", text: m.from }),
+      el("span", { class: "subj", text: m.subject, title: m.subject }), el("span", { class: "when", text: m.when.replace(/^Today /, "") })];
+    const label = `${words[m.category] || ""}: ${m.from}, ${m.subject}. ${m.thread ? "Opens in Gmail." : ""}`;
+    list.append(m.thread
+      ? el("li", { class: m.category }, el("a", { class: "li", href: `https://mail.google.com/mail/u/0/#all/${m.thread}`,
+        target: "_blank", rel: "noopener noreferrer", "aria-label": label }, ...row))
+      : el("li", { class: `li ${m.category}`, "aria-label": label }, ...row));
+  }
+  if (!list.children.length) list.append(el("li", { class: "sub", text: "Nothing new that needs you." }));
+  return widget("inbox", { meta: box.waiting ? `${box.waiting} need${box.waiting === 1 ? "s" : ""} you` : "All clear",
+    metaCls: box.waiting ? "hot" : "good", actions: [
+      tool("refresh", "Check the inbox now", () => post("/api/jobs/inbox/run")),
+      asking("Ask what needs a reply", "Anything in my inbox I need to reply to?")] }, list);
+}
+
+function newsW() {
+  const p = panelOf("news");
+  if (!p) return null;
+  const list = el("ul", { class: "fit nw" });
+  for (const n of (p.items || []).slice(0, 10)) {
+    const src = [n.topic, n.source, n.ago].filter(Boolean).join(" · ");
+    const row = [el("span", { class: "grow" }, el("span", { class: "one", text: n.title, title: n.title })), el("span", { class: "src", text: src })];
+    list.append(n.url
+      ? el("li", {}, el("a", { class: "li", href: n.url, target: "_blank", rel: "noopener noreferrer" }, ...row))
+      : el("li", { class: "li" }, ...row));
+  }
+  if (!list.children.length) list.append(el("li", { class: "sub", text: (p.lines || [])[0] || "No headlines right now." }));
+  return widget("news", { meta: p.old ? "Earlier" : "", actions: [
+    adding("Follow a topic", FORMS.follow), asking("Ask for the news", "What's in the news?")] }, list);
+}
+
+function habitsW() {
+  const habits = panelOf("habits")?.habits || [];
+  if (!habits.length) return null;
+  const list = el("ul", { class: "fit hb" });
+  for (const h of habits) {
+    const days = h.days || [];
+    const today = !!days[days.length - 1];
+    const tick = el("button", { type: "button", class: "tick", "aria-pressed": String(today),
+      "aria-label": today ? `${h.name}: done today. Undo` : `Mark ${h.name} done today`,
+      title: today ? "Done today. Press to undo" : "Mark done today",
+      onclick: () => run(today ? `/habit undo ${h.name}` : `/did ${h.name}`) }, icon("check"));
+    const dots = el("span", { class: "dots14", "aria-hidden": "true" });
+    days.forEach((done, i) => dots.append(el("i", { class: [done ? "y" : "", i === days.length - 1 ? "today" : ""].join(" ").trim() })));
+    const kept = days.filter(Boolean).length;
+    list.append(el("li", { class: "li" }, tick, el("span", { class: "name", text: h.name, title: h.name }), dots,
+      el("span", { class: "streak", "aria-label": `${h.streak} day streak, ${kept} of the last 14 days` },
+        el("b", { text: `${h.streak}d` }))));
+  }
+  return widget("habits", { meta: "Last 14 days", actions: [adding("Track a habit", FORMS.habit)] }, list);
+}
+
+function focusW() {
+  const loaded = new Set(latest?.system?.skills || []);
+  if (!loaded.has("focus")) return null;
+  const p = panelOf("focus") || { today_minutes: 0, goal_minutes: 0, running: null };
+  const running = p.running;
+  let fraction, big, lines;
+  if (running) {
+    const total = Math.max(1, Date.parse(running.ends_at) - Date.parse(running.started_at));
+    const left = Math.max(0, Date.parse(running.ends_at) - Date.now());
+    fraction = left / total;
+    big = `${Math.ceil(left / 60000)}m`;
+    lines = [el("div", { class: "num-md", text: running.what, title: running.what }), el("div", { class: "sub", text: `left · ${hm(p.today_minutes)} today` })];
+  } else {
+    fraction = p.goal_minutes ? Math.min(1, p.today_minutes / p.goal_minutes) : 0;
+    big = hm(p.today_minutes || 0);
+    lines = [el("div", { class: "num-md", text: p.today_minutes ? "Focused" : "Not yet today" }),
+      el("div", { class: "sub", text: p.goal_minutes ? `Goal ${hm(p.goal_minutes)}` : "Start a block" })];
+  }
+  const acts = running
+    ? [button("Stop", () => run("/focus stop"), "btn sm danger")]
+    : [button("25 min", () => run("/focus 25 deep work"), "btn sm"), button("50 min", () => run("/focus 50 deep work"), "btn sm")];
+  return widget("focus", { meta: running ? "Running" : "", metaCls: running ? "good" : "",
+    actions: running ? [] : [adding("Focus on something, for as long as you choose", FORMS.focus)] },
+    el("div", { class: "ring-row" }, ring(fraction, 64, "", big), el("div", { class: "grow" }, ...lines)),
+    el("div", { class: "card-foot acts" }, ...acts));
+}
+
+function moneyW() {
+  const p = panelOf("money");
+  if (!p || p.spent_cents == null) return null;
+  const dollars = (cents) => `$${(cents / 100).toLocaleString("en-US", { maximumFractionDigits: cents % 100 ? 2 : 0, minimumFractionDigits: cents % 100 ? 2 : 0 })}`;
+  const share = p.budget_cents ? p.spent_cents / p.budget_cents : 0;
+  const list = el("ul", { class: "fit" });
+  for (const r of p.recent || []) list.append(item({ one: r.what, val: valueOf(dollars(r.cents), r.day) }));
+  return widget("money", { meta: p.earned_cents != null ? `Earned ~${dollars(p.earned_cents)}` : "",
+    actions: [adding("Log spending", FORMS.spent)] },
+  el("div", { class: "num" }, dollars(p.spent_cents), el("small", { text: p.budget_cents ? `of ${dollars(p.budget_cents)} this week` : "this week" })),
+  p.budget_cents
+    ? el("div", { class: "meter", role: "img", "aria-label": `${Math.round(share * 100)}% of the week's budget` },
+      el("i", { class: share >= 1 ? "over" : share >= 0.85 ? "hot" : "", style: `width:${Math.min(100, share * 100).toFixed(0)}%` }))
+    : el("button", { type: "button", class: "link", text: "Set a weekly budget", onclick: (e) => openForm(e.currentTarget.closest(".card"), FORMS.budget) }),
+  list);
+}
+
+let listShown = "";
+function listsW() {
+  const lists = panelOf("lists")?.lists || {};
+  const names = Object.keys(lists);
+  if (!names.length) return null;
+  if (!names.includes(listShown)) listShown = names[0];
+  const tabs = names.length > 1 ? el("div", { class: "tabs-row", role: "group", "aria-label": "Which list" },
+    ...names.map((n) => el("button", { type: "button", class: "chip", "aria-pressed": String(n === listShown),
+      onclick: () => { listShown = n; renderPanels(); } }, n.replace(/^./, (c) => c.toUpperCase()), el("b", { text: String(lists[n].length) })))) : null;
+  const list = el("ul", { class: "fit" });
+  lists[listShown].forEach((text, i) => {
+    list.append(item({ one: text, lead: el("button", { type: "button", class: "tick square", "aria-pressed": "false",
+      "aria-label": `Check off ${text}`, title: "Check off", onclick: () => run(`/list done ${listShown}: ${i + 1}`) }, icon("check")) }));
+  });
+  return widget("lists", { meta: names.length === 1 ? `${listShown.replace(/^./, (c) => c.toUpperCase())} · ${lists[listShown].length}` : "",
+    actions: [tool("plus", `Add to the ${listShown} list`, (e) => openForm(e.currentTarget.closest(".card"), listForm(listShown)))] },
+  tabs, list);
 }
 
 function daysBetween(fromIso, toIso) {
   return Math.round((Date.parse(toIso) - Date.parse(fromIso)) / 86400000);
 }
 
-function countdownsPanel() {
-  const p = panelOf("countdowns");
-  const items = (p?.items || []).slice(0, 4);
+function countdownsW() {
+  const items = panelOf("countdowns")?.items || [];
   if (!items.length) return null;
-  const list = el("div", { class: "cd" });
+  const list = el("ul", { class: "fit cd" });
   for (const c of items) {
-    // How much of the wait is gone: from the day it was set, or the last 90 days.
     const total = c.created_on ? Math.max(1, daysBetween(c.created_on, c.date)) : 90;
     const gone = Math.max(0, Math.min(1, 1 - c.days / total));
-    list.append(el("div", {}, el("span", { class: "mono", text: c.days === 0 ? "today" : `${c.days}d` }),
-      el("span", { class: "name", text: c.name }),
-      el("span", { class: "bar", "aria-hidden": "true" }, el("i", { style: `width:${(gone * 100).toFixed(0)}%` }))));
+    const on = new Date(`${c.date}T12:00:00`);
+    list.append(el("li", { class: "li", "aria-label": `${c.name}: ${c.days === 0 ? "today" : `${c.days} days`}` },
+      el("span", { class: "days" }, c.days === 0 ? "Today" : String(c.days), c.days === 0 ? null : el("small", { text: "d" })),
+      el("span", { class: "grow" }, el("span", { class: "one", text: c.name, title: c.name })),
+      el("span", { class: "val" }, el("small", { text: on.toLocaleDateString("en-US", { month: "short", day: "numeric" }) })),
+      el("span", { class: "meter", "aria-hidden": "true" }, el("i", { style: `width:${(gone * 100).toFixed(0)}%` }))));
   }
-  return pn("Countdowns", "", list);
+  return widget("countdowns", { actions: [adding("Add a countdown", FORMS.countdown)] }, list);
 }
 
-const STEP_NAMES = ["plan", "code", "test", "CI", "ready"];
+function birthdaysW() {
+  const items = panelOf("birthdays")?.items || [];
+  if (!items.length) return null;
+  const list = el("ul", { class: "fit" });
+  for (const b of items) {
+    list.append(item({ one: b.name, two: b.date, val: el("span", { class: `pill ${b.days <= 1 ? "now" : ""}`,
+      text: b.days === 0 ? "Today" : b.days === 1 ? "Tomorrow" : `In ${b.days} days` }) }));
+  }
+  return widget("birthdays", { actions: [adding("Add a birthday", FORMS.birthday),
+    asking("Ask for gift ideas", `Give me gift ideas for ${items[0].name}'s birthday`)] }, list);
+}
+
+function clientsW() {
+  const p = panelOf("clients");
+  const items = p?.items || [];
+  if (!items.length) return null;
+  const list = el("ul", { class: "fit" });
+  for (const c of items) {
+    const worth = c.value_cents != null ? `$${Math.round(c.value_cents / 100).toLocaleString("en-US")}` : "";
+    list.append(item({ one: c.name, two: [c.follow_up ? `Follow up ${c.follow_up}` : "", c.next].filter(Boolean).join(" · "),
+      val: el("span", { class: "val" }, el("span", { class: `pill ${c.late ? "bad" : ""}`, text: c.stage.replace(/^./, (x) => x.toUpperCase()) }),
+        worth ? el("small", { text: worth }) : null) }));
+  }
+  return widget("clients", { actions: [adding("Add a client", FORMS.client)] },
+    p.pipeline_cents ? el("div", { class: "sub", text: `$${Math.round(p.pipeline_cents / 100).toLocaleString("en-US")} in the pipeline` }) : null, list);
+}
+
+// School, in one widget: what's due soon (tick one handed in), what's overdue, the grades.
+function schoolW() {
+  const data = latest;
+  if (!data) return null;
+  const overdue = (data.overdue || []).length;
+  const list = el("ul", { class: "fit sc" });
+  for (const a of data.due || []) {
+    const tick = careful(el("button", { type: "button", class: "tick square", "aria-pressed": "false",
+      "aria-label": `Mark handed in: ${a.title}`, title: "Mark handed in" }, icon("check")),
+    `/done ${a.title}`, `Press again: mark "${clip(a.title, 40)}" handed in`);
+    list.append(item({ lead: tick, one: a.title, two: [a.course, fromNow(a.at)].filter(Boolean).join(" · ") }));
+  }
+  if (!list.children.length) list.append(el("li", { class: "sub", text: "Nothing due in the next three days." }));
+  const grades = (data.grades || []).slice(0, 6);
+  const gradeRow = grades.length ? el("div", { class: "gr" }, ...grades.map((g) => {
+    const score = Number(g.score) || 0;
+    return el("span", { class: score < 80 ? "low" : "", title: g.course },
+      `${String(g.course || "").split(/\s+/)[0]} `, el("b", { text: `${Math.round(score)}` }));
+  })) : null;
+  const meta = overdue ? `${overdue} overdue` : data.due_week ? `${data.due_week} this week` : "";
+  const box = widget("school", { meta, metaCls: overdue ? "bad" : "",
+    actions: [tool("open", "See what's due and overdue", () => openWaiting(overdue ? "overdue" : "due"))] }, list, gradeRow);
+  return box;
+}
+
+const STEP_NAMES = ["Plan", "Code", "Test", "CI", "Ready"];
 
 // The workshop item to show, and its step (1-5) and whether that step is under way.
 function workshopNow() {
@@ -1302,360 +1896,156 @@ function workshopNow() {
   if (item.status === "building") {
     step = s.state === "building" && s.step ? s.step : 2;
     active = true;
-    word = ["planning", "building", "testing", "waiting on CI", "ready"][step - 1];
-  } else if (item.status === "deploying" || item.status === "accepted") { step = 5; active = true; word = "going live"; }
-  else if (item.status === "ready") { step = 5; active = true; word = "ready for you"; }
-  else if (item.status === "queued") { step = 2; word = "queued"; }
-  else if (item.status === "planned") { step = 2; word = "planned"; }
-  else { step = 1; active = s.state === "building" && s.step === 1; word = active ? "planning" : "an idea"; }
+    word = ["Planning", "Building", "Testing", "Waiting on CI", "Ready"][step - 1];
+  } else if (item.status === "deploying" || item.status === "accepted") { step = 5; active = true; word = "Going live"; }
+  else if (item.status === "ready") { step = 5; active = true; word = "Ready for you"; }
+  else if (item.status === "queued") { step = 2; word = "Queued"; }
+  else if (item.status === "planned") { step = 2; word = "Planned"; }
+  else { step = 1; active = s.state === "building" && s.step === 1; word = active ? "Planning" : "An idea"; }
   return { item, step, active, word };
 }
 
-function workshopPanel() {
+function workshopW() {
   const now = workshopNow();
   if (!now) return null;
-  // Done steps amber, the one under way blinking.
   const segs = el("div", { class: "steps", "aria-hidden": "true" });
   for (let i = 1; i <= 5; i++) segs.append(el("i", { class: i < now.step ? "d" : i === now.step && now.active ? "a" : "" }));
-  const labels = el("div", { class: "sub step-l" });
-  STEP_NAMES.forEach((name, i) => {
-    if (i) labels.append(" · ");
-    labels.append(i + 1 === now.step && now.active ? el("b", { text: name }) : name);
-  });
-  const box = el("button", { type: "button", class: "pn", onclick: () => show("workshop"),
-    "aria-label": `Workshop: ${now.item.title}, ${now.word}. Open the workshop.` },
-  el("h3", {}, "Workshop", el("span", { class: now.active ? "hot" : "", text: now.word })),
-  el("div", { class: "title", text: now.item.title }), segs, labels);
-  return box;
+  const labels = el("div", { class: "step-l", "aria-hidden": "true" });
+  STEP_NAMES.forEach((name, i) => labels.append(i + 1 === now.step && now.active ? el("b", { text: name }) : el("span", { text: name })));
+  const others = (shop?.items || []).filter((i) => ["idea", "planned", "queued"].includes(i.status) && i.id !== now.item.id).length;
+  return widget("workshop", { actions: [
+    adding("Ask her to build something", FORMS.idea), tool("open", "Open the workshop", () => show("workshop"))] },
+  el("div", { class: "ring-row" }, el("div", { class: "num-md grow one", text: now.item.title, title: now.item.title }),
+    el("span", { class: `pill ${now.active ? "hot" : ""}`, text: now.word })), segs, labels,
+  el("div", { class: "sub", text: others ? `${others} more waiting in the workshop` : "Nothing else queued" }),
+  now.item.status === "ready" ? el("div", { class: "card-foot" }, button("Review", () => show("workshop"), "btn sm primary")) : null);
 }
 
-function habitsPanel() {
-  const p = panelOf("habits");
-  const habits = p?.habits || [];
-  if (!habits.length) return null;
-  const rows = el("div", { class: "hb" });
-  for (const h of habits) {
-    const dots = el("div", { class: "dots", "aria-hidden": "true" });
-    for (const done of h.days || []) dots.append(el("i", { class: done ? "y" : "" }));
-    const kept = (h.days || []).filter(Boolean).length;
-    rows.append(el("div", { class: "r" }, el("span", { text: h.name }), dots,
-      el("span", { class: "mono", text: String(h.streak), "aria-label": `${h.streak} day streak, ${kept} of the last 14 days` })));
-  }
-  const box = pn("Habits", "last 14 days", rows);
-  box.classList.add("span2");
-  return box;
-}
-
-function focusPanel() {
-  const p = panelOf("focus");
-  if (!p || p.today_minutes == null) return null;
-  const C = 2 * Math.PI * 22;
-  let fraction, big, sub;
-  const running = p.running;
-  if (running) {
-    // A block running: the ring counts down.
-    const total = Math.max(1, Date.parse(running.ends_at) - Date.parse(running.started_at));
-    const left = Math.max(0, Date.parse(running.ends_at) - Date.now());
-    fraction = left / total;
-    big = `${Math.ceil(left / 60000)}m left`;
-    sub = [running.what, `${hm(p.today_minutes)} today`];
-  } else {
-    fraction = Math.min(1, p.today_minutes / Math.max(1, p.goal_minutes));
-    big = hm(p.today_minutes);
-    sub = ["focused today", `goal ${hm(p.goal_minutes)}`];
-  }
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("width", "54"); svg.setAttribute("height", "54"); svg.setAttribute("viewBox", "0 0 54 54");
-  svg.setAttribute("aria-hidden", "true");
-  svg.innerHTML = `<circle class="track" cx="27" cy="27" r="22" fill="none" stroke-width="5"/>
-    <circle class="done" cx="27" cy="27" r="22" fill="none" stroke-width="5" stroke-linecap="round"
-      stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${(C * (1 - fraction)).toFixed(1)}" transform="rotate(-90 27 27)"/>`;
-  return pn("Focus", running ? "running" : "", el("div", { class: "ring" }, svg,
-    el("div", {}, el("div", { class: "mono", style: "font-size:17px", text: big }),
-      el("div", { class: "sub" }, sub[0], el("br"), sub[1]))));
-}
-
-function gradesPanel() {
-  const grades = latest?.grades || [];
-  if (!grades.length) return null;
-  const rows = el("div", { class: "gr" });
-  for (const g of grades) {
-    const score = Number(g.score) || 0;
-    rows.append(el("div", { class: `r${score < 80 ? " low" : ""}` }, el("span", { text: g.course }),
-      el("span", { class: "mono", text: `${score.toFixed(1).replace(/\.0$/, "")}%` }),
-      el("span", { class: "bar", "aria-hidden": "true" }, el("i", { style: `width:${Math.max(0, Math.min(100, score))}%` }))));
-  }
-  return pn("Grades", "", rows);
-}
-
-function weekPanel() {
-  const days = latest?.week || [];
-  if (!days.length || !days.some((d) => d.count)) return null;
-  const strip = el("div", { class: "wk" });
-  for (const d of days) {
-    strip.append(el("span", { "aria-label": `${d.day}: ${d.count} thing${d.count === 1 ? "" : "s"}${d.today ? ", today" : ""}` },
-      el("b", { class: [d.level ? `l${d.level}` : "", d.today ? "today" : ""].join(" ").trim() }), d.day[0]));
-  }
-  const most = Math.max(...days.map((d) => d.count));
-  const heavy = days.filter((d) => d.count === most);
-  const said = heavy.length === 1 && most >= 3 ? `${heavy[0].day} is the heavy one.` : "Spread out evenly.";
-  return pn("This week", "", strip, el("div", { class: "sub", text: said }));
-}
-
-function learnedPanel() {
+function learnedW() {
   const facts = (latest?.learned || []).filter((f) => f.today);
   if (!facts.length) return null;
-  const list = el("div", { class: "lr" });
-  for (const f of facts.slice(0, 5)) {
-    if (forgetting === f.key) {
-      list.append(el("div", { class: "confirm" }, el("span", { class: "text", text: f.value }),
-        button("Forget", () => { forgetting = ""; post("/api/memory/forget", { key: f.key }); }, "btn danger", { "aria-label": `Forget: ${f.value}` }),
-        button("Keep", () => { forgetting = ""; renderPanels(); })));
-    } else {
-      list.append(el("button", { type: "button", text: f.value, "aria-label": `${f.value}. Forget it?`,
-        onclick: () => { forgetting = f.key; renderPanels(); } }));
-    }
-  }
-  return pn("Learned today", "", list);
+  const list = el("ul", { class: "fit" });
+  for (const f of facts) list.append(item({ one: f.value, tail: forgetButton(f) }));
+  return widget("learned", { actions: [adding("Tell her something to keep", FORMS.remember), tool("open", "See all she knows", () => show("memory"))] }, list);
 }
 
-function collegesPanel() {
+function forgetButton(f) {
+  return careful(tool("x", `Forget: ${f.value}`, null, "icon-btn sm hover"), () => post("/api/memory/forget", { key: f.key }),
+    `Press again to forget: ${clip(f.value, 48)}`);
+}
+
+function gradesW() {
+  const grades = latest?.grades || [];
+  if (!grades.length) return null;
+  const list = el("ul", { class: "fit" });
+  for (const g of grades) {
+    const score = Number(g.score) || 0;
+    list.append(el("li", { class: "li", style: "flex-wrap:wrap;row-gap:6px" },
+      el("span", { class: "grow" }, el("span", { class: "one", text: g.course })),
+      el("span", { class: `val${score < 80 ? " bad" : ""}`, text: `${score.toFixed(1).replace(/\.0$/, "")}%` }),
+      el("span", { class: "meter", style: "width:100%;height:4px", "aria-hidden": "true" },
+        el("i", { class: score < 80 ? "over" : "", style: `width:${Math.max(0, Math.min(100, score))}%` }))));
+  }
+  return widget("grades", { actions: [asking("Ask about your grades", "How are my grades looking?")] }, list);
+}
+
+function weekW() {
+  const days = latest?.week || [];
+  if (!days.length || !days.some((d) => d.count)) return null;
+  const most = Math.max(...days.map((d) => d.count));
+  const bars = el("div", { class: "bars7" });
+  for (const d of days) {
+    bars.append(el("span", { class: d.today ? "today" : "", "aria-label": `${d.day}: ${d.count} thing${d.count === 1 ? "" : "s"}` },
+      el("i", { class: d.count ? "y" : "", style: `height:${d.count ? Math.max(12, (d.count / most) * 100).toFixed(0) : 6}%` }), d.day[0]));
+  }
+  const heavy = days.filter((d) => d.count === most);
+  return widget("week", { actions: [asking("Ask about the week", "What does my week look like?")] }, bars,
+    el("div", { class: "sub", text: heavy.length === 1 && most >= 3 ? `${heavy[0].day} is the heavy one.` : "Spread out evenly." }));
+}
+
+function collegesW() {
   const schools = panelOf("colleges")?.schools || [];
   if (!schools.length) return null;
-  const rows = el("div", { class: "cl" });
-  for (const s of schools.slice(0, 5)) {
-    // Done first, so the pips fill like a bar.
+  const list = el("ul", { class: "fit" });
+  for (const s of schools) {
     const pips = el("span", { class: "pips", "aria-hidden": "true" });
     for (const t of [...(s.checklist || [])].sort((a, b) => b.done - a.done)) pips.append(el("i", { class: t.done ? "y" : "" }));
     const done = (s.checklist || []).filter((t) => t.done).length;
-    const when = s.days == null ? "" : s.days < 0 ? "late" : s.days === 0 ? "today" : `${s.days}d`;
-    rows.append(el("div", { class: "r", "aria-label": `${s.name}: ${done} of ${(s.checklist || []).length} done${when ? `, ${when === "late" ? "past its deadline" : when === "today" ? "due today" : `${s.days} days to go`}` : ""}` },
-      el("span", { text: s.plan ? `${s.name} ${s.plan}` : s.name }),
-      el("span", { class: "right" }, pips, when ? el("span", { class: `mono${when === "late" ? " late" : ""}`, text: when }) : null)));
+    const when = s.days == null ? "" : s.days < 0 ? "Late" : s.days === 0 ? "Today" : `${s.days}d`;
+    list.append(item({ one: s.plan ? `${s.name} ${s.plan}` : s.name, two: `${done} of ${(s.checklist || []).length} done`,
+      val: el("span", { class: "acts" }, pips, when ? el("span", { class: `pill ${when === "Late" ? "bad" : ""}`, text: when }) : null) }));
   }
-  return pn("College", "", rows);
+  return widget("colleges", {}, list);
 }
 
-function enginePanel() {
+function engineW() {
   const e = latest?.engine;
   if (!e) return null;
   const up = e.up_since ? hm((Date.now() - Date.parse(e.up_since)) / 60000) : "—";
   const share = e.job_budget ? Math.min(1, e.job_calls / e.job_budget) : 0;
-  return pn("Engine", "", el("div", { class: "en" },
-    el("span", {}, el("span", { class: "mono", text: String(e.calls_today) }), "calls today"),
-    el("span", {}, el("span", { class: "mono", text: up }), "up"),
-    el("span", { class: "meter", role: "img", "aria-label": `${e.job_calls} of ${e.job_budget} scheduled calls` },
-      el("i", { class: share >= 0.9 ? "hot" : "", style: `width:${Math.max(2, share * 100).toFixed(0)}%` }))),
-  el("div", { class: "sub", text: `scheduled ${e.job_calls}/${e.job_budget} · bulk ${e.bulk_calls}/${e.bulk_budget}` }));
+  return widget("engine", { actions: [tool("open", "Open the engine room", () => show("engine"))] },
+    el("div", { class: "stat" }, el("span", {}, el("b", { text: String(e.calls_today) }), "Calls today"), el("span", {}, el("b", { text: up }), "Up")),
+    el("div", { class: "meter", role: "img", "aria-label": `${e.job_calls} of ${e.job_budget} scheduled calls` },
+      el("i", { class: share >= 0.9 ? "over" : "", style: `width:${Math.max(2, share * 100).toFixed(0)}%` })),
+    el("div", { class: "sub", text: `Scheduled ${e.job_calls}/${e.job_budget} · bulk ${e.bulk_calls}/${e.bulk_budget}` }));
 }
 
-function workPanel() {
+function workW() {
   const w = latest?.work;
   if (!w || (!w.now && !w.next)) return null;
   let big, sub;
-  if (w.now) { big = `until ${short(minuteOf(w.now.ends_at))}`; sub = "on shift now"; }
+  if (w.now) { big = `Until ${short(minuteOf(w.now.ends_at))}`; sub = "On shift now"; }
   else {
     const minutes = (Date.parse(w.next.starts_at) - Date.now()) / 60000;
     big = minutes < 24 * 60 ? hm(minutes) : w.next.when;
-    sub = minutes < 24 * 60 ? `shift at ${short(minuteOf(w.next.starts_at))}` : "next shift";
+    sub = minutes < 24 * 60 ? `Shift at ${short(minuteOf(w.next.starts_at))}` : "Next shift";
   }
-  return pn("Up next at work", "", el("div", { class: "big-n", style: "font-size:22px;color:var(--work)", text: big }),
-    el("div", { class: "sub", text: sub }),
+  return widget("work", {}, el("div", { class: "num", style: "color:var(--work)", text: big }), el("div", { class: "sub", text: sub }),
     el("div", { class: "sub", text: `${w.week_hours}h this week (${w.done_hours}h done) · ${w.last_week_hours}h last week` }));
 }
 
-// -- the life panels -------------------------------------------------------------------------
-
-// A command into the message box, cursor at the end, for him to finish and send.
-function compose(text) {
-  if (!wide.matches) show("talk");
-  input.value = text;
-  grow();
-  input.focus();
-  input.setSelectionRange(text.length, text.length);
+function linesW(p) {
+  const list = el("ul", { class: "fit" });
+  for (const text of p.lines || []) list.append(item({ one: text }));
+  return widget(p.skill, { title: p.title || PANEL_NAMES[p.skill] || p.skill }, list);
 }
 
-function chip(label, command, sayIt = false) {
-  return el("button", { type: "button", class: "chip", text: label,
-    "aria-label": sayIt ? `Ask her: ${command}` : `${label}: puts ${command.trim()} in the message box`,
-    onclick: () => (sayIt ? say(command) : compose(command)) });
-}
-
-// A panel with nothing in it yet: what it's for, and one way to fill it. The grid is never bare.
+// A widget with nothing in it yet: what it's for, and the button that fills it.
 const EMPTY = {
-  whoop: ["Recovery, last night's sleep and today's strain, from your Whoop.", null,
-    "Not connected yet: DEPLOY.md 7j, about five minutes."],
-  workouts: ["Nothing logged yet. Tell her “ran 3 miles” or “45 minutes of lifting”.", ["Log a workout", "/workout "]],
-  markets: ["Your watchlist's prices, delayed.", ["Watch a ticker", "/watch "]],
-  news: ["The top headlines, and the topics you follow.", ["Follow a topic", "/news follow "]],
-  habits: ["The things you mean to do every day, and the streak.", ["Track a habit", "/habit add "]],
-  focus: ["Timed focus blocks, toward a goal for the day.", ["Start 25 minutes", "/focus 25 "]],
-  money: ["What you spend this week, against a budget.", ["Log spending", "/spent "]],
-  countdowns: ["Days to go until the things you're waiting for.", ["Count down to a day", "/countdown "]],
-  lists: ["Groceries, packing, to-do: any list you name.", ["Start a list", "/list add grocery: "]],
-  birthdays: ["Birthdays coming up, so none sneak past.", ["Add a birthday", "/birthday "]],
-  clients: ["Your clients, where each stands, and who's due a follow-up.", ["Add a client", "/client add "]],
-  workshop: ["Anything you wish she could do, she can build for you.", ["Ask for something", "/idea "]],
-  learned: ["What she picked up about you today.", ["Tell her something", "remember that "]],
-  plan: ["Her plan for your evening, around work.", ["Plan my evening", "Plan my evening", true]],
+  whoop: { text: "Recovery, last night's sleep and today's strain from your Whoop.", note: "Connect it on the box: DEPLOY.md, section 7j.",
+    ask: ["How do I connect it?", "How do I connect my Whoop to you?"] },
+  workouts: { text: "Log a run, a lift or a ride, and she keeps count against a weekly goal.", form: FORMS.workout, cta: "Log a workout" },
+  markets: { text: "The stocks and coins you follow, with today's move.", form: FORMS.watch, cta: "Watch a ticker" },
+  news: { text: "The top headlines, and the topics you follow.", form: FORMS.follow, cta: "Follow a topic" },
+  habits: { text: "The things you mean to do every day. Tick them off here and keep the streak.", form: FORMS.habit, cta: "Track a habit" },
+  money: { text: "What you spend each week, against a budget if you set one.", form: FORMS.spent, cta: "Log spending" },
+  countdowns: { text: "Days to go until the things you're waiting for.", form: FORMS.countdown, cta: "Add a countdown" },
+  lists: { text: "Groceries, packing, to-dos: any list you name. Check things off here.", form: listForm("grocery"), cta: "Start a list" },
+  birthdays: { text: "Birthdays coming up, so none sneak past.", form: FORMS.birthday, cta: "Add a birthday" },
+  clients: { text: "Your clients, where each one stands, and who's due a follow-up.", form: FORMS.client, cta: "Add a client" },
+  workshop: { text: "Anything you wish she could do, she can build. You approve it before it goes live.", form: FORMS.idea, cta: "Suggest something" },
+  learned: { text: "What she picks up about you today shows here.", form: FORMS.remember, cta: "Tell her something" },
 };
 
-function emptyPanel(id) {
+function emptyWidget(id) {
   const loaded = new Set(latest?.system?.skills || []);
-  if (!EMPTY[id] || !(loaded.has(id) || CORE_PANELS.has(id) || id === "whoop")) return null;
-  const [what, action, note] = EMPTY[id];
-  const box = pn(PANEL_NAMES[id] || id, "", el("div", { class: "sub", text: what }),
-    note ? el("div", { class: "sub note", text: note }) : null,
-    action ? el("div", { class: "starts" }, chip(...action)) : null);
-  box.classList.add("empty-pn");
-  return box;
-}
-
-// A little line of the day's prices, rising or falling.
-function spark(values, up) {
-  if (!values || values.length < 2) return null;
-  const lo = Math.min(...values), hi = Math.max(...values);
-  const points = values.map((v, i) => `${((i / (values.length - 1)) * 60).toFixed(1)},${(hi === lo ? 9 : 17 - ((v - lo) / (hi - lo)) * 16).toFixed(1)}`);
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("viewBox", "0 0 60 18");
-  svg.setAttribute("class", `spark ${up ? "up" : "down"}`);
-  svg.setAttribute("aria-hidden", "true");
-  const line = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
-  line.setAttribute("points", points.join(" "));
-  svg.append(line);
-  return svg;
-}
-
-function marketsPanel() {
-  const p = panelOf("markets");
-  if (!p) return null;
-  const quotes = p.quotes || [];
-  const rows = el("div", { class: "mk" });
-  for (const q of quotes.slice(0, 6)) {
-    const up = (q.change ?? 0) >= 0;
-    const change = q.change == null ? "" : `${up ? "+" : "−"}${Math.abs(q.change).toFixed(2)}%`;
-    rows.append(el("div", { class: "r", "aria-label": `${q.name}: ${q.price}${change ? `, ${change} today` : ""}` },
-      el("span", { class: "name", text: q.name === q.symbol ? q.symbol : q.name, title: q.symbol }),
-      spark(q.spark, up) || el("span"),
-      el("span", { class: "px mono" }, el("b", { text: q.price }), el("span", { class: `chg ${up ? "up" : "down"}`, text: change }))));
-  }
-  if (!quotes.length) rows.append(el("div", { class: "sub", text: (p.lines || [])[0] || "No prices right now." }));
-  return pn("Markets", p.old ? "delayed" : p.mine ? "your list" : "the market", rows,
-    el("div", { class: "starts" }, chip("Watch a ticker", "/watch "), chip("How's the market?", "How's the market?", true)));
-}
-
-function newsPanel() {
-  const p = panelOf("news");
-  if (!p) return null;
-  const list = el("ul", { class: "nw" });
-  for (const n of (p.items || []).slice(0, 6)) {
-    const title = n.url ? el("a", { href: n.url, target: "_blank", rel: "noopener noreferrer", text: n.title }) : el("span", { text: n.title });
-    list.append(el("li", {}, title, el("span", { class: "sub", text: [n.topic, n.source, n.ago].filter(Boolean).join(" · ") })));
-  }
-  if (!list.children.length) list.append(el("li", { class: "sub", text: (p.lines || [])[0] || "No headlines right now." }));
-  const box = pn("News", p.old ? "older" : "headlines", list,
-    el("div", { class: "starts" }, chip("Follow a topic", "/news follow "), chip("Read me the news", "What's in the news?", true)));
-  box.classList.add("tall");
-  return box;
-}
-
-function inboxPanel() {
-  const box = latest?.inbox;
-  if (!box) return null;
-  if (!box.ready && !(box.items || []).length) {
-    return pn("Inbox", "", el("div", { class: "sub", text: "She reads your Gmail every few hours and flags what needs you." }),
-      el("div", { class: "sub note", text: "Not connected yet: DEPLOY.md 7c." }));
-  }
-  const list = el("ul", { class: "ib" });
-  for (const m of box.items || []) {
-    list.append(el("li", { class: m.category },
-      el("span", { class: "dot", "aria-label": { urgent: "Urgent", reply: "Needs a reply", fyi: "For your information" }[m.category] || "" }),
-      el("span", { class: "who", text: m.from }), el("span", { class: "sub when", text: m.when.replace(/^Today /, "") }),
-      el("span", { class: "subj", text: m.subject })));
-  }
-  if (!list.children.length) list.append(el("li", { class: "sub", text: "Nothing new that needs you." }));
-  return pn("Inbox", box.waiting ? `${box.waiting} need${box.waiting === 1 ? "s" : ""} you` : "", list,
-    el("div", { class: "starts" }, chip("What needs a reply?", "Anything in my inbox I need to reply to?", true)));
-}
-
-function whoopPanel() {
-  const p = panelOf("whoop");
-  if (!p || (p.recovery == null && p.sleep_minutes == null && p.strain == null)) {
-    return p?.down ? pn("Whoop", "", el("div", { class: "sub", text: "Can't reach Whoop right now." })) : null;
-  }
-  const C = 2 * Math.PI * 22;
-  const fraction = p.recovery == null ? 0 : p.recovery / 100;
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("width", "54"); svg.setAttribute("height", "54"); svg.setAttribute("viewBox", "0 0 54 54");
-  svg.setAttribute("aria-hidden", "true");
-  svg.innerHTML = `<circle class="track" cx="27" cy="27" r="22" fill="none" stroke-width="5"/>
-    <circle class="done ${p.zone || ""}" cx="27" cy="27" r="22" fill="none" stroke-width="5" stroke-linecap="round"
-      stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${(C * (1 - fraction)).toFixed(1)}" transform="rotate(-90 27 27)"/>`;
-  const facts = el("div", { class: "wh" });
-  if (p.sleep_minutes != null) facts.append(el("span", {}, el("b", { class: "mono", text: hm(p.sleep_minutes) }), `slept${p.sleep_performance != null ? `, ${p.sleep_performance}%` : ""}`));
-  if (p.strain != null) facts.append(el("span", {}, el("b", { class: "mono", text: p.strain.toFixed(1) }), "strain"));
-  return pn("Whoop", p.old ? "older" : p.zone || "", el("div", { class: "ring" }, svg,
-    el("div", {}, el("div", { class: "mono", style: "font-size:20px", text: p.recovery == null ? "—" : `${p.recovery}%` }),
-      el("div", { class: "sub", text: "recovery" }))), facts,
-    el("div", { class: "sub", text: [p.hrv != null ? `HRV ${p.hrv} ms` : "", p.rhr != null ? `resting HR ${p.rhr}` : ""].filter(Boolean).join(" · ") }));
-}
-
-function workoutsPanel() {
-  const p = panelOf("workouts");
-  if (!p) return null;
-  const most = Math.max(30, ...(p.days || []).map((d) => d.minutes || (d.count ? 30 : 0)));
-  const bars = el("div", { class: "wo", "aria-hidden": "true" });
-  for (const d of p.days || []) {
-    const minutes = d.minutes || (d.count ? 30 : 0);
-    bars.append(el("span", { class: d.today ? "today" : "" },
-      el("i", { class: d.count ? "y" : "", style: `height:${d.count ? Math.max(18, (minutes / most) * 100).toFixed(0) : 6}%` }), d.day[0]));
-  }
-  const said = `${p.count} workout${p.count === 1 ? "" : "s"} this week${p.goal ? ` of ${p.goal}` : ""}`;
-  return pn("Workouts", p.distance || "", el("div", { class: "big-n", "aria-label": said },
-    String(p.count), el("span", { class: "of", text: p.goal ? ` / ${p.goal} this week` : " this week" })), bars,
-    p.last ? el("div", { class: "sub", text: `Last: ${p.last.text}, ${p.last.when.toLowerCase()}` }) : null,
-    el("div", { class: "starts" }, chip("Log a workout", "/workout ")));
-}
-
-// School, in one small panel: what's due soon, what's overdue, grades, the next college deadline.
-function schoolPanel() {
-  const data = latest;
-  if (!data) return null;
-  const overdue = (data.overdue || []).length;
-  const links = el("span", { class: "school-links" });
-  if (overdue) links.append(el("button", { type: "button", class: "link hot-due", text: `${overdue} overdue`, onclick: () => openWaiting("overdue") }));
-  if (data.due_week) links.append(el("button", { type: "button", class: "link", text: `${data.due_week} this week`, onclick: () => openWaiting("due") }));
-  const list = el("ul", { class: "sc" });
-  for (const a of (data.due || []).slice(0, 3)) {
-    list.append(el("li", {}, el("span", { class: "t", text: a.title, title: a.title }),
-      el("span", { class: "sub", text: [a.course, fromNow(a.at)].filter(Boolean).join(" · ") })));
-  }
-  const grades = (data.grades || []).slice(0, 6);
-  const gradeRow = grades.length ? el("div", { class: "gchips" }, ...grades.map((g) => {
-    const score = Number(g.score) || 0;
-    return el("span", { class: score < 80 ? "low" : "", title: g.course },
-      `${String(g.course || "").split(/\s+/).slice(0, 2).join(" ")} `, el("b", { class: "mono", text: `${Math.round(score)}` }));
-  })) : null;
-  const college = (panelOf("colleges")?.schools || []).filter((c) => c.days != null && c.days >= 0).sort((a, b) => a.days - b.days)[0];
-  if (!list.children.length) list.append(el("li", { class: "sub", text: "Nothing due in the next three days." }));
-  return pn("School", "", links.children.length ? links : null, list, gradeRow,
-    college ? el("div", { class: "sub", text: `${college.name}${college.plan ? ` ${college.plan}` : ""}: ${college.days === 0 ? "due today" : `${college.days}d to go`}` }) : null);
-}
-
-function linesPanel(p) {
-  const list = el("ul", {});
-  for (const text of (p.lines || []).slice(0, 6)) list.append(el("li", { text }));
-  return pn(p.title || PANEL_NAMES[p.skill] || p.skill, "", list);
+  const spec = EMPTY[id];
+  if (!spec || !(loaded.has(id) || CORE_PANELS.has(id) || id === "whoop")) return null;
+  const acts = [];
+  if (spec.form) acts.push(button(spec.cta, (e) => openForm(e.currentTarget.closest(".card"), spec.form), "btn sm primary"));
+  if (spec.ask) acts.push(button(spec.ask[0], () => askHer(spec.ask[1]), "btn sm"));
+  return widget(id, {}, el("div", { class: "w-empty" }, el("p", { text: spec.text }),
+    spec.note ? el("p", { class: "note", text: spec.note }) : null, acts.length ? el("div", { class: "acts" }, ...acts) : null));
 }
 
 const BUILT = {
-  weather: weatherPanel, whoop: whoopPanel, workouts: workoutsPanel, markets: marketsPanel, inbox: inboxPanel,
-  habits: habitsPanel, news: newsPanel, focus: focusPanel, countdowns: countdownsPanel, school: schoolPanel,
-  workshop: workshopPanel, learned: learnedPanel, grades: gradesPanel, week: weekPanel, colleges: collegesPanel,
-  engine: enginePanel, work: workPanel,
+  weather: weatherW, whoop: whoopW, workouts: workoutsW, markets: marketsW, inbox: inboxW, habits: habitsW,
+  news: newsW, focus: focusW, money: moneyW, lists: listsW, countdowns: countdownsW, birthdays: birthdaysW,
+  clients: clientsW, school: schoolW, workshop: workshopW, learned: learnedW, grades: gradesW, week: weekW,
+  colleges: collegesW, engine: engineW, work: workW,
 };
 
-// Every panel there could be, in order: the ones the page draws, then every other skill's.
+// Every widget there could be, in order: the ones the page draws, then every other skill's.
 function panelIds() {
   const ids = Object.keys(latest?.prefs?.defaults || BUILT);
   for (const p of latest?.panels || []) if (!ids.includes(p.skill)) ids.push(p.skill);
@@ -1671,24 +2061,26 @@ function panelOn(id) {
 
 function buildPanel(id) {
   if (BUILT[id]) {
-    try { return BUILT[id](); } catch { /* a panel that can't draw falls back to its lines */ }
+    try { return BUILT[id](); } catch (error) { console.warn(`widget ${id}:`, error); }
   }
   const p = panelOf(id);
-  return p && (p.lines || []).length ? linesPanel(p) : null;
+  return p && (p.lines || []).length ? linesW(p) : null;
 }
 
 function renderPanels() {
+  // Don't redraw under his hands: a form open, or typing in one. It redraws when he's done.
+  if (formOpen) { redrawWaiting = true; return; }
   const box = $("#panels");
   const out = [];
   if (wide.matches) {
-    // Every panel that's on: filled, or saying how to fill it.
+    // Every widget that's on: filled, or saying how to fill it.
     for (const id of panelIds()) {
       if (!panelOn(id)) continue;
-      const node = buildPanel(id) || emptyPanel(id);
+      const node = buildPanel(id) || emptyWidget(id);
       if (node) { node.dataset.id = id; out.push(node); }
     }
   } else {
-    // The phone's three, as he chose them; with nothing in one yet, the next panel that has something.
+    // The phone's three, as he chose them; with nothing in one yet, the next widget that has something.
     const chosen = latest?.prefs?.phone || ["whoop", "markets", "habits"];
     const count = latest?.prefs?.phone_count || 3;
     const order = [...chosen, ...panelIds().filter((i) => !chosen.includes(i) && panelOn(i))];
@@ -1699,29 +2091,120 @@ function renderPanels() {
     }
     for (const id of order) {
       if (out.length >= count) break;
-      const node = emptyPanel(id);
+      const node = emptyWidget(id);
       if (node) out.push(node);
     }
   }
+  // Only the first draw rises in; a refresh swaps them quietly.
+  if (box.children.length) out.forEach((n) => { n.style.animation = "none"; });
   box.replaceChildren(...out);
-  box.closest(".panel-col").hidden = !out.length;
-  pack();
+  layoutPanels();
 }
 
-// Panels are as tall as what's in them. On a desk they pack like bricks, each in the first
-// space it fits (a grid of 4px rows, each panel spanning its own height), so no hole is left.
-const ROW = 4, GAP = 12;
-function pack() {
-  const box = $("#panels");
-  const packed = wide.matches && getComputedStyle(box).gridTemplateColumns.split(" ").length > 1;
-  box.classList.toggle("packed", packed);
-  for (const p of box.children) {
-    if (!packed) { p.style.removeProperty("grid-row-end"); continue; }
-    p.style.gridRowEnd = `span ${Math.ceil((p.getBoundingClientRect().height + GAP) / ROW)}`;
+// -- one page, no scrolling: the widgets fill the space, in pages when there are more ---------------
+// Columns and rows come from the room there is (each widget at least MIN_W by MIN_H). Widgets go
+// in order into the first place they fit; what doesn't fit starts the next page. The last row's
+// widgets widen to fill it, so no hole is left.
+
+const MIN_W = 212, MIN_H = 184, GAP = 12, MAX_COLS = 6, MAX_ROWS = 4;
+let page = 0;
+
+function paginate(spans, cols, rows) {
+  const pages = [];
+  spans.forEach((w, i) => {
+    for (let p = 0; ; p++) {
+      pages[p] ??= { cells: Array.from({ length: rows }, () => Array(cols).fill(-1)), items: [] };
+      const cells = pages[p].cells;
+      let spot = null;
+      for (let r = 0; r < rows && !spot; r++) {
+        for (let c = 0; c + w <= cols && !spot; c++) {
+          if (cells[r].slice(c, c + w).every((x) => x === -1)) spot = { r, c };
+        }
+      }
+      if (!spot) continue;
+      for (let c = spot.c; c < spot.c + w; c++) cells[spot.r][c] = i;
+      pages[p].items.push({ i, r: spot.r, c: spot.c, w });
+      break;
+    }
+  });
+  // Widen each row's widgets into its empty cells, a column at a time, from the right.
+  for (const pg of pages) {
+    for (let r = 0; r < rows; r++) {
+      const row = pg.items.filter((it) => it.r === r).sort((a, b) => a.c - b.c);
+      if (!row.length) continue;
+      let spare = cols - row.reduce((n, it) => n + it.w, 0);
+      for (let k = row.length - 1; spare > 0; k = (k - 1 + row.length) % row.length, spare--) row[k].w++;
+      let c = 0;
+      for (const it of row) { it.c = c; c += it.w; }
+    }
+    pg.rows = Math.max(...pg.items.map((it) => it.r)) + 1;
+  }
+  return pages;
+}
+
+function layoutPanels() {
+  const grid = $("#panels");
+  const cards = [...grid.children];
+  const pager = $("#pager");
+  if (!wide.matches || !cards.length || document.body.dataset.view !== "today") {
+    if (!wide.matches) { grid.removeAttribute("style"); cards.forEach((c) => { c.hidden = false; c.style.removeProperty("grid-area"); }); pager.hidden = true; fitLists(); }
+    return;
+  }
+  const board = grid.parentElement;
+  const W = grid.clientWidth, H = board.clientHeight;
+  if (!W || !H) return;
+  const cols = Math.max(1, Math.min(MAX_COLS, Math.floor((W + GAP) / (MIN_W + GAP))));
+  const spans = cards.map((c) => Math.min(cols, WIDE.has(c.dataset.id) ? 2 : 1));
+  const rowsIn = (h) => Math.max(1, Math.min(MAX_ROWS, Math.floor((h + GAP) / (MIN_H + GAP))));
+  let pages = paginate(spans, cols, rowsIn(H));
+  if (pages.length > 1) pages = paginate(spans, cols, rowsIn(H - 38));
+  page = Math.min(page, pages.length - 1);
+  const shown = pages[page];
+  const rows = pages.length > 1 ? rowsIn(H - 38) : shown.rows;
+  grid.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
+  grid.style.gridTemplateRows = `repeat(${rows}, minmax(0, 1fr))`;
+  const at = new Map(shown.items.map((it) => [it.i, it]));
+  cards.forEach((card, i) => {
+    const it = at.get(i);
+    card.hidden = !it;
+    if (it) card.style.gridArea = `${it.r + 1} / ${it.c + 1} / span 1 / span ${it.w}`;
+  });
+  pager.hidden = pages.length < 2;
+  if (pages.length > 1) {
+    const dots = $("#page-dots");
+    dots.replaceChildren(...pages.map((_, n) => el("button", { type: "button", "aria-label": `Widgets, page ${n + 1} of ${pages.length}`,
+      "aria-current": String(n === page), onclick: () => { page = n; layoutPanels(); } })));
+    $("#page-prev").disabled = page === 0;
+    $("#page-next").disabled = page === pages.length - 1;
+  }
+  fitLists();
+}
+
+// Each list shows the rows that fit, and says how many more.
+function fitLists() {
+  for (const list of document.querySelectorAll("#panels .fit")) {
+    if (list.closest("[hidden]")) continue;
+    const rows = [...list.children].filter((r) => !r.classList.contains("more-n"));
+    list.querySelector(".more-n")?.remove();
+    rows.forEach((r) => { r.hidden = false; });
+    let n = rows.length;
+    while (n > 1 && list.scrollHeight > list.clientHeight + 1) rows[--n].hidden = true;
+    if (n < rows.length) {
+      const more = el("li", { class: "more-n", text: `+${rows.length - n} more` });
+      list.append(more);
+      while (n > 1 && list.scrollHeight > list.clientHeight + 1) { rows[--n].hidden = true; more.textContent = `+${rows.length - n} more`; }
+    }
   }
 }
-if ("ResizeObserver" in window) new ResizeObserver(() => requestAnimationFrame(pack)).observe($("#panels"));
-document.fonts?.ready.then(pack);
+
+$("#page-prev").addEventListener("click", () => { page = Math.max(0, page - 1); layoutPanels(); });
+$("#page-next").addEventListener("click", () => { page += 1; layoutPanels(); });
+$("#edit-widgets").addEventListener("click", () => {
+  show("engine");
+  $("#widgets-block").scrollIntoView({ block: "start", behavior: calm.matches ? "auto" : "smooth" });
+});
+if ("ResizeObserver" in window) new ResizeObserver(() => requestAnimationFrame(layoutPanels)).observe($(".board"));
+document.fonts?.ready.then(() => layoutPanels());
 
 function renderToday(data) {
   renderHeader(data);
@@ -1730,6 +2213,9 @@ function renderToday(data) {
   renderStarters(data);
   if (waiting.open) renderNeeds();
 }
+
+// Workout kinds, offered as he types.
+document.body.append(el("datalist", { id: "workout-kinds" }, ...WORKOUT_KINDS.map((k) => el("option", { value: k }))));
 
 // -- memory ---------------------------------------------------------------------------------
 
@@ -1809,23 +2295,24 @@ function renderEngine(data) {
   for (const job of jobs) {
     const status = job.status === "ok" ? "ok" : job.status === "failed" ? "failed" : "";
     body.append(el("tr", { class: status === "failed" ? "failed" : "" },
-      el("td", {}, el("span", { class: "job-name", text: jobName(job.name) }), el("span", { class: `pill ${status}`, text: job.status }),
+      el("td", {}, el("span", { class: "job-name", text: jobName(job.name) }),
+        el("span", { class: `pill ${status === "ok" ? "good" : status === "failed" ? "bad" : ""}`, text: job.status }),
         el("span", { class: "job-id", text: job.name }),
         job.error ? el("span", { class: status === "failed" ? "job-error" : "job-note", text: job.error }) : null),
-      el("td", { class: "mono", text: job.last || "—" }),
-      el("td", { class: "mono", text: job.next || "—" }),
-      el("td", {}, button("Run now", () => post(`/api/jobs/${job.name}/run`), "btn", { "aria-label": `Run ${jobName(job.name)} now` }))));
+      el("td", { class: "when", text: job.last || "—" }),
+      el("td", { class: "when", text: job.next || "—" }),
+      el("td", {}, button("Run now", () => post(`/api/jobs/${job.name}/run`), "btn sm", { "aria-label": `Run ${jobName(job.name)} now` }))));
   }
 
   fill("#trust", data.trust, (t) => line(`${t.action} → ${t.target}`,
     t.hard ? "hard line" : `${t.state}${t.state === "trusted" ? "" : ` · ${t.streak}/10`}`,
-    ...(t.hard || t.state !== "trusted" ? [] : [button("Take back", () => post("/api/trust/revoke", { action: t.action, target: t.target }), "btn danger")])),
+    ...(t.hard || t.state !== "trusted" ? [] : [button("Take back", () => post("/api/trust/revoke", { action: t.action, target: t.target }), "btn sm danger")])),
   "She asks before everything.");
   const most = Math.max(1, ...(data.usage || []).map((u) => u.calls));
   fill("#usage", data.usage, (u) => el("li", {},
     el("span", { class: "text", text: `${u.lane} · ${provider(u.provider)}` }),
     el("span", { class: "meta2", text: `${u.calls} call${u.calls === 1 ? "" : "s"}${u.failures ? `, ${u.failures} failed` : ""}` }),
-    el("span", { class: "bar", "aria-hidden": "true" }, el("i", { class: u.failures ? "failed" : "", style: `width:${(u.calls / most) * 100}%` }))),
+    el("span", { class: "meter", "aria-hidden": "true" }, el("i", { class: u.failures ? "failed" : "", style: `width:${(u.calls / most) * 100}%` }))),
   "No model calls in the last day.");
   renderPrefs(false);
 }
@@ -2051,6 +2538,8 @@ function everySecond() {
 
 document.querySelectorAll(".js-orb").forEach(orb);
 paintOrb();
+initChat();
+$("#add-reminder").addEventListener("click", () => openForm($(".agenda"), FORMS.remind));
 const startAt = recall("sloane.view", "today");
 show(VIEWS.includes(startAt) || (startAt === "talk" && !wide.matches) ? startAt : "today");
 loadHistory();
