@@ -50,6 +50,8 @@ SKILLS: dict[str, str] = {
     "college": ("/college add <school> <EA|ED|RD> <deadline>  ·  /college <school> done <checklist item>  ·  "
                 "/college <school> submitted | admitted | deferred | waitlisted | denied | committed"),
     "roleplay": "/roleplay [area] -- starts a DECA practice role-play (marketing, finance, hospitality ...)",
+    "workout": "/workout <what> [distance] [minutes] [yesterday] -- e.g. /workout run 3 mi 28 min  ·  /workout goal <n a week>",
+    "watch": "/watch <ticker or name> -- onto his markets watchlist, e.g. /watch NVDA",
 }
 MAX_LENGTH = 300
 
@@ -95,6 +97,9 @@ RULES: dict[str, object] = {
     "college": lambda a: bool(a) and not set(a) & {"drop", "archive", "remove", "delete", "skip", "skipped",
                                                   "optional", "undo", "untick", "unskip", "open", "reopen"},
     "roleplay": lambda a: len(a) <= 4,
+    # Logging one or setting the goal; never taking one back.
+    "workout": _first_not("undo", "delete", "remove", "oops"),
+    "watch": bool,
 }
 
 

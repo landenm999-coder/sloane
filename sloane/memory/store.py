@@ -1358,7 +1358,8 @@ class Store:
     BACKUP_TABLES = ("state", "people", "commitments", "courses", "trust", "reminders", "jobs",
                      "list_items", "countdowns", "cards", "habits", "habit_log",
                      "clients", "client_notes", "focus_sessions", "expenses", "skill_settings",
-                     "colleges", "college_tasks", "roleplays", "workshop_items", "dashboard_prefs")
+                     "colleges", "college_tasks", "roleplays", "workshop_items", "dashboard_prefs",
+                     "workouts", "watchlist")
 
     async def restore_rows(self, table: str, rows: Sequence[Row]) -> int:
         """Merge backed-up rows back in. Existing rows win; returns rows inserted.
@@ -2496,6 +2497,56 @@ class Store:
             "select * from roleplays order by finished_at desc, id limit %s",
             (limit,),
         )
+
+    # -- workouts (sql/033) -------------------------------------------------------------------
+
+    async def add_workout(self, *, kind: str, minutes: int | None, distance_m: float | None, done_on: date,
+                          logged_at: datetime, source: str = "him", source_id: str | None = None) -> Row | None:
+        """The row, or None when that source's workout was already logged."""
+        return await self._one(
+            """
+            insert into workouts (kind, minutes, distance_m, done_on, logged_at, source, source_id)
+            values (%s, %s, %s, %s, %s, %s, %s)
+            on conflict (source, source_id) where source_id is not null do nothing
+            returning *
+            """,
+            (kind, minutes, distance_m, done_on, logged_at, source, source_id),
+        )
+
+    async def workouts_since(self, since: date) -> list[Row]:
+        return await self._fetch(
+            "select * from workouts where done_on >= %s order by done_on, logged_at", (since,)
+        )
+
+    async def last_workout(self) -> Row | None:
+        return await self._one("select * from workouts order by done_on desc, logged_at desc limit 1")
+
+    async def undo_workout(self, since: datetime) -> Row | None:
+        """Take back the last one he logged himself, if it was logged after `since`."""
+        return await self._one(
+            """
+            delete from workouts where id = (
+              select id from workouts where source = 'him' and logged_at >= %s
+               order by logged_at desc limit 1)
+            returning *
+            """,
+            (since,),
+        )
+
+    # -- markets (sql/034) ------------------------------------------------------------------
+
+    async def watchlist(self) -> list[str]:
+        return [r["symbol"] for r in await self._fetch("select symbol from watchlist order by added_at, symbol")]
+
+    async def watch(self, symbol: str) -> bool:
+        """True if it's new on the list."""
+        row = await self._one(
+            "insert into watchlist (symbol) values (%s) on conflict (symbol) do nothing returning symbol", (symbol,)
+        )
+        return row is not None
+
+    async def unwatch(self, symbol: str) -> bool:
+        return await self._one("delete from watchlist where symbol = %s returning symbol", (symbol,)) is not None
 
 
 async def remember(what: str, coro: Awaitable[T]) -> T | None:

@@ -117,12 +117,13 @@ class Router:
             on_text=on_text,
         )
 
-    async def quick(self, system: str, prompt: str, *, max_tokens: int = 400, on_text=None) -> str:  # noqa: ANN001
+    async def quick(self, system: str, prompt: str, *, max_tokens: int = 800, on_text=None) -> str:  # noqa: ANN001
         """The quick lane: one short spoken turn on QUICK_PROVIDER, and nothing else.
 
         No fallback through the other providers: when the fast model can't answer,
         the caller hands the turn to the main lane, which is the fallback.
-        Raises NoProviderAvailable (also when QUICK_PROVIDER is blank).
+        Raises NoProviderAvailable (also when QUICK_PROVIDER is blank). The reply is
+        a sentence or two, but gpt-oss's reasoning counts against `max_tokens` too.
         """
         name = self._config.quick_provider.strip()
         if not name:

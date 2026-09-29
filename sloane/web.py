@@ -258,7 +258,7 @@ def _minutes(moment: datetime, zone: ZoneInfo) -> int:
 
 
 def _focus_blocks(panels: dict, zone: ZoneInfo, day: date) -> list[dict]:
-    """Focus blocks for the timeline: the study plan's stretches, and a focus session running now."""
+    """A focus session running now, for the timeline. (The study plan's stretches stay in its panel.)"""
     blocks: list[dict] = []
 
     def block(title: str, sub: str, start_iso: str, end_iso: str) -> None:
@@ -274,11 +274,6 @@ def _focus_blocks(panels: dict, zone: ZoneInfo, day: date) -> list[dict]:
                        "time": f"{_clock(start, zone)}–{_clock(end, zone)}", "start": first, "end": max(last, first),
                        "all_day": False})
 
-    plan = panels.get("plan") if isinstance(panels.get("plan"), dict) else {}
-    for slot in plan.get("slots") or []:
-        if isinstance(slot, dict):
-            part = f" {slot['part']}" if slot.get("part") else ""
-            block(f"Focus: {slot.get('title') or 'study'}{part}", "in her plan", slot.get("start"), slot.get("end"))
     focus = panels.get("focus") if isinstance(panels.get("focus"), dict) else {}
     running = focus.get("running")
     if isinstance(running, dict):
@@ -347,11 +342,15 @@ def work(shifts: list[dict], zone: ZoneInfo, now: datetime) -> dict | None:
 
 
 def agenda(data: dict, tz: str, day: date) -> dict:
-    """One day for the page's agenda: /today's rows as data, with that day's reminders."""
+    """One day for the page's timeline: what's on his calendar, his shifts, reminders, a focus session running.
+
+    His life, not school's: deadlines are in the School panel, and her study plan's suggested
+    stretches in Tonight's plan (/today on Telegram still lists both).
+    """
     from sloane import views
 
     zone = ZoneInfo(tz)
-    items, clashes = views.day_items(day, assignments=data.get("assignments") or [], shifts=data.get("shifts") or [],
+    items, clashes = views.day_items(day, assignments=[], shifts=data.get("shifts") or [],
                                      events=data.get("events") or [], tz=tz)
     for r in data.get("reminders") or []:
         moment = r.get("due_at")
@@ -393,6 +392,7 @@ async def overview(store, config, state: dict, now: datetime) -> dict:  # noqa: 
         "week_due": store.assignments_due(monday, monday + timedelta(days=6)),
         "used": store.usage_today(),
         "prefs": store.dashboard_prefs(),
+        "emails": store.recent_emails(12),
     }
     settled = await asyncio.gather(*reads.values(), return_exceptions=True)
     extra: dict[str, Any] = {}
@@ -451,6 +451,7 @@ async def overview(store, config, state: dict, now: datetime) -> dict:  # noqa: 
                       for r in data.get("reminders") or []],
         "promises": [{"what": c.get("what"), "to": c.get("person"), "when": _when(c.get("due_at"), zone, today)}
                      for c in data.get("commitments") or []],
+        "inbox": inbox(extra["emails"], config, zone, now),
         "proposals": [{"id": str(p["id"]), "preview": p.get("preview"), "status": p.get("status")}
                       for p in extra["proposals"]],
         # Each skill's panel: its lines (what /tv and Telegram show) and, beside them, the
@@ -495,17 +496,42 @@ async def overview(store, config, state: dict, now: datetime) -> dict:  # noqa: 
     }
 
 
+def inbox(rows: list, config, zone: ZoneInfo, now: datetime) -> dict:  # noqa: ANN001
+    """What her inbox triage kept from the last three days, newest first. Senders and subjects are
+    other people's words: flattened to a line each (ingest.safe_field) and shown as text."""
+    from sloane.ingest import safe_field
+
+    since = now - timedelta(days=3)
+    items = []
+    for r in rows:
+        at = r.get("received_at") or r.get("triaged_at")
+        if r.get("category") not in INBOX_SHOWN or not isinstance(at, datetime) or at < since:
+            continue
+        items.append({"from": safe_field(r.get("sender_name") or r.get("sender") or "someone", limit=60),
+                      "subject": safe_field(r.get("subject") or "(no subject)", limit=140),
+                      "category": r["category"], "when": _when(at, zone, now.date()),
+                      "draft": r.get("proposal_status") or ""})
+    return {"ready": bool(config.gmail_refresh_token), "items": items[:8],
+            "waiting": sum(1 for i in items if i["category"] in ("urgent", "reply"))}
+
+
+INBOX_SHOWN = ("urgent", "reply", "fyi")
+
+
 # -- the panels ------------------------------------------------------------------------------
 
-# The panels the page draws itself, in the grid's order, and whether each is on until he says.
-# Every other skill panel (lists, flashcards, money...) comes after these, on, drawn from its lines.
+# Every panel, in the grid's order, and whether each is on until he says. His life first; school
+# is one small panel (deadlines, grades), with grades, the week's heat and colleges apart, off.
+# A panel with nothing in it yet still shows, saying how to fill it (webui/app.js EMPTY), so the
+# grid is never bare. Any skill not named here comes after these, on, drawn from its lines.
 PANELS: dict[str, bool] = {
-    "weather": True, "countdowns": True, "workshop": True, "habits": True, "focus": True, "grades": True,
-    "week": True, "learned": True, "colleges": True, "engine": False, "work": False,
-    # Already on the page elsewhere: the plan's stretches are on the timeline, loose ends in Memory.
-    "plan": False, "memory": False,
+    "weather": True, "whoop": True, "workouts": True, "markets": True, "inbox": True, "habits": True,
+    "news": True, "focus": True, "money": True, "countdowns": True, "lists": True, "birthdays": True,
+    "clients": True, "school": True, "workshop": True, "learned": True,
+    "grades": False, "week": False, "colleges": False, "cards": False, "deca": False, "engine": False,
+    "work": False, "plan": False, "memory": False,
 }
-PHONE_PANELS = ("countdowns", "habits", "workshop")
+PHONE_PANELS = ("whoop", "markets", "habits")
 PHONE_COUNT = 3
 MAX_PANELS = 40
 _PANEL = re.compile(r"^[a-z_]{1,40}$")

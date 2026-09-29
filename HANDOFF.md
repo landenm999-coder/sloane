@@ -308,6 +308,7 @@ real behaviour is on the Oracle box; ask Landen for screenshots or `doctor.py` o
 | Command menu (PR #12) | at every start she sets Telegram's "/" menu for his chat only (scope: his chat), built by `telegram.menu()` from the same lines `/help` shows (`EVERYDAY_HELP`, skills' `help`, `BEHIND_HELP`), so a new skill appears on its own. A failure is logged, never fatal | `sloane/telegram.py`, `main.py`, `tests/test_format.py`, `tests/test_boot.py` |
 | Supabase API lockdown (PR #12) | `sql/999_lock_public.sql`, sorted last and re-applied by every install and upgrade: row-level security on every table in `public` (no policies) and all grants revoked from Supabase's `anon`/`authenticated` roles, so the project's auto REST API sees nothing and the security advisor has nothing to email about. She connects as the tables' owner, which RLS doesn't restrict (verified with a non-superuser owner and Supabase-style default grants). Doctor's `api lockdown` line checks it | `sql/999_lock_public.sql`, `scripts/doctor.py` |
 | Planted entries (PR #12) | `ingest.planted()` (narrow: an override phrase *addressed to her*, or an unmistakable marker); the heartbeat tells him once per calendar entry in the next 14 days (`planted:event:<id>`, skills or none); the entry's FACTS line is marked so she neither obeys it nor repeats the warning. Before this she flagged the eval's planted invite in almost every answer | `ingest.py`, `jobs/briefs.py` `planted_nudges`, `memory/tiers.py`; tests in `test_tiers`, `test_heartbeat` |
+| Life skills (PR #20) | workouts (sql/033: by rule, weekly goal, Whoop's too), markets (sql/034 watchlist; Yahoo chart API, CoinGecko fallback; FACTS from cache), news (Google News RSS; tainted answers, never FACTS), Whoop (API v2, rotating refresh token on the volume) | `skills/{workouts,markets,news,whoop}.py`, `scripts/whoop_auth.py`, `tests/test_{workouts,markets,news,whoop}.py` |
 | DECA (PR #12) | `/roleplay [area]`: a model-written scenario (event, role, judge, situation, five PIs), then a session where the judge stays in character (typed or voice), two follow-up questions after "I'm done", and a score on the DECA form (PIs 0–14, four 21st Century Skills 0–6, overall 0–6) **totalled in code**; `roleplays` table (sql/027), FACTS line with recent scores + "work on", TV panel, an evening nudge when a DECA countdown is ≤14 days out and no practice in 3 days; `/roleplay` on the actions allowlist. Live-checked against the real CLI: a presentation that missed the brief was pushed back on in character and scored 19/100 with specific notes | `sloane/skills/deca.py`, `sql/027`, `tests/test_deca.py` |
 | Slow skills (PR #12) | a command or skill still working after 0.6 s shows "typing…" (a role-play's judge, `/cards make`); instant ones never flash it. The actions instructions now also say recording what he reports isn't initiative, and that only the "do" list does anything (she once said "marking that off" with no command) | `telegram.py` `SLOW_SKILL_SECONDS`, `actions.instructions`; `test_live` |
 | JSON repair (PR #12) | `contract.loads_lenient`/`closed`: the CLI sometimes drops an object's final `}` (1 in 3 scenario calls, live). Unrepaired, a reply came out as raw JSON (read aloud, actions lost). Every model-JSON parser now uses it: `contract.parse`, inbox triage, learn, `/cards make`, deca | `contract.py`; regression checks in test_contract, test_cards, test_learn, test_mail, test_deca |
@@ -364,6 +365,30 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
     purposes), `tests/test_web.py` (`/api/speak`, `quick` only when spoken); a whole call in Chromium
     with a fake mic at 1440 and 390 wide (two turns, the cut-in, Esc, nothing sent after hanging up).
   Nothing new to paste on the box: `QUICK_PROVIDER` defaults to groq and uses the existing `GROQ_API_KEY`.
+- **A life dashboard, not a school tracker** (same branch and PR). Landen: "stop trying to do all this school
+  stuff... this dashboard should have everything I need... no empty space". Built:
+  - *Today*: the timeline is his calendar, shifts, reminders and a running focus session (`web.agenda` drops
+    due work and her study-plan stretches; Telegram's `/today` still lists both). The header counts what's
+    waiting on him and emails to answer, nothing from school. Every panel that's on shows (`PANELS`, life
+    first), packed like bricks (`app.js pack`: 4px grid rows, each panel spanning its height), and one with
+    nothing yet is dashed with what it's for and one button to fill it (`EMPTY`). School is one small panel
+    (due soon, overdue and this week's counts opening the list, grades, the next college deadline); grades,
+    the week's heat, colleges, flashcards and DECA are their own panels, off by default.
+  - *Four skills*: **workouts** (sql/033, logged by rule, a weekly goal, FACTS, a week of bars), **markets**
+    (sql/034 `watchlist`, Yahoo chart API + CoinGecko fallback, S&P/Nasdaq/Bitcoin when the list is empty,
+    FACTS from the cache only), **news** (Google News RSS, topics in `skill_settings`, headlines are outside
+    text: `safe_field`, `Answer(tainted=True)`, never FACTS), **Whoop** (API v2, read-only; rotating refresh
+    token kept in `WHOOP_TOKEN_FILE` on the volume, fingerprinted to the .env token it grew from;
+    `scripts/whoop_auth.py`; its workouts into the workouts table once each). All four tested against stub
+    servers (`tests/test_{workouts,markets,news,whoop}.py`); none of their real APIs is reachable from the
+    sandbox, so the first real fetch is on the box. Yahoo is unofficial and may refuse the Oracle box's IP:
+    then stocks say "can't reach the markets" and crypto still comes from CoinGecko.
+  - *Inbox*: the overview's `inbox` (the last three days' triaged mail, never "ignore", senders and
+    subjects flattened); needs Gmail (DEPLOY §7c). *Answers*: `skills.Answer` has `tainted`, carried into the
+    Reply. *Panels*: one slow to answer is left out after `PANEL_SECONDS` (4 s) while its fetch finishes in
+    the background, so a hung feed never hangs the page. `/workout` and `/watch` are on her actions list.
+  - Verified: the suite (59 suites), and the page in Chromium with stub feeds at 1440, 1024 and 390, full
+    and first-night (empty) data; a click-through of the chips, the School links and the packing.
 - **The coin skill** (`sloane/skills/coin.py`, workshop item `/coin`): `/coin`, "flip a coin", "heads or tails?"
   give Heads or Tails from `secrets`. No SQL, no setting, no migration. `tests/test_coin.py` pins the
   command, both sides, and phrases it must not catch. Awaiting Landen's review.
@@ -391,9 +416,10 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
 4. P5 phone calls, beyond v1.
 5. Streaming for the Groq and Anthropic providers (`claude_code` and `local` stream; the others answer whole).
 6. The control room: approvals there when Telegram isn't set up (today the agency needs
-   `TELEGRAM_CHAT_ID`), and the mockup's **Market** panel (needs a market data source first). A call that
-   lets him talk over her (barge-in): today the mic is off while she speaks, because echo cancellation
-   on a laptop's speakers isn't reliable enough to keep her from hearing herself.
+   `TELEGRAM_CHAT_ID`). A call that lets him talk over her (barge-in): today the mic is off while she
+   speaks, because echo cancellation on a laptop's speakers isn't reliable enough to keep her from hearing
+   herself. Drag to reorder panels. If Yahoo refuses the box, a second stock source (Stooq's CSV, or a
+   keyed API) behind the same `Quote`.
    Drag to reorder panels (today the order is fixed; Engine → Panels switches them on and off).
 7. A weekday lunch slot for `think`, if Landen wants one (school hours are skipped today).
 8. `scripts/install.sh` under WSL with Docker Desktop installed: `command -v docker` finds Docker Desktop's
@@ -416,6 +442,9 @@ Done: the Oracle box, the installer, the workshop's GitHub token, the control ro
    die after 7 days), then `python3 scripts/gmail_auth.py` on the box.
 3. Capture on the phone: Tailscale on the phone, `CAPTURE_TOKEN` + `CORS_ORIGINS` on the box, then
    Capture → Settings → Sloane (DEPLOY §7d).
+4. Optional Whoop (DEPLOY §7j): an app at developer.whoop.com (redirect `http://localhost:8765`), its id and
+   secret in `.env`, `python3 scripts/whoop_auth.py` on the box, restart. Gmail (2) is what fills the
+   control room's Inbox panel.
 
 Security rules he follows: never paste tokens or credentials into chat. Credentials live only in `.env`
 (gitignored, chmod 600). The ICS URL, the Canvas token and the GitHub token are passwords.

@@ -30,7 +30,9 @@ Rules every skill keeps, because the core invariants apply here too:
 * Model calls go through `ctx.router` (invariant 1).
 * `facts()` lines are evidence. Only rows from SQL or structured numbers from an
   API (a temperature, a count) may go there. Third-party free text -- a headline,
-  a web page, an email -- never does; it is INGESTED data, not FACTS.
+  a web page, an email -- never does; it is INGESTED data, not FACTS. An answer
+  that repeats such text (the news skill reading headlines) is
+  `Answer(..., tainted=True)`, and each line of it goes through `ingest.safe_field`.
 * A skill never crosses a hard line and never acts on its own initiative except
   through `Agency.propose()` (invariant 9). Something Landen explicitly asked for
   in the same message is its own approval.
@@ -59,6 +61,9 @@ log = logging.getLogger(__name__)
 # A session untouched this long is over. A quiz he walked away from must not
 # swallow the next "what's due tonight?".
 SESSION_IDLE_MINUTES = 30
+
+# The longest a page waits for one skill's panel. A panel is a glance, not worth a slow page.
+PANEL_SECONDS = 4.0
 
 # Handled by the registry itself, for whichever skill holds the session.
 END_COMMAND = "end"
@@ -91,10 +96,15 @@ def cap(text: str) -> str:
 
 @dataclass(frozen=True)
 class Answer:
-    """What a skill says back. The bot builds the Reply from it."""
+    """What a skill says back. The bot builds the Reply from it.
+
+    `tainted`: built from outside text (headlines, a web page). The bot stores
+    it untrusted, and CONVERSATION shows a placeholder for it (invariant 9).
+    """
 
     speech: str
     detail: str = ""
+    tainted: bool = False
 
 
 @dataclass(frozen=True)
@@ -315,10 +325,19 @@ class Registry:
         return lines, notes
 
     async def panels(self) -> dict[str, Any]:
-        settled = await asyncio.gather(*(s.panel() for s in self.skills), return_exceptions=True)
+        """Every skill's panel. One slow to answer (a feed that hangs) is left out this time, not
+        waited for: its fetch carries on in the background and fills its cache for the next look."""
+
+        async def one(skill: Skill) -> Any:
+            return await asyncio.wait_for(asyncio.shield(asyncio.ensure_future(skill.panel())), PANEL_SECONDS)
+
+        settled = await asyncio.gather(*(one(s) for s in self.skills), return_exceptions=True)
         out: dict[str, Any] = {}
         for skill, result in zip(self.skills, settled):
-            if isinstance(result, BaseException):
+            if isinstance(result, asyncio.TimeoutError):
+                log.warning("skill %s panel took over %ss; left out this time", skill.name, PANEL_SECONDS)
+                out[skill.name] = {"error": "slow"}
+            elif isinstance(result, BaseException):
                 log.warning("skill %s panel failed: %s", skill.name, result)
                 out[skill.name] = {"error": "unavailable"}
             elif result is not None:

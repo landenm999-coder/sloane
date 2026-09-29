@@ -50,7 +50,7 @@ BUILTIN_COMMANDS = frozenset({
 
 
 def _reply(answer: Answer) -> Reply:
-    return Reply(speech=answer.speech, detail=answer.detail)
+    return Reply(speech=answer.speech, detail=answer.detail, tainted=answer.tainted)
 
 
 def split_message(text: str, limit: int = TELEGRAM_LIMIT) -> list[str]:

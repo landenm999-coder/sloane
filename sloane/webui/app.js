@@ -972,16 +972,18 @@ document.addEventListener("keydown", (event) => {
   input.focus();
 });
 
-// What to ask, from what's actually on today.
+// What to ask, from what's actually going on: his day, his inbox, his body, the world.
 function renderStarters(data) {
   const now = nowMinutes();
   const items = data.agenda?.today?.items || [];
+  const skills = new Set(data.system?.skills || []);
   const asks = [];
-  if (items.some((i) => i.kind === "due" && i.start > now)) asks.push("What should I do first tonight?");
-  else asks.push("What's due tomorrow?");
   if (items.some((i) => i.kind === "shift" && i.end > now)) asks.push("Plan my evening around work");
-  else asks.push("Help me plan tonight");
-  if ((data.overdue || []).length) asks.push("How do I catch up on what's overdue?");
+  else asks.push(now < 12 * 60 ? "What's my day look like?" : "Help me plan tonight");
+  if (data.inbox?.waiting) asks.push("Anything in my inbox I need to reply to?");
+  if (skills.has("whoop")) asks.push("How did I sleep?");
+  if (skills.has("markets")) asks.push("How's the market?");
+  if (skills.has("news")) asks.push("What's in the news?");
   asks.push("/reminders", "What do you remember about me?");
   const box = $("#starters");
   const key = asks.join("|");
@@ -1049,14 +1051,12 @@ function renderHeader(data) {
   open.hidden = !waiting;
   open.textContent = `${waiting} waiting on you`;
   open.classList.toggle("hot", !!waiting);
-  const overdue = (data.overdue || []).length;
-  const late = $("#overdue-open");
-  late.hidden = !overdue;
-  late.textContent = `${overdue} overdue`;
-  const due = $("#due-open");
-  due.hidden = !data.due_week;
-  due.textContent = `${data.due_week} due this week`;
-  $("#links").hidden = open.hidden && late.hidden && due.hidden;
+  // Mail that needs a reply is waiting on him too; school's counts are in its own panel.
+  const mail = data.inbox?.waiting || 0;
+  const inbox = $("#inbox-open");
+  inbox.hidden = !mail;
+  inbox.textContent = `${mail} email${mail === 1 ? "" : "s"} to answer`;
+  $("#links").hidden = open.hidden && inbox.hidden;
 }
 
 // -- what's waiting on him: approvals, what's broken, builds to accept; overdue work apart ---------
@@ -1138,8 +1138,7 @@ function openWaiting(at) {
 }
 function closeWaiting() { if (waiting.open) waiting.close(); }
 $("#waiting-open").addEventListener("click", () => openWaiting("needs"));
-$("#due-open").addEventListener("click", () => openWaiting("due"));
-$("#overdue-open").addEventListener("click", () => openWaiting("overdue"));
+$("#inbox-open").addEventListener("click", () => say("Anything in my inbox I need to reply to?"));
 $("#waiting-close").addEventListener("click", closeWaiting);
 waiting.addEventListener("click", (event) => { if (event.target === waiting) closeWaiting(); });
 
@@ -1232,12 +1231,14 @@ $("#day-tomorrow").addEventListener("click", () => setDay(true));
 // -- today: the panels ----------------------------------------------------------------------
 
 const PANEL_NAMES = {
-  weather: "Weather", countdowns: "Countdowns", workshop: "Workshop", habits: "Habits", focus: "Focus",
-  grades: "Grades", week: "This week", learned: "Learned today", colleges: "College", engine: "Engine",
-  work: "Up next at work", plan: "Tonight's plan", memory: "Loose ends", lists: "Lists", cards: "Flashcards",
-  clients: "Clients", money: "Money", birthdays: "Birthdays", deca: "DECA practice",
+  weather: "Weather", whoop: "Whoop", workouts: "Workouts", markets: "Markets", inbox: "Inbox", habits: "Habits",
+  news: "News", focus: "Focus", money: "Money", countdowns: "Countdowns", lists: "Lists", birthdays: "Birthdays",
+  clients: "Clients", school: "School", workshop: "Workshop", learned: "Learned today", grades: "Grades",
+  week: "This week", colleges: "College", cards: "Flashcards", deca: "DECA practice", engine: "Engine",
+  work: "Up next at work", plan: "Tonight's plan", memory: "Loose ends",
 };
-const DESK_PANELS = 9;
+// Panels that come from the page's own data, not a skill: shown whatever skills are loaded.
+const CORE_PANELS = new Set(["inbox", "school", "learned", "grades", "week", "engine", "work"]);
 
 function pn(title, right, ...body) {
   return el("section", { class: "pn" }, el("h3", {}, title, right ? el("span", { text: right }) : null), ...body);
@@ -1463,26 +1464,182 @@ function workPanel() {
     el("div", { class: "sub", text: `${w.week_hours}h this week (${w.done_hours}h done) · ${w.last_week_hours}h last week` }));
 }
 
-// The panels he can start from the chat, and how. Shown on a desk while any of them has nothing yet,
-// so a new install's grid says how to fill it instead of sitting empty.
-const STARTERS = [
-  ["habits", "Track a habit", "/habit add "],
-  ["countdowns", "Count down to a day", "/countdown "],
-  ["colleges", "Add a college", "/college add "],
-  ["focus", "Start a focus block", "/focus 25 "],
-];
+// -- the life panels -------------------------------------------------------------------------
 
-function setupPanel() {
-  const missing = STARTERS.filter(([id]) => panelOn(id) && !buildPanel(id));
-  if (!missing.length) return null;
-  const chips = el("div", { class: "starts" }, ...missing.map(([, label, command]) => el("button", {
-    type: "button", class: "chip", text: label, "aria-label": `${label}: puts ${command.trim()} in the message box`,
-    onclick: () => { input.value = command; grow(); input.focus(); input.setSelectionRange(command.length, command.length); },
-  })));
-  const box = pn("Add to your day", "", chips,
-    el("div", { class: "sub", text: "Each puts a command in the message box: finish it and send. More panels in Engine → Panels." }));
-  box.classList.add("setup", "span2");
+// A command into the message box, cursor at the end, for him to finish and send.
+function compose(text) {
+  if (!wide.matches) show("talk");
+  input.value = text;
+  grow();
+  input.focus();
+  input.setSelectionRange(text.length, text.length);
+}
+
+function chip(label, command, sayIt = false) {
+  return el("button", { type: "button", class: "chip", text: label,
+    "aria-label": sayIt ? `Ask her: ${command}` : `${label}: puts ${command.trim()} in the message box`,
+    onclick: () => (sayIt ? say(command) : compose(command)) });
+}
+
+// A panel with nothing in it yet: what it's for, and one way to fill it. The grid is never bare.
+const EMPTY = {
+  whoop: ["Recovery, last night's sleep and today's strain, from your Whoop.", null,
+    "Not connected yet: DEPLOY.md 7j, about five minutes."],
+  workouts: ["Nothing logged yet. Tell her “ran 3 miles” or “45 minutes of lifting”.", ["Log a workout", "/workout "]],
+  markets: ["Your watchlist's prices, delayed.", ["Watch a ticker", "/watch "]],
+  news: ["The top headlines, and the topics you follow.", ["Follow a topic", "/news follow "]],
+  habits: ["The things you mean to do every day, and the streak.", ["Track a habit", "/habit add "]],
+  focus: ["Timed focus blocks, toward a goal for the day.", ["Start 25 minutes", "/focus 25 "]],
+  money: ["What you spend this week, against a budget.", ["Log spending", "/spent "]],
+  countdowns: ["Days to go until the things you're waiting for.", ["Count down to a day", "/countdown "]],
+  lists: ["Groceries, packing, to-do: any list you name.", ["Start a list", "/list add grocery: "]],
+  birthdays: ["Birthdays coming up, so none sneak past.", ["Add a birthday", "/birthday "]],
+  clients: ["Your clients, where each stands, and who's due a follow-up.", ["Add a client", "/client add "]],
+  workshop: ["Anything you wish she could do, she can build for you.", ["Ask for something", "/idea "]],
+  learned: ["What she picked up about you today.", ["Tell her something", "remember that "]],
+  plan: ["Her plan for your evening, around work.", ["Plan my evening", "Plan my evening", true]],
+};
+
+function emptyPanel(id) {
+  const loaded = new Set(latest?.system?.skills || []);
+  if (!EMPTY[id] || !(loaded.has(id) || CORE_PANELS.has(id) || id === "whoop")) return null;
+  const [what, action, note] = EMPTY[id];
+  const box = pn(PANEL_NAMES[id] || id, "", el("div", { class: "sub", text: what }),
+    note ? el("div", { class: "sub note", text: note }) : null,
+    action ? el("div", { class: "starts" }, chip(...action)) : null);
+  box.classList.add("empty-pn");
   return box;
+}
+
+// A little line of the day's prices, rising or falling.
+function spark(values, up) {
+  if (!values || values.length < 2) return null;
+  const lo = Math.min(...values), hi = Math.max(...values);
+  const points = values.map((v, i) => `${((i / (values.length - 1)) * 60).toFixed(1)},${(hi === lo ? 9 : 17 - ((v - lo) / (hi - lo)) * 16).toFixed(1)}`);
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 60 18");
+  svg.setAttribute("class", `spark ${up ? "up" : "down"}`);
+  svg.setAttribute("aria-hidden", "true");
+  const line = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
+  line.setAttribute("points", points.join(" "));
+  svg.append(line);
+  return svg;
+}
+
+function marketsPanel() {
+  const p = panelOf("markets");
+  if (!p) return null;
+  const quotes = p.quotes || [];
+  const rows = el("div", { class: "mk" });
+  for (const q of quotes.slice(0, 6)) {
+    const up = (q.change ?? 0) >= 0;
+    const change = q.change == null ? "" : `${up ? "+" : "−"}${Math.abs(q.change).toFixed(2)}%`;
+    rows.append(el("div", { class: "r", "aria-label": `${q.name}: ${q.price}${change ? `, ${change} today` : ""}` },
+      el("span", { class: "name", text: q.name === q.symbol ? q.symbol : q.name, title: q.symbol }),
+      spark(q.spark, up) || el("span"),
+      el("span", { class: "px mono" }, el("b", { text: q.price }), el("span", { class: `chg ${up ? "up" : "down"}`, text: change }))));
+  }
+  if (!quotes.length) rows.append(el("div", { class: "sub", text: (p.lines || [])[0] || "No prices right now." }));
+  return pn("Markets", p.old ? "delayed" : p.mine ? "your list" : "the market", rows,
+    el("div", { class: "starts" }, chip("Watch a ticker", "/watch "), chip("How's the market?", "How's the market?", true)));
+}
+
+function newsPanel() {
+  const p = panelOf("news");
+  if (!p) return null;
+  const list = el("ul", { class: "nw" });
+  for (const n of (p.items || []).slice(0, 6)) {
+    const title = n.url ? el("a", { href: n.url, target: "_blank", rel: "noopener noreferrer", text: n.title }) : el("span", { text: n.title });
+    list.append(el("li", {}, title, el("span", { class: "sub", text: [n.topic, n.source, n.ago].filter(Boolean).join(" · ") })));
+  }
+  if (!list.children.length) list.append(el("li", { class: "sub", text: (p.lines || [])[0] || "No headlines right now." }));
+  const box = pn("News", p.old ? "older" : "headlines", list,
+    el("div", { class: "starts" }, chip("Follow a topic", "/news follow "), chip("Read me the news", "What's in the news?", true)));
+  box.classList.add("tall");
+  return box;
+}
+
+function inboxPanel() {
+  const box = latest?.inbox;
+  if (!box) return null;
+  if (!box.ready && !(box.items || []).length) {
+    return pn("Inbox", "", el("div", { class: "sub", text: "She reads your Gmail every few hours and flags what needs you." }),
+      el("div", { class: "sub note", text: "Not connected yet: DEPLOY.md 7c." }));
+  }
+  const list = el("ul", { class: "ib" });
+  for (const m of box.items || []) {
+    list.append(el("li", { class: m.category },
+      el("span", { class: "dot", "aria-label": { urgent: "Urgent", reply: "Needs a reply", fyi: "For your information" }[m.category] || "" }),
+      el("span", { class: "who", text: m.from }), el("span", { class: "sub when", text: m.when.replace(/^Today /, "") }),
+      el("span", { class: "subj", text: m.subject })));
+  }
+  if (!list.children.length) list.append(el("li", { class: "sub", text: "Nothing new that needs you." }));
+  return pn("Inbox", box.waiting ? `${box.waiting} need${box.waiting === 1 ? "s" : ""} you` : "", list,
+    el("div", { class: "starts" }, chip("What needs a reply?", "Anything in my inbox I need to reply to?", true)));
+}
+
+function whoopPanel() {
+  const p = panelOf("whoop");
+  if (!p || (p.recovery == null && p.sleep_minutes == null && p.strain == null)) {
+    return p?.down ? pn("Whoop", "", el("div", { class: "sub", text: "Can't reach Whoop right now." })) : null;
+  }
+  const C = 2 * Math.PI * 22;
+  const fraction = p.recovery == null ? 0 : p.recovery / 100;
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("width", "54"); svg.setAttribute("height", "54"); svg.setAttribute("viewBox", "0 0 54 54");
+  svg.setAttribute("aria-hidden", "true");
+  svg.innerHTML = `<circle class="track" cx="27" cy="27" r="22" fill="none" stroke-width="5"/>
+    <circle class="done ${p.zone || ""}" cx="27" cy="27" r="22" fill="none" stroke-width="5" stroke-linecap="round"
+      stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${(C * (1 - fraction)).toFixed(1)}" transform="rotate(-90 27 27)"/>`;
+  const facts = el("div", { class: "wh" });
+  if (p.sleep_minutes != null) facts.append(el("span", {}, el("b", { class: "mono", text: hm(p.sleep_minutes) }), `slept${p.sleep_performance != null ? `, ${p.sleep_performance}%` : ""}`));
+  if (p.strain != null) facts.append(el("span", {}, el("b", { class: "mono", text: p.strain.toFixed(1) }), "strain"));
+  return pn("Whoop", p.old ? "older" : p.zone || "", el("div", { class: "ring" }, svg,
+    el("div", {}, el("div", { class: "mono", style: "font-size:20px", text: p.recovery == null ? "—" : `${p.recovery}%` }),
+      el("div", { class: "sub", text: "recovery" }))), facts,
+    el("div", { class: "sub", text: [p.hrv != null ? `HRV ${p.hrv} ms` : "", p.rhr != null ? `resting HR ${p.rhr}` : ""].filter(Boolean).join(" · ") }));
+}
+
+function workoutsPanel() {
+  const p = panelOf("workouts");
+  if (!p) return null;
+  const most = Math.max(30, ...(p.days || []).map((d) => d.minutes || (d.count ? 30 : 0)));
+  const bars = el("div", { class: "wo", "aria-hidden": "true" });
+  for (const d of p.days || []) {
+    const minutes = d.minutes || (d.count ? 30 : 0);
+    bars.append(el("span", { class: d.today ? "today" : "" },
+      el("i", { class: d.count ? "y" : "", style: `height:${d.count ? Math.max(18, (minutes / most) * 100).toFixed(0) : 6}%` }), d.day[0]));
+  }
+  const said = `${p.count} workout${p.count === 1 ? "" : "s"} this week${p.goal ? ` of ${p.goal}` : ""}`;
+  return pn("Workouts", p.distance || "", el("div", { class: "big-n", "aria-label": said },
+    String(p.count), el("span", { class: "of", text: p.goal ? ` / ${p.goal} this week` : " this week" })), bars,
+    p.last ? el("div", { class: "sub", text: `Last: ${p.last.text}, ${p.last.when.toLowerCase()}` }) : null,
+    el("div", { class: "starts" }, chip("Log a workout", "/workout ")));
+}
+
+// School, in one small panel: what's due soon, what's overdue, grades, the next college deadline.
+function schoolPanel() {
+  const data = latest;
+  if (!data) return null;
+  const overdue = (data.overdue || []).length;
+  const links = el("span", { class: "school-links" });
+  if (overdue) links.append(el("button", { type: "button", class: "link hot-due", text: `${overdue} overdue`, onclick: () => openWaiting("overdue") }));
+  if (data.due_week) links.append(el("button", { type: "button", class: "link", text: `${data.due_week} this week`, onclick: () => openWaiting("due") }));
+  const list = el("ul", { class: "sc" });
+  for (const a of (data.due || []).slice(0, 3)) {
+    list.append(el("li", {}, el("span", { class: "t", text: a.title, title: a.title }),
+      el("span", { class: "sub", text: [a.course, fromNow(a.at)].filter(Boolean).join(" · ") })));
+  }
+  const grades = (data.grades || []).slice(0, 6);
+  const gradeRow = grades.length ? el("div", { class: "gchips" }, ...grades.map((g) => {
+    const score = Number(g.score) || 0;
+    return el("span", { class: score < 80 ? "low" : "", title: g.course },
+      `${String(g.course || "").split(/\s+/).slice(0, 2).join(" ")} `, el("b", { class: "mono", text: `${Math.round(score)}` }));
+  })) : null;
+  const college = (panelOf("colleges")?.schools || []).filter((c) => c.days != null && c.days >= 0).sort((a, b) => a.days - b.days)[0];
+  if (!list.children.length) list.append(el("li", { class: "sub", text: "Nothing due in the next three days." }));
+  return pn("School", "", links.children.length ? links : null, list, gradeRow,
+    college ? el("div", { class: "sub", text: `${college.name}${college.plan ? ` ${college.plan}` : ""}: ${college.days === 0 ? "due today" : `${college.days}d to go`}` }) : null);
 }
 
 function linesPanel(p) {
@@ -1492,8 +1649,9 @@ function linesPanel(p) {
 }
 
 const BUILT = {
-  weather: weatherPanel, countdowns: countdownsPanel, workshop: workshopPanel, habits: habitsPanel,
-  focus: focusPanel, grades: gradesPanel, week: weekPanel, learned: learnedPanel, colleges: collegesPanel,
+  weather: weatherPanel, whoop: whoopPanel, workouts: workoutsPanel, markets: marketsPanel, inbox: inboxPanel,
+  habits: habitsPanel, news: newsPanel, focus: focusPanel, countdowns: countdownsPanel, school: schoolPanel,
+  workshop: workshopPanel, learned: learnedPanel, grades: gradesPanel, week: weekPanel, colleges: collegesPanel,
   engine: enginePanel, work: workPanel,
 };
 
@@ -1523,28 +1681,47 @@ function renderPanels() {
   const box = $("#panels");
   const out = [];
   if (wide.matches) {
+    // Every panel that's on: filled, or saying how to fill it.
     for (const id of panelIds()) {
-      if (out.length >= DESK_PANELS) break;
       if (!panelOn(id)) continue;
+      const node = buildPanel(id) || emptyPanel(id);
+      if (node) { node.dataset.id = id; out.push(node); }
+    }
+  } else {
+    // The phone's three, as he chose them; with nothing in one yet, the next panel that has something.
+    const chosen = latest?.prefs?.phone || ["whoop", "markets", "habits"];
+    const count = latest?.prefs?.phone_count || 3;
+    const order = [...chosen, ...panelIds().filter((i) => !chosen.includes(i) && panelOn(i))];
+    for (const id of order) {
+      if (out.length >= count) break;
       const node = buildPanel(id);
       if (node) out.push(node);
     }
-    if (out.length < DESK_PANELS) {
-      const setup = setupPanel();
-      if (setup) out.push(setup);
-    }
-  } else {
-    // The phone's three, as he chose them; with no data for one, the next panel that's on.
-    const chosen = latest?.prefs?.phone || ["countdowns", "habits", "workshop"];
-    for (const id of [...chosen, ...panelIds().filter((i) => !chosen.includes(i) && panelOn(i))]) {
-      if (out.length >= (latest?.prefs?.phone_count || 3)) break;
-      const node = buildPanel(id);
+    for (const id of order) {
+      if (out.length >= count) break;
+      const node = emptyPanel(id);
       if (node) out.push(node);
     }
   }
   box.replaceChildren(...out);
   box.closest(".panel-col").hidden = !out.length;
+  pack();
 }
+
+// Panels are as tall as what's in them. On a desk they pack like bricks, each in the first
+// space it fits (a grid of 4px rows, each panel spanning its own height), so no hole is left.
+const ROW = 4, GAP = 12;
+function pack() {
+  const box = $("#panels");
+  const packed = wide.matches && getComputedStyle(box).gridTemplateColumns.split(" ").length > 1;
+  box.classList.toggle("packed", packed);
+  for (const p of box.children) {
+    if (!packed) { p.style.removeProperty("grid-row-end"); continue; }
+    p.style.gridRowEnd = `span ${Math.ceil((p.getBoundingClientRect().height + GAP) / ROW)}`;
+  }
+}
+if ("ResizeObserver" in window) new ResizeObserver(() => requestAnimationFrame(pack)).observe($("#panels"));
+document.fonts?.ready.then(pack);
 
 function renderToday(data) {
   renderHeader(data);

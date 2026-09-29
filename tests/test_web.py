@@ -96,9 +96,9 @@ blocks = web.agenda({"panels": {
                        {"start": "not a time", "end": "", "title": "junk"}]},
     "focus": {"running": {"what": "essay", "started_at": at(16).isoformat(), "ends_at": at(16, 25).isoformat()}},
 }}, "America/Denver", today)["items"]
-check("focus blocks: her plan's stretches for today and a session running now, in time order",
+check("the timeline has a focus session running now, and not her study plan's suggested stretches",
       [(i["kind"], i["title"], i["sub"], i["start"], i["end"]) for i in blocks],
-      [("focus", "Focus: essay", "running now", 960, 985), ("focus", "Focus: Physics lab", "in her plan", 1170, 1215)])
+      [("focus", "Focus: essay", "running now", 960, 985)])
 
 # -- the page itself -----------------------------------------------------------------------------
 import re  # noqa: E402
@@ -128,8 +128,15 @@ check("the door has the orb", 'class="orb"' in door, True)
 # On his first night the header read "55 waiting on you" (every missed Canvas item) and counted down
 # to one of her suggested study stretches by its full assignment title.
 needs = re.search(r"function needsCount\(\) \{(.*?)\n\}", js, re.S)
-check("'waiting on you' is what needs him; overdue work is its own count",
-      (needs is not None and "overdue" not in needs.group(1), 'id="overdue-open"' in page), (True, True))
+check("'waiting on you' is what needs him; overdue work is counted in the School panel",
+      (needs is not None and "overdue" not in needs.group(1), 'openWaiting("overdue")' in js, 'id="overdue-open"' in page),
+      (True, True, False))
+# "Stop trying to do all this school stuff": the header and the timeline are his life; school is one panel.
+header = re.search(r"function renderHeader\(data\) \{(.*?)\n\}", js, re.S)
+check("the header counts nothing from school", header is not None and "overdue" not in header.group(1)
+      and "due_week" not in header.group(1), True)
+check("every panel that's on shows, filled or saying how to fill it", ("buildPanel(id) || emptyPanel(id)" in js,
+                                                                          "DESK_PANELS" in js), (True, False))
 upcoming = re.search(r"function nextUp\(data\) \{(.*?)\n\}", js, re.S)
 check("the header counts down to real things, never her plan's stretches, and keeps titles short",
       (upcoming is not None and 'i.sub === "running now"' in upcoming.group(1) and "clip(" in upcoming.group(1)), True)
@@ -137,7 +144,11 @@ check("the header counts down to real things, never her plan's stretches, and ke
 # -- the panel choices ---------------------------------------------------------------------------
 check("nothing chosen: the defaults, and the phone's three",
       (web.prefs(None)["shown"], web.prefs(None)["phone"], web.prefs(None)["defaults"]["engine"]),
-      ([], ["countdowns", "habits", "workshop"], False))
+      ([], ["whoop", "markets", "habits"], False))
+check("his life first; school is one panel, its old parts off until he wants them",
+      ([k for k, on in web.PANELS.items() if on][:6], web.PANELS["school"],
+       [web.PANELS[k] for k in ("grades", "week", "colleges", "cards", "deca")]),
+      (["weather", "whoop", "workouts", "markets", "inbox", "habits"], True, [False] * 5))
 check("chosen", web.prefs({"shown": ["engine"], "hidden": ["weather"], "phone": ["focus"]})["phone"], ["focus"])
 check("a clean choice", web.clean_prefs({"shown": ["engine", "engine"], "hidden": ["weather"], "phone": ["focus", "week"]}),
       ({"shown": ["engine"], "hidden": ["weather"], "phone": ["focus", "week"]}, ""))
@@ -154,16 +165,15 @@ day = web.agenda({
                     {"title": "Essay", "due_at": at(8, d=1), "course": "English 12"}],
     "reminders": [{"text": "call Keegan", "due_at": at(20, 45)}, {"text": "meds", "due_at": at(7, d=1)}],
 }, "America/Denver", today)
-check("the agenda: all-day first, then the day in order, reminders included",
+check("the timeline: all-day first, then the day in order, reminders included; his life, not deadlines",
       [(i["kind"], i["title"], i["time"], i["start"], i["end"]) for i in day["items"]],
       [("event", "Homecoming week", "all day", 0, 1440),
        ("event", "DECA meeting", "7:15 AM–7:55 AM", 435, 475),
        ("shift", "Work", "3:00 PM–7:00 PM", 900, 1140),
        ("event", "Team call", "4:00 PM–4:30 PM", 960, 990),
        ("reminder", "call Keegan", "8:45 PM", 1245, 1245),
-       ("event", "Late show", "11:00 PM–1:00 AM", 1380, 1440),
-       ("due", "Lab report", "11:59 PM", 1439, 1439)])
-check("with the place or the course beside it", [i["sub"] for i in day["items"]][1:], ["Room 204", "", "", "", "", "AP Physics"])
+       ("event", "Late show", "11:00 PM–1:00 AM", 1380, 1440)])
+check("with the place beside it", [i["sub"] for i in day["items"]][1:], ["Room 204", "", "", "", ""])
 check("and what collides, as /today says it", day["clashes"], [{"hard": True, "what": "Team call", "against": "your shift"}])
 check("tomorrow is its own day",
       [(i["kind"], i["title"]) for i in web.agenda({"shifts": [{"starts_at": at(15, d=1), "ends_at": at(19, d=1)}],
@@ -187,8 +197,18 @@ async def integration() -> None:
     config = isolated(database_url=os.environ["DATABASE_URL"], timezone="America/Denver", telegram_chat_id=5151,
                       dashboard_token=TOKEN)
     async with Store(config) as store:
-        for table in ("reminders", "proposals", "alerts", "workshop_items", "dashboard_prefs"):
+        for table in ("emails", "reminders", "proposals", "alerts", "workshop_items", "dashboard_prefs"):
             await store._exec(f"delete from {table}")
+        # The inbox panel: what triage kept (never "ignore"), other people's words flattened.
+        fresh = datetime.now(DEN) - timedelta(hours=2)
+        for n, (category, subject) in enumerate((("urgent", "Shift swap\ntomorrow?\u202e"), ("reply", "Lunch?"),
+                                                 ("fyi", "Receipt"), ("ignore", "SALE"))):
+            await store.record_email(gmail_id=f"web-{n}", thread_id="t", sender="k@example.com",
+                                     sender_name="Keegan" if n == 0 else "", subject=subject, snippet="",
+                                     received_at=fresh, category=category, why="")
+        await store.record_email(gmail_id="web-old", thread_id="t", sender="a@example.com", sender_name="Old",
+                                 subject="Last week", snippet="", received_at=fresh - timedelta(days=5),
+                                 category="urgent", why="")
         await store._exec("update jobs set last_status = 'ok' where last_status = 'failed'")
         await store._exec("delete from working_set where kind = 'follow_up'")
         await store._exec("delete from state where category = 'learned' or key = 'school.name'")
@@ -401,8 +421,13 @@ async def integration() -> None:
             check("the overview has every part", sorted(overview), sorted([
                 "now", "name", "unreadable", "alerts", "schedule", "due", "overdue", "grades", "reminders",
                 "promises", "proposals", "panels", "learned", "loose", "diary", "jobs", "trust", "usage", "system",
-                "agenda", "talk", "health", "due_week", "week", "work", "engine", "prefs"]))
+                "agenda", "talk", "health", "due_week", "week", "work", "engine", "prefs", "inbox"]))
             check("nothing unreadable", overview["unreadable"], [])
+            box = overview["inbox"]
+            check("the inbox: the last three days' kept mail, flattened to a line, never 'ignore'",
+                  (sorted((i["from"], i["subject"], i["category"]) for i in box["items"]), box["waiting"], box["ready"]),
+                  ([("Keegan", "Shift swap tomorrow?", "urgent"), ("k@example.com", "Lunch?", "reply"),
+                    ("k@example.com", "Receipt", "fyi")], 2, False))
             check("the week strip is Monday to Sunday", [d["day"] for d in overview["week"]],
                   ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"])
             check("the engine panel: calls against the budget, and since when she's been up",
