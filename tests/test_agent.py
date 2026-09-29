@@ -176,6 +176,62 @@ check("under the channels the bot really stores (text, voice, dashboard) too",
       [w in recorder.prompts[0] for w in ("zztypedzz", "zzspokenzz", "zzwebzz")], [False, False, False])
 
 
+# -- the quick lane: spoken turns on the fast model, the main lane for anything to do ----------------
+from sloane.agent import needs_hands  # noqa: E402
+from sloane.providers.base import ProviderError  # noqa: E402
+
+
+class Fast(Provider):
+    name = "groq"
+
+    def __init__(self, text: str = '{"speech": "Doing well. You?", "detail": "Doing well. You?"}',
+                 fails: bool = False) -> None:
+        self.text, self.fails = text, fails
+        self.calls: list[tuple[str, str]] = []
+
+    async def complete(self, system, prompt, *, max_tokens=1024):
+        self.calls.append((system, prompt))
+        if self.fails:
+            raise ProviderError(self.name, "rate limited (daily free-tier cap)")
+        return Completion(text=self.text, usage=Usage(provider=self.name))
+
+
+def spoken(question: str, fast: Fast, *, quick: bool = True, provider: str = "groq") -> tuple[str, Fast, Recorder]:
+    cfg = isolated(timezone="America/Denver", main_provider="claude_code", quick_provider=provider)
+    main = Recorder()
+    router = Router(cfg, factory=lambda n, c, b: fast if n == "groq" else main)
+    reply = asyncio.run(Agent(EmptyStore(), cfg, router=router, embedder=NoEmbedder()).answer(
+        question, quick=quick, can_act=True))
+    return reply.speech, fast, main
+
+
+said, fast, main = spoken("how's it going?", Fast())
+check("small talk out loud: the fast model answers, the main lane isn't called",
+      (said, len(fast.calls), len(main.prompts)), ("Doing well. You?", 1, 0))
+check("told it's spoken, and that it can't act", ("SPOKEN CONVERSATION" in fast.calls[0][0],
+                                                  '"handoff": true' in fast.calls[0][0],
+                                                  "/remind" in fast.calls[0][0]), (True, True, False))
+said, fast, main = spoken("what should I focus on tonight?", Fast('{"handoff": true}'))
+check("it hands off: the main lane answers", (said, len(fast.calls), len(main.prompts)), ("ok", 1, 1))
+said, fast, main = spoken("remind me to call mom at 6", Fast())
+check("asked to do something: straight to the main lane, no detour", (said, len(fast.calls), len(main.prompts)),
+      ("ok", 0, 1))
+said, fast, main = spoken("how's it going?", Fast(fails=True))
+check("the fast model over its cap or down: the main lane answers", (said, len(main.prompts)), ("ok", 1))
+said, fast, main = spoken("how's it going?", Fast('{"speech": "Sure.", "detail": "Sure.", "actions": ["/remind 6pm x"]}'))
+check("it tries to act anyway: not allowed, the main lane answers", (said, len(main.prompts)), ("ok", 1))
+said, fast, main = spoken("how's it going?", Fast('HANDOFF'))
+check("a bare HANDOFF counts too", (said, len(main.prompts)), ("ok", 1))
+said, fast, main = spoken("how's it going?", Fast(), quick=False)
+check("typed (not spoken): the main lane, as always", (len(fast.calls), len(main.prompts)), (0, 1))
+said, fast, main = spoken("how's it going?", Fast(), provider="")
+check("QUICK_PROVIDER blank: every spoken turn on the main lane", (len(fast.calls), len(main.prompts)), (0, 1))
+check("what counts as asking her to do something",
+      [needs_hands(t) for t in ("add milk to the list", "can you look that up", "set a timer", "build me a workout tracker",
+                                "what's on my list?", "how was my week", "what time is work")],
+      [True, True, True, True, False, False, False])
+
+
 # settle() spun forever when a background task had finished but its clean-up callback hadn't run
 # yet: gather() of finished tasks returns without yielding (3.12), so the callback never got a turn.
 # It hung CI on main after #15 (the workshop suite); in the agent it could hang shutdown, whose

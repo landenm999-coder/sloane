@@ -214,8 +214,10 @@ function currentOrb() {
     const [label, detail, step] = PREVIEW[forced];
     return { state: forced, label, detail, step: step ?? null };
   }
-  if (doing.listening) return { state: "listening", label: "Listening", detail: "Recording your voice note" };
-  if (doing.speaking) return { state: "speaking", label: "Speaking", detail: "Reading her reply aloud" };
+  if (doing.listening) {
+    return { state: "listening", label: "Listening", detail: call.on ? "On a call. Just talk" : "Recording your voice note" };
+  }
+  if (doing.speaking) return { state: "speaking", label: "Speaking", detail: call.on ? "Tap the orb to cut in" : "Saying her reply" };
   if (doing.asking) return { state: "thinking", label: "Thinking", detail: "Working on your message" };
   return doing.server;
 }
@@ -369,36 +371,220 @@ input.addEventListener("keydown", (event) => {
   }
 });
 
-// Her reply, read out by the browser's own voice (never leaves the device).
-function speakAloud(text) {
-  if (readAloud.getAttribute("aria-pressed") !== "true" || !("speechSynthesis" in window) || !text) return;
-  const words = new SpeechSynthesisUtterance(text);
-  words.lang = latest?.talk?.lang || "en-US";
-  const voice = speechSynthesis.getVoices().find((v) => v.lang.replace("_", "-") === words.lang);
-  if (voice) words.voice = voice;
-  words.addEventListener("start", () => { doing.speaking = true; paintOrb(); });
-  for (const over of ["end", "error"]) words.addEventListener(over, () => { doing.speaking = false; paintOrb(); });
-  speechSynthesis.speak(words);
+// -- her voice: her own (Piper on the box), sentence by sentence as she writes -------------------
+// Each finished sentence is sent to /api/speak while the next is still being written,
+// so she starts talking a moment after she starts answering. When the server has no
+// voice, the browser's own reads it instead (it never leaves the device).
+
+const SERVER_RETRY = 5 * 60 * 1000;
+const voice = {
+  el: null,          // the one <audio> she speaks through (Safari lets it play later only if a tap started it)
+  context: null,     // for the orb's bars to follow her voice
+  levels: null,
+  queue: [],         // sentences waiting: { text, audio: Promise<Blob|null> }
+  chain: Promise.resolve(),
+  run: 0,            // bumped by hush(): anything from an older run stops
+  running: false,
+  stop: null,        // ends the sentence playing now
+  said: "",          // how much of the current reply's speech is queued
+  serverDown: 0,     // when /api/speak last failed
+};
+
+function voiceOn() { return call.on || readAloud.getAttribute("aria-pressed") === "true"; }
+
+// A tenth of a second of silence, as a WAV: what the first tap plays to unlock her voice.
+function silence() {
+  const rate = 8000, samples = 800, bytes = new DataView(new ArrayBuffer(44 + samples * 2));
+  const text = (at, s) => [...s].forEach((c, i) => bytes.setUint8(at + i, c.charCodeAt(0)));
+  text(0, "RIFF"); bytes.setUint32(4, 36 + samples * 2, true); text(8, "WAVEfmt ");
+  bytes.setUint32(16, 16, true); bytes.setUint16(20, 1, true); bytes.setUint16(22, 1, true);
+  bytes.setUint32(24, rate, true); bytes.setUint32(28, rate * 2, true); bytes.setUint16(32, 2, true);
+  bytes.setUint16(34, 16, true); text(36, "data"); bytes.setUint32(40, samples * 2, true);
+  return new Blob([bytes], { type: "audio/wav" });
 }
 
+// Called on his taps and keys: browsers only let a page make sound after one.
+function primeAudio() {
+  if (!voice.el) {
+    voice.el = new Audio();
+    voice.el.src = URL.createObjectURL(silence());
+    voice.el.play().catch(() => {});
+  }
+  if (voice.context) {
+    if (voice.context.state === "suspended") voice.context.resume().catch(() => {});
+    return;
+  }
+  if (calm.matches) return;
+  try {
+    const Context = window.AudioContext || window.webkitAudioContext;
+    const context = new Context();
+    // Only a running context may carry her voice: a suspended one would silence it.
+    if (context.state !== "running") { context.close().catch(() => {}); return; }
+    const levels = context.createAnalyser();
+    levels.fftSize = 128;
+    context.createMediaElementSource(voice.el).connect(levels);
+    levels.connect(context.destination);
+    Object.assign(voice, { context, levels });
+  } catch { /* the CSS pulse instead */ }
+}
+document.addEventListener("pointerdown", primeAudio, true);
+document.addEventListener("keydown", primeAudio, true);
+
 function hush() {
+  voice.run += 1;
+  voice.queue = [];
+  voice.chain = Promise.resolve();
+  voice.said = "";
+  if (voice.stop) voice.stop();
+  if (voice.el) voice.el.pause();
   if ("speechSynthesis" in window) speechSynthesis.cancel();
+  voice.running = false;
   doing.speaking = false;
+  unfollow(null);
   paintOrb();
 }
 
-if ("speechSynthesis" in window) {
-  readAloud.setAttribute("aria-pressed", recall("sloane.readAloud", "false"));
-  readAloud.addEventListener("click", () => {
-    const on = readAloud.getAttribute("aria-pressed") !== "true";
-    readAloud.setAttribute("aria-pressed", String(on));
-    remember("sloane.readAloud", String(on));
-    if (!on) hush();
-    toast(on ? "She'll read her replies aloud." : "Reading aloud is off.");
-  });
-} else {
-  readAloud.hidden = true;
+// The end of the last whole sentence in `text`, once there's enough to be worth a breath.
+function sentenceEnd(text) {
+  let at = 0;
+  const ends = /[.!?…]+["')\]]*\s+/g;
+  for (let m; (m = ends.exec(text));) at = m.index + m[0].length;
+  return text.slice(0, at).trim().length >= 12 ? at : 0;
 }
+
+// Her speech so far (a partial) or all of it (the reply): queue what's new, whole sentences only.
+function speakAlong(speech, final = false) {
+  if (!voiceOn() || !speech) return;
+  if (!speech.startsWith(voice.said)) {
+    // The reply isn't what she was writing (it changed at the end): say it only if nothing was said yet.
+    if (voice.said) return;
+  }
+  const rest = speech.slice(voice.said.length);
+  const cut = final ? rest.length : sentenceEnd(rest);
+  if (!cut) return;
+  voice.said += rest.slice(0, cut);
+  // Long sentences in pieces the server takes (600 characters), at a space.
+  let chunk = rest.slice(0, cut).trim();
+  while (chunk) {
+    let piece = chunk;
+    if (piece.length > 560) piece = piece.slice(0, piece.lastIndexOf(" ", 560) > 200 ? piece.lastIndexOf(" ", 560) : 560);
+    enqueue(piece);
+    chunk = chunk.slice(piece.length).trim();
+  }
+}
+
+function enqueue(text) {
+  const run = voice.run;
+  // One at a time, in order: the next is made while this one plays.
+  const audio = voice.chain.then(() => (run === voice.run ? fetchVoice(text) : null));
+  voice.chain = audio.catch(() => null);
+  voice.queue.push({ text, audio });
+  if (!voice.running) playQueue();
+}
+
+async function fetchVoice(text) {
+  if (Date.now() - voice.serverDown < SERVER_RETRY) return null;
+  try {
+    const response = await api("/api/speak", { method: "POST", headers: HEAD, body: JSON.stringify({ text }) });
+    if (!response.ok) throw new Error(String(response.status));
+    return await response.blob();
+  } catch (error) {
+    if (error.message === "signed out") throw error;
+    voice.serverDown = Date.now();
+    return null;
+  }
+}
+
+async function playQueue() {
+  const run = voice.run;
+  voice.running = true;
+  while (voice.queue.length && run === voice.run) {
+    let blob = null;
+    try { blob = await voice.queue[0].audio; } catch { /* signed out */ }
+    if (run !== voice.run) return;
+    const { text } = voice.queue.shift();
+    doing.speaking = true;
+    paintOrb();
+    if (blob) await playBlob(blob, run);
+    else await browserSay(text);
+  }
+  if (run !== voice.run) return;
+  voice.running = false;
+  doing.speaking = false;
+  unfollow(null);
+  paintOrb();
+  quieted();
+}
+
+function playBlob(blob, run) {
+  return new Promise((resolve) => {
+    const el = voice.el || (voice.el = new Audio());
+    const url = URL.createObjectURL(blob);
+    let hear = null;
+    // Never stuck on a sentence: a call waits for her to finish before it listens again.
+    const guard = setTimeout(() => { el.pause(); done(); }, 60000);
+    const done = () => {
+      clearTimeout(guard);
+      el.removeEventListener("ended", done);
+      el.removeEventListener("error", done);
+      if (hear) cancelAnimationFrame(hear.frame);
+      URL.revokeObjectURL(url);
+      if (voice.stop === done) voice.stop = null;
+      resolve();
+    };
+    voice.stop = done;
+    el.addEventListener("ended", done);
+    el.addEventListener("error", done);
+    el.src = url;
+    el.play().then(() => {
+      if (run === voice.run && voice.levels) hear = barsFrom(voice.levels);
+    }).catch(() => { done(); });
+  });
+}
+
+function browserSay(text) {
+  return new Promise((resolve) => {
+    if (!("speechSynthesis" in window)) { resolve(); return; }
+    const words = new SpeechSynthesisUtterance(text);
+    words.lang = latest?.talk?.lang || "en-US";
+    const chosen = speechSynthesis.getVoices().find((v) => v.lang.replace("_", "-") === words.lang);
+    if (chosen) words.voice = chosen;
+    // Some browsers never say "end" (no voices installed): give up after about as long as it takes to say.
+    const guard = setTimeout(() => { speechSynthesis.cancel(); done(); }, 2500 + text.length * 90);
+    const done = () => { clearTimeout(guard); if (voice.stop === done) voice.stop = null; resolve(); };
+    voice.stop = done;
+    for (const over of ["end", "error"]) words.addEventListener(over, done);
+    speechSynthesis.speak(words);
+  });
+}
+
+// The orb's bars following an analyser: his voice while he talks, hers while she does.
+function barsFrom(analyser) {
+  const bins = new Uint8Array(analyser.frequencyBinCount);
+  const live = document.querySelectorAll(".js-orb");
+  live.forEach((o) => o.classList.add("live"));
+  const hear = { frame: 0 };
+  const frame = () => {
+    analyser.getByteFrequencyData(bins);
+    live.forEach((o) => o.querySelectorAll(".bars line").forEach((line, i) => {
+      // Symmetric around the top: low voices near 12 o'clock, higher ones down the sides.
+      const bin = 1 + Math.floor((Math.abs(18 - i) / 18) * 20);
+      line.style.transform = `scale(${(0.9 + (bins[bin] / 255) * 0.32).toFixed(3)})`;
+    }));
+    hear.frame = requestAnimationFrame(frame);
+  };
+  frame();
+  return hear;
+}
+
+readAloud.setAttribute("aria-pressed", recall("sloane.readAloud", "false"));
+readAloud.addEventListener("click", () => {
+  const on = readAloud.getAttribute("aria-pressed") !== "true";
+  readAloud.setAttribute("aria-pressed", String(on));
+  remember("sloane.readAloud", String(on));
+  if (!on && !call.on) hush();
+  toast(on ? "She'll say her replies out loud." : "Reading aloud is off.");
+});
 
 // One exchange: his message (typed, or a voice note), her reply streamed in.
 async function exchange(request, mine) {
@@ -414,6 +600,8 @@ async function exchange(request, mine) {
     if (!response.ok || !response.body) {
       const data = await response.json().catch(() => ({}));
       if (mine.classList.contains("pending")) mine.remove();
+      // On a call, nothing heard (a cough, the room) isn't worth a message: she just keeps listening.
+      if (call.on && response.status === 422) { if (draft) draft.remove(); draft = null; return; }
       place().replaceWith(herMessage({ speech: data.error || "That didn't go through.", cls: "error" }));
       draft = null;
       return;
@@ -442,13 +630,17 @@ async function exchange(request, mine) {
           node.className = "msg her draft";
           node.querySelector(".speech").textContent = event.text;
           scrollDown();
+          // Speech, then a blank line, then detail: once the detail starts, the speech is whole.
+          const cut = event.text.indexOf("\n\n");
+          speakAlong(cut < 0 ? event.text : event.text.slice(0, cut), cut >= 0);
         } else if (event.t === "reply") {
           const finished = herMessage({ speech: event.speech, detail: event.detail, outside: event.outside });
           if (draft) { draft.replaceWith(finished); draft = null; }
-          speakAloud(event.speech);
+          speakAlong(event.speech, true);
         } else if (event.t === "error") {
           const failed = herMessage({ speech: event.text, cls: "error" });
           if (draft) { draft.replaceWith(failed); draft = null; }
+          if (call.on) speakAlong(event.text, true);
         }
       }
     }
@@ -512,20 +704,8 @@ function follow(stream) {
     const analyser = context.createAnalyser();
     analyser.fftSize = 128;
     context.createMediaStreamSource(stream).connect(analyser);
-    const bins = new Uint8Array(analyser.frequencyBinCount);
-    const live = document.querySelectorAll(".js-orb");
-    live.forEach((o) => o.classList.add("live"));
-    const hear = { context, frame: 0 };
-    const frame = () => {
-      analyser.getByteFrequencyData(bins);
-      live.forEach((o) => o.querySelectorAll(".bars line").forEach((line, i) => {
-        // Symmetric around the top: low voices near 12 o'clock, higher ones down the sides.
-        const bin = 1 + Math.floor((Math.abs(18 - i) / 18) * 20);
-        line.style.transform = `scale(${(0.9 + (bins[bin] / 255) * 0.32).toFixed(3)})`;
-      }));
-      hear.frame = requestAnimationFrame(frame);
-    };
-    frame();
+    const hear = barsFrom(analyser);
+    hear.context = context;
     return hear;
   } catch {
     return null;
@@ -539,10 +719,11 @@ function unfollow(hear) {
   });
   if (!hear) return;
   cancelAnimationFrame(hear.frame);
-  hear.context.close().catch(() => {});
+  hear.context?.close().catch(() => {});
 }
 
 async function startRecording() {
+  if (call.on) endCall();
   let stream;
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -583,6 +764,202 @@ function stopRecording(cancel = false) {
 mic.addEventListener("click", () => (recording ? stopRecording() : startRecording()));
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && recording) { event.preventDefault(); stopRecording(true); }
+});
+
+// -- a call: hands-free, back and forth ------------------------------------------------------------
+// He talks; when he stops (a short silence), what he said goes to her like a voice note,
+// and she answers out loud, sentence by sentence. Then she listens again. The microphone
+// is off while she thinks and talks (so she never hears herself); tap the orb to cut
+// her off, Esc or End to hang up.
+
+const callButton = $("#call");
+const callbar = $("#callbar");
+const FRAME_MS = 40;         // how often the level is read
+const START_MS = 160;        // this long above the line: he's talking
+const END_MS = 850;          // this long below it: he's finished
+const MIN_TALK_MS = 300;     // less than this is a cough, not a sentence
+const MAX_TURN_MS = 45000;   // one turn at most
+const RECYCLE_MS = 8000;     // this long without a word: start the recording over (it stays small)
+const IDLE_HANGUP_MS = 4 * 60 * 1000;
+const call = { on: false, phase: "off", stream: null, context: null, analyser: null, samples: null, timer: 0,
+  recorder: null, chunks: [], since: 0, floor: 0.006, voiced: 0, quiet: 0, talked: 0, heardAt: 0,
+  pending: false, calmSince: 0, lastWords: 0, hear: null };
+
+function callPhase(phase) {
+  call.phase = phase;
+  doing.listening = call.on && (phase === "listening" || phase === "hearing");
+  const shown = phase === "waiting" ? (doing.speaking ? "speaking" : "thinking") : phase;
+  if (callbar.dataset.phase === shown) return;
+  callbar.dataset.phase = shown;
+  const [words, hint] = {
+    listening: ["Listening", "just talk"], hearing: ["Hearing you", "pause when you're done"],
+    thinking: ["Thinking", ""], speaking: ["Speaking", "tap the orb to cut in"], off: ["", ""],
+  }[shown];
+  $("#call-state").textContent = words;
+  $("#call-hint").textContent = hint;
+  paintOrb();
+}
+
+function record() {
+  if (call.recorder && call.recorder.state !== "inactive") {
+    call.recorder.ondataavailable = null;
+    call.recorder.onstop = null;
+    call.recorder.stop();
+  }
+  const type = recordingType();
+  const recorder = new MediaRecorder(call.stream, type ? { mimeType: type } : {});
+  call.chunks = [];
+  recorder.ondataavailable = (event) => { if (event.data.size) call.chunks.push(event.data); };
+  recorder.start();
+  Object.assign(call, { recorder, since: Date.now(), voiced: 0, quiet: 0, talked: 0 });
+}
+
+function listen() {
+  if (!call.on) return;
+  record();
+  if (call.hear) cancelAnimationFrame(call.hear.frame);
+  call.hear = calm.matches ? null : barsFrom(call.analyser);
+  callPhase("listening");
+}
+
+function stopListening() {
+  if (call.hear) { cancelAnimationFrame(call.hear.frame); call.hear = null; unfollow(null); }
+}
+
+// He's finished a sentence: send what was recorded, the same way a voice note goes.
+function sendTurn() {
+  const recorder = call.recorder;
+  call.recorder = null;
+  call.pending = true;
+  stopListening();
+  callPhase("waiting");
+  const talked = call.talked;
+  recorder.onstop = () => {
+    const kind = (recorder.mimeType || recordingType() || "audio/webm").split(";")[0];
+    const blob = new Blob(call.chunks, { type: kind });
+    if (!call.on || talked < MIN_TALK_MS || blob.size < 800) { call.pending = false; return; }
+    call.lastWords = Date.now();
+    const mine = hisMessage("Listening back…", { spoken: true, pending: true });
+    exchange(() => api("/api/voice", { method: "POST", headers: { "X-Sloane": "1", "Content-Type": kind }, body: blob }), mine)
+      .finally(() => { call.pending = false; });
+  };
+  recorder.stop();
+}
+
+function level() {
+  call.analyser.getFloatTimeDomainData(call.samples);
+  let sum = 0;
+  for (const x of call.samples) sum += x * x;
+  return Math.sqrt(sum / call.samples.length);
+}
+
+function callFrame() {
+  if (!call.on) return;
+  const busy = call.pending || doing.asking || voice.running || voice.queue.length > 0;
+  if (busy) {
+    call.calmSince = 0;
+    if (call.phase === "listening" || call.phase === "hearing") {
+      // Something else started (a typed message, a reminder read out): stop listening meanwhile.
+      if (call.recorder) { call.recorder.onstop = null; call.recorder.stop(); call.recorder = null; }
+      stopListening();
+    }
+    callPhase("waiting");
+    return;
+  }
+  if (call.phase === "waiting") {
+    // A breath after she stops, so the tail of her voice isn't taken for his.
+    call.calmSince ||= Date.now();
+    if (Date.now() - call.calmSince >= 300) listen();
+    return;
+  }
+  const now = Date.now();
+  const heard = level();
+  const line = Math.max(0.012, call.floor * 3);
+  if (call.phase === "listening") {
+    if (heard > line) {
+      call.voiced += FRAME_MS;
+      if (call.voiced >= START_MS) { call.heardAt = now; call.quiet = 0; call.talked = call.voiced; callPhase("hearing"); }
+    } else {
+      call.voiced = 0;
+      // The room's own noise, followed slowly: a fan is not a voice.
+      call.floor = heard < call.floor ? call.floor * 0.9 + heard * 0.1 : call.floor * 0.98 + heard * 0.02;
+      if (now - call.since > RECYCLE_MS) record();
+      if (now - Math.max(call.lastWords, call.startedAt) > IDLE_HANGUP_MS) { endCall(); toast("Hung up after a few quiet minutes."); }
+    }
+  } else if (call.phase === "hearing") {
+    if (heard > line * 0.7) { call.quiet = 0; call.talked += FRAME_MS; } else call.quiet += FRAME_MS;
+    if (call.quiet >= END_MS || now - call.heardAt > MAX_TURN_MS) sendTurn();
+  }
+}
+
+function quieted() {
+  if (call.on) callFrame();
+}
+
+async function startCall() {
+  if (call.on) return;
+  if (recording) stopRecording(true);
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+  } catch {
+    toast("The microphone is blocked. Allow it for this page in the browser's settings.");
+    return;
+  }
+  try {
+    const Context = window.AudioContext || window.webkitAudioContext;
+    const context = new Context();
+    const analyser = context.createAnalyser();
+    analyser.fftSize = 1024;
+    context.createMediaStreamSource(stream).connect(analyser);
+    Object.assign(call, { on: true, stream, context, analyser, samples: new Float32Array(analyser.fftSize),
+      floor: 0.006, startedAt: Date.now(), lastWords: 0, pending: false });
+  } catch {
+    stream.getTracks().forEach((track) => track.stop());
+    toast("This browser can't listen hands-free. Use the mic button instead.");
+    return;
+  }
+  hush();
+  if (!wide.matches) show("talk");
+  callButton.setAttribute("aria-pressed", "true");
+  callButton.querySelector("span").textContent = "End";
+  document.body.classList.add("calling");
+  callbar.hidden = false;
+  input.placeholder = "On a call. Or type";
+  call.timer = setInterval(callFrame, FRAME_MS);
+  listen();
+}
+
+function endCall() {
+  if (!call.on) return;
+  call.on = false;
+  clearInterval(call.timer);
+  if (call.recorder) { call.recorder.onstop = null; call.recorder.stop(); call.recorder = null; }
+  stopListening();
+  call.stream.getTracks().forEach((track) => track.stop());
+  call.context.close().catch(() => {});
+  if (readAloud.getAttribute("aria-pressed") !== "true") hush();
+  callButton.setAttribute("aria-pressed", "false");
+  callButton.querySelector("span").textContent = "Talk";
+  document.body.classList.remove("calling");
+  callbar.hidden = true;
+  input.placeholder = "Message Sloane";
+  callPhase("off");
+}
+
+// Tap her while she's talking: she stops, and listens.
+function cutIn() {
+  if (!call.on) return;
+  if (voice.running || voice.queue.length) { hush(); callFrame(); }
+}
+
+callButton.addEventListener("click", () => (call.on ? endCall() : startCall()));
+$("#call-end").addEventListener("click", endCall);
+$(".chat-head .js-orb").addEventListener("click", cutIn);
+$("#orb-talk").addEventListener("click", () => (call.on ? cutIn() : startCall()));
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && call.on && !recording) { event.preventDefault(); endCall(); }
 });
 
 // "/" goes to the message box from anywhere that isn't already a field.
@@ -1234,6 +1611,7 @@ function renderEngine(data) {
     ["Telegram", sys.telegram ? "Polling" : "Off", sys.telegram],
     ["Main model", provider(sys.main)],
     ["Bulk model", provider(sys.bulk)],
+    ["Spoken replies", sys.quick ? provider(sys.quick) + ", then the main model to act" : "The main model"],
     ["Local model", sys.local || "None set up"],
     ["Her voice", sys.voice.replace(/^(\w+)/, (m) => provider(m))],
     ["Quiet hours", sys.quiet],
@@ -1473,6 +1851,8 @@ async function refresh() {
     renderMemory(data);
     renderEngine(data);
     mic.hidden = !(data.talk?.hears && canRecord());
+    callButton.hidden = mic.hidden;
+    $("#orb-talk").disabled = mic.hidden;
   } catch (error) {
     if (error.message === "signed out") return;
     doing.server = { ...doing.server, state: "needs", label: "Can't reach her", detail: "Trying again in a minute" };

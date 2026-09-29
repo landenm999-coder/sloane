@@ -53,7 +53,9 @@
   <main class="main" id="main">
     <header class="top" aria-label="Sloane right now">
       <div class="hdr">
-        <div class="orb js-orb" aria-hidden="true"></div>
+        <button type="button" class="orb-talk" id="orb-talk" aria-label="Talk to her, hands-free" title="Talk to her" disabled>
+          <span class="orb js-orb" aria-hidden="true"></span>
+        </button>
         <div class="clock mono" id="clock"></div>
         <div class="status" id="status"><b id="status-label">Connecting</b><span id="status-detail"></span></div>
       </div>
@@ -191,11 +193,21 @@
       <div class="orb sm js-orb" aria-hidden="true"></div>
       <h2 id="talk-title">Sloane</h2>
       <span class="short mono" id="status-short"></span>
-      <button type="button" class="icon-btn" id="read-aloud" aria-pressed="false" aria-label="Read her replies aloud">
+      <button type="button" class="btn call" id="call" aria-pressed="false" aria-label="Talk to her, hands-free" hidden>
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h1.5M8 8.5v7M12 5v14M16 8.5v7M19.5 12H20"/></svg>
+        <span>Talk</span>
+      </button>
+      <button type="button" class="icon-btn" id="read-aloud" aria-pressed="false" aria-label="Say her replies out loud">
         <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path class="wave" d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/></svg>
       </button>
     </div>
     <ol class="thread" id="thread" aria-live="polite" aria-relevant="additions" aria-label="Conversation"></ol>
+    <div class="callbar" id="callbar" data-phase="off" hidden>
+      <span class="pulse" aria-hidden="true"></span>
+      <b id="call-state" role="status">Listening</b>
+      <span class="hint" id="call-hint"></span>
+      <button type="button" class="btn danger" id="call-end">End</button>
+    </div>
     <div class="starters" id="starters" role="group" aria-label="Things to ask"></div>
     <form class="composer" id="composer">
       <label for="composer-input" class="sr">Message Sloane</label>

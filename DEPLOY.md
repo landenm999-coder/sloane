@@ -305,8 +305,13 @@ everything she runs. The bare address, `/`, opens it too.
   step), or needs you. The line beside it says what.
 - **Talk:** on a laptop the chat is always open on the right; on a phone it's
   its own tab. Type, or tap the microphone and speak (it needs the `https://`
-  address below and `GROQ_API_KEY`, or a local Whisper). **Read aloud** has the
-  browser read her replies to you.
+  address below, or `localhost` through the SSH tunnel, and `GROQ_API_KEY`, or a
+  local Whisper). **Talk** (or tap the big orb) starts a hands-free call: just
+  talk, pause when you're done, and she answers out loud in her own voice (the
+  one her voice notes use), then listens again. Tap the orb to cut her off;
+  **End** or Esc hangs up. The speaker button has her say every reply, typed or
+  not. Small talk on a call is answered by her fast model (`QUICK_PROVIDER`,
+  Groq), a second or so; anything she has to do or look up goes to Claude.
 - **Today:** the day as a timeline (classes, shifts, reminders, focus blocks,
   what's due) with a line at now, and a Tomorrow toggle. The header counts
   what's **waiting on you** (approvals, anything broken or failed, overdue work,

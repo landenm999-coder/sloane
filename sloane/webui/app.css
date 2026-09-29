@@ -45,7 +45,7 @@ h1, h2, h3, h4, p { margin: 0; }
 .count { letter-spacing: 0; }
 
 /* -- the orb: a HUD core with rings, inline SVG from one function (app.js `orb`) ------------------ */
-.orb { --size: 44px; width: var(--size); height: var(--size); position: relative; flex: none; color: #7fd1c1; }
+.orb { --size: 44px; display: block; width: var(--size); height: var(--size); position: relative; flex: none; color: #7fd1c1; }
 .orb svg { width: 100%; height: 100%; overflow: visible; display: block; position: relative; }
 .orb .spin { transform-origin: 50px 50px; transform-box: view-box; }
 .orb .r1 { animation: rot 40s linear infinite; }
@@ -74,6 +74,7 @@ h1, h2, h3, h4, p { margin: 0; }
 .orb[data-state="needs"] { color: #f0a08f; }
 .orb[data-state="needs"] .core { animation: breathe 1.4s ease-in-out infinite; }
 .orb[data-state="needs"] .r1, .orb[data-state="needs"] .r2 { animation-play-state: paused; }
+.orb[data-state="speaking"].live .bars line { opacity: .9; animation: none; transition: transform .08s linear; }
 .orb.sm { --size: 26px; }
 .orb.sm .r1, .orb.sm .bars, .orb.sm .prog { display: none; }
 @keyframes rot { to { transform: rotate(360deg); } }
@@ -336,6 +337,25 @@ button.pn:hover { border-color: var(--dim); }
 .composer .send { color: var(--now); }
 .composer .send:disabled { opacity: .4; cursor: default; }
 .mic[aria-pressed="true"] { color: var(--bg); background: var(--due); border-color: var(--due); }
+
+/* -- a call: the orb starts one; the bar says whose turn it is --------------------------------------- */
+.orb-talk { background: none; border: 0; padding: 0; margin: 0; border-radius: 50%; flex: none; color: inherit; cursor: pointer; }
+.orb-talk:disabled { cursor: default; }
+.orb-talk:focus-visible { outline: 2px solid var(--now); outline-offset: 4px; }
+.btn.call { display: inline-flex; align-items: center; gap: 6px; color: var(--now);
+  border-color: color-mix(in srgb, var(--now) 45%, var(--line)); }
+.btn.call .ico { width: 16px; height: 16px; }
+.btn.call[aria-pressed="true"] { color: var(--due); border-color: var(--due); }
+.callbar { margin: 0 12px 8px; display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 12px; flex: none;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--bg); font-size: 12.5px; }
+.callbar b { font-weight: 500; white-space: nowrap; }
+.callbar .hint { color: var(--mut); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.callbar .pulse { width: 8px; height: 8px; border-radius: 50%; flex: none; background: #9ee6d6; animation: breathe 1.4s ease-in-out infinite; }
+.callbar[data-phase="hearing"] .pulse { animation-duration: .45s; }
+.callbar[data-phase="thinking"] .pulse { background: #a9b8f0; }
+.callbar[data-phase="speaking"] .pulse { background: #b6f0e2; animation-duration: .38s; }
+body.calling .starters { display: none; }
+body.calling .chat-head .js-orb { cursor: pointer; }
 .composer.recording { border-color: var(--due); }
 
 /* -- memory, workshop, engine ------------------------------------------------------------------- */

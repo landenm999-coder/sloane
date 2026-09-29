@@ -82,11 +82,13 @@ FONTS = frozenset({"plex-sans-400.woff2", "plex-sans-500.woff2", "plex-sans-600.
 AUDIO = {"audio/webm": "webm", "audio/ogg": "ogg", "audio/mp4": "m4a", "audio/x-m4a": "m4a", "audio/aac": "m4a",
          "audio/mpeg": "mp3", "audio/wav": "wav"}
 MAX_AUDIO = 8 * 1024 * 1024
+# What the page asks her to say at once: a sentence or two of her speech.
+MAX_SPOKEN = 600
 
 HEADERS = {
     "Content-Security-Policy": (
         "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; "
-        "connect-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'self'; "
+        "media-src 'self' blob:; connect-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'self'; "
         "frame-ancestors 'none'"
     ),
     "X-Content-Type-Options": "nosniff",
@@ -477,6 +479,7 @@ async def overview(store, config, state: dict, now: datetime) -> dict:  # noqa: 
             "telegram": "bot" in state,
             "main": config.main_provider,
             "bulk": config.bulk_provider,
+            "quick": config.quick_provider.strip(),
             "local": config.local_model if config.local_base_url and config.local_model else "",
             "voice": config.speak_provider + (f" ({config.piper_voice})" if config.piper_voice else ""),
             "quiet": f"{config.quiet_start_hour}:00–{config.quiet_end_hour}:{config.quiet_end_minute:02d}",
@@ -852,9 +855,40 @@ def install(app: FastAPI, state: dict, store, config) -> None:  # noqa: ANN001, 
             return JSONResponse({"error": "That came back empty. Try again, a little closer?"}, status_code=422)
         text = text[:MAX_MESSAGE]
         await store.log_message(chat_id=owner(), direction="in", kind="voice", body=text)
-        return converse(bot, text, heard=True)
+        # Spoken: he's waiting to hear her, so her fast lane may answer.
+        return converse(bot, text, heard=True, quick=True)
 
-    def converse(bot, text: str, *, heard: bool = False) -> StreamingResponse:  # noqa: ANN001
+    @app.post("/api/speak")
+    async def api_speak(request: Request) -> Response:
+        """Her voice for a sentence the page shows (Piper or Groq, as on Telegram): WAV.
+
+        The page asks sentence by sentence as her reply streams in, so she starts
+        talking before she's finished writing. Accounted as "talk", apart from the
+        Telegram voice notes DAILY_SPEAK_BUDGET rations."""
+        stop = refuse(request, change=True)
+        if stop is not None:
+            return stop
+        router = state.get("router")
+        if router is None:
+            return JSONResponse({"error": "her voice isn't ready yet"}, status_code=503)
+        try:
+            text = str((await request.json()).get("text") or "").strip()
+        except (ValueError, AttributeError):
+            text = ""
+        if not text:
+            return JSONResponse({"error": "nothing to say"}, status_code=400)
+        if len(text) > MAX_SPOKEN:
+            return JSONResponse({"error": f"keep it under {MAX_SPOKEN} characters"}, status_code=413)
+        from sloane.router import NoProviderAvailable
+
+        try:
+            audio = await router.speak(text, purpose="talk")
+        except NoProviderAvailable as exc:
+            log.warning("no voice for the control room: %s", exc)
+            return JSONResponse({"error": "her voice is unavailable"}, status_code=503)
+        return Response(audio.wav, media_type="audio/wav", headers={"Cache-Control": "no-store"})
+
+    def converse(bot, text: str, *, heard: bool = False, quick: bool = False) -> StreamingResponse:  # noqa: ANN001
         """Her answer to one message of his (already logged), streamed to the page as NDJSON."""
         outlet = WebOutlet(store, owner())
         if heard:
@@ -862,7 +896,7 @@ def install(app: FastAPI, state: dict, store, config) -> None:  # noqa: ANN001, 
 
         async def run() -> None:
             try:
-                await bot.respond(owner(), text, outlet, channel="dashboard")
+                await bot.respond(owner(), text, outlet, channel="dashboard", quick=quick)
             except Exception as exc:  # noqa: BLE001 - said on the page, never a hung spinner
                 log.exception("dashboard message failed")
                 outlet.emit({"t": "error", "text": f"That hit an error: {type(exc).__name__}."})

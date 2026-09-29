@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     # claude_code | groq | anthropic
     main_provider: str = "claude_code"
     bulk_provider: str = "groq"
+    # Spoken conversation in the control room: a fast model answers quick
+    # back-and-forth, and hands to the main lane anything she has to do (act,
+    # look up, plan, build). Blank: every spoken turn goes to the main lane.
+    quick_provider: str = "groq"
 
     # --- claude code CLI (draws on the Claude Pro subscription, not credits) --
     claude_cli: str = "claude"

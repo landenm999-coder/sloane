@@ -196,9 +196,11 @@ async def integration() -> None:
 
         class Agent:
             asked: list = []
+            quick: list = []
 
-            async def answer(self, question, *, channel="", on_text=None, can_act=False, ingested=""):
+            async def answer(self, question, *, channel="", on_text=None, can_act=False, ingested="", quick=False):
                 Agent.asked.append((question, channel, can_act))
+                Agent.quick.append(quick)
                 raw = '{"speech": "Lab first, it\'s due at 11:59.", "detail": "Then the essay."}'
                 if on_text is not None:
                     for cut in (12, 30, len(raw)):
@@ -267,7 +269,8 @@ async def integration() -> None:
                      "/api/memory/forget", "/api/followups/00000000-0000-0000-0000-000000000000/close",
                      "/api/jobs/entity_sync/run", "/app/logout", "/api/workshop/ideas",
                      "/api/workshop/00000000-0000-0000-0000-000000000000/accept",
-                     "/api/workshop/00000000-0000-0000-0000-000000000000/build", "/api/voice", "/api/prefs"]
+                     "/api/workshop/00000000-0000-0000-0000-000000000000/build", "/api/voice", "/api/prefs",
+                     "/api/speak"]
             check("signed out: every read is refused",
                   [(await client.get(p)).status_code for p in ("/api/overview", "/api/history", "/api/workshop",
                                                                 "/api/activity")],
@@ -305,6 +308,7 @@ async def integration() -> None:
                   ("typing", True, ["reply", "done"]))
             check("through the same path as Telegram, allowed to act, marked as the dashboard",
                   Agent.asked[-1], ("what first tonight?", "dashboard", True))
+            check("typed: her main lane, never the fast spoken one", Agent.quick[-1], False)
             check("the reply", (events[-2]["speech"], events[-2]["detail"]), ("Lab first, it's due at 11:59.", "Then the essay."))
             code, events = await chat("/reminders")
             check("commands work here too", "1 reminder set." in events[0]["speech"], True)
@@ -341,6 +345,7 @@ async def integration() -> None:
                   (code, events[0], [e["t"] for e in events][-2:]),
                   (200, {"t": "heard", "text": "what first tonight?"}, ["reply", "done"]))
             check("read in the format it was recorded in", heard[-1][1], "note.webm")
+            check("spoken: her fast lane may answer (he's waiting to hear her)", Agent.quick[-1], True)
             check("Safari's recording too", ((await speak(b"mp4", "audio/mp4"))[0], heard[-1][1]), (200, "note.m4a"))
             said_row = await store._one(
                 "select kind, body from messages where chat_id = 5151 and direction = 'in' order by at desc limit 1")
@@ -355,6 +360,41 @@ async def integration() -> None:
             failed = await client.post("/api/voice", content=b"x", headers={"X-Sloane": "1", "content-type": "audio/webm"})
             check("a failed transcription is said plainly", (failed.status_code, "couldn't make that out" in failed.text),
                   (502, True))
+
+            # -- her voice: a sentence of her reply, spoken back as WAV ------------------------
+            async def voice(text):
+                return await client.post("/api/speak", json={"text": text}, headers={"X-Sloane": "1"})
+
+            check("no router yet (still starting): said, not a crash", (await voice("Evening.")).status_code, 503)
+
+            class Spoken:
+                wav = b"RIFF\x24\x00\x00\x00WAVEfmt "
+
+            class Voiced:
+                said: list = []
+                down = False
+
+                async def speak(self, text, *, purpose="speak"):
+                    from sloane.router import NoProviderAvailable
+                    if Voiced.down:
+                        raise NoProviderAvailable("piper and groq both down")
+                    Voiced.said.append((text, purpose))
+                    return Spoken()
+
+            state["router"] = Voiced()
+            check("nothing to say", (await voice("   ")).status_code, 400)
+            check("not an essay", (await voice("x" * (web.MAX_SPOKEN + 1))).status_code, 413)
+            spoken = await voice("Lab first, it's due at 11:59.")
+            check("her words come back as audio",
+                  (spoken.status_code, spoken.headers["content-type"], spoken.content[:4]), (200, "audio/wav", b"RIFF"))
+            check("accounted as talk, apart from the Telegram voice-note budget", Voiced.said[-1],
+                  ("Lab first, it's due at 11:59.", "talk"))
+            check("and never cached", spoken.headers.get("cache-control"), "no-store")
+            Voiced.down = True
+            check("no voice anywhere: the page falls back to the browser's", (await voice("Evening.")).status_code, 503)
+            state.pop("router")
+            check("the page may play her audio (media-src blob:)",
+                  "media-src 'self' blob:" in (await client.get("/app")).headers["content-security-policy"], True)
 
             # -- the controls ---------------------------------------------------------------
             overview = (await client.get("/api/overview")).json()

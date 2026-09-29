@@ -342,9 +342,28 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
 
 ## In flight
 
-- **The control room from the mockup** (branch `claude/nifty-thompson-5h6l2x`, draft PR): see "The control
-  room, from the mockup" above. Merging it and rerunning the installer is all the box needs: sql/032
-  applies itself, `FOCUS_GOAL_MINUTES` has a default, nothing new to paste. It replaces the page from #16.
+- **Talking to her in the control room** (branch `claude/nifty-thompson-5h6l2x`, draft
+  landenm999-coder/sloane#20). Landen: "an assistant for anything I need... speak in conversations, quick,
+  not a long wait". Built so far:
+  - *A call*: **Talk** in the chat head, or tap the big orb. Hands-free: an `AnalyserNode` level check every
+    40 ms (the room's noise followed slowly; 160 ms above the line starts his turn, 850 ms below ends it;
+    under 300 ms of voice is a cough, dropped), the recording goes as a voice note (`/api/voice`), she
+    answers out loud and listens again. The mic is off while she thinks and talks (she never hears
+    herself); tap the orb to cut in, End or Esc hangs up, four quiet minutes hang up.
+  - *Her own voice*: `POST /api/speak` (WAV from `Router.speak`, Piper or Groq, accounted as `talk` so
+    Telegram's `DAILY_SPEAK_BUDGET` isn't spent), asked sentence by sentence while the reply streams, one
+    at a time in order (the next is made while this one plays); the browser's voice when the server has
+    none (retried after 5 minutes). The orb's bars follow her audio. The speaker button says every reply.
+  - *The fast lane*: `QUICK_PROVIDER` (Groq, default). A spoken turn with nothing to do in it
+    (`agent.needs_hands`: remind, add, send, plan, build, look up...) goes to the fast model with a slim
+    context (`QUICK_BUDGETS`) and the `persona.QUICK` prompt: short, spoken, and `{"handoff": true}` for
+    anything she'd need to act, look up or think hard about. A hand-off, an attempted action, empty speech
+    or the fast model down (Groq's free-tier cap) all fall through to the main lane, Claude, as before.
+    Typed messages and Telegram are unchanged.
+  - Verified: `tests/test_agent.py` (the lane's routing), `tests/test_router.py` (quick lane, speak
+    purposes), `tests/test_web.py` (`/api/speak`, `quick` only when spoken); a whole call in Chromium
+    with a fake mic at 1440 and 390 wide (two turns, the cut-in, Esc, nothing sent after hanging up).
+  Nothing new to paste on the box: `QUICK_PROVIDER` defaults to groq and uses the existing `GROQ_API_KEY`.
 - **The coin skill** (`sloane/skills/coin.py`, workshop item `/coin`): `/coin`, "flip a coin", "heads or tails?"
   give Heads or Tails from `secrets`. No SQL, no setting, no migration. `tests/test_coin.py` pins the
   command, both sides, and phrases it must not catch. Awaiting Landen's review.
@@ -371,9 +390,10 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
    lock the account.
 4. P5 phone calls, beyond v1.
 5. Streaming for the Groq and Anthropic providers (`claude_code` and `local` stream; the others answer whole).
-6. The control room: her replies in her own voice (Groq/Piper audio, not the browser's; the orb's
-   "speaking" would then follow that audio), approvals there when Telegram isn't set up (today the agency
-   needs `TELEGRAM_CHAT_ID`), and the mockup's **Market** panel (needs a market data source first).
+6. The control room: approvals there when Telegram isn't set up (today the agency needs
+   `TELEGRAM_CHAT_ID`), and the mockup's **Market** panel (needs a market data source first). A call that
+   lets him talk over her (barge-in): today the mic is off while she speaks, because echo cancellation
+   on a laptop's speakers isn't reliable enough to keep her from hearing herself.
    Drag to reorder panels (today the order is fixed; Engine → Panels switches them on and off).
 7. A weekday lunch slot for `think`, if Landen wants one (school hours are skipped today).
 8. `scripts/install.sh` under WSL with Docker Desktop installed: `command -v docker` finds Docker Desktop's

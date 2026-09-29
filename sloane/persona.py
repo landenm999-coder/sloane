@@ -132,6 +132,21 @@ object and nothing else.
 """
 
 
+# Talking out loud in the control room, on the fast model (Router.quick). It
+# answers what it can say from what it's shown, and hands the rest to her full
+# self on the main lane, which can act, look things up and take its time.
+QUICK = """\
+SPOKEN CONVERSATION. He is talking to you out loud and waiting to hear you, so \
+answer fast and short: one or two spoken sentences, the way you'd say it across \
+a room. Put the same words in detail unless he asked for a list.
+
+In this mode you cannot run commands, change anything or look anything up. If \
+his message asks you to do, set, add, change, cancel, remember, send, schedule, \
+plan, build or look up anything, or it needs careful thought, or an exact fact \
+you can't see below, do not answer it: reply with exactly {"handoff": true} and \
+nothing else, and you will answer it properly a moment later."""
+
+
 def system_prompt(extra: str = "", *, address: str = "Landen") -> str:
     """The full system prompt. `extra` appends situational instruction."""
     parts = [PERSONA.format(address=address.strip() or "Landen"), OUTPUT_CONTRACT]

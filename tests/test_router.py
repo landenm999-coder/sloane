@@ -243,6 +243,45 @@ check("gpt-oss is asked for low reasoning effort; other models aren't sent the f
       [(b["model"], b.get("reasoning_effort"), b["max_tokens"]) for b in _sent],
       [("openai/gpt-oss-120b", "low", 512), ("llama-3.3-70b-versatile", None, 512)])
 
+# -- the quick lane: QUICK_PROVIDER only, no fall-through (the main lane is the fallback) ------
+router, made, rows, purposes = harness(broken={"groq"})
+router._config = Settings(main_provider="claude_code", bulk_provider="groq", quick_provider="groq", database_url="")
+try:
+    run(router.quick("s", "p"))
+    check("a failed quick lane raises, so the agent hands the turn to the main lane", True, False)
+except NoProviderAvailable:
+    check("a failed quick lane raises, so the agent hands the turn to the main lane", True, True)
+check("and tries nothing else on the way", sorted(made), ["groq"])
+router._config = Settings(main_provider="claude_code", quick_provider="", database_url="")
+try:
+    run(router.quick("s", "p"))
+    check("blank QUICK_PROVIDER: no quick lane", True, False)
+except NoProviderAvailable:
+    check("blank QUICK_PROVIDER: no quick lane", True, True)
+
+# -- her voice in the control room is accounted apart from Telegram's rationed voice notes --------
+from sloane.providers.tts import Audio  # noqa: E402
+
+spoken_purposes: list[str] = []
+
+
+class _Voice:
+    async def synthesize(self, text):
+        return Audio(wav=b"RIFF", usage=Usage(provider="piper"))
+
+    async def warm(self):
+        return True
+
+
+async def _sink(usage, purpose, ok, error, degraded):  # noqa: ANN001
+    spoken_purposes.append(purpose)
+
+_talker = Router(Settings(speak_provider="piper", database_url=""), usage_sink=_sink,
+                 tts_factory=lambda n, c: _Voice())
+run(_talker.speak("hi"))
+run(_talker.speak("hi", purpose="talk"))
+check("Telegram's voice notes are 'speak'; the control room's voice is 'talk'", spoken_purposes, ["speak", "talk"])
+
 # -- request URLs carry credentials; httpx must not log them -------------------
 import logging as _logging
 

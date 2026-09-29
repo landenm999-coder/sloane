@@ -1200,12 +1200,13 @@ class Bot:
         await self.respond(chat_id, body, TelegramOutlet(self, chat_id), voice=bool(voice))
 
     async def respond(self, chat_id: int, body: str, out: Outlet, *, voice: bool = False,
-                      channel: str = "") -> None:
+                      channel: str = "", quick: bool = False) -> None:
         """Answer one message of his, already logged: on Telegram or the dashboard.
 
         `voice`: he spoke it, so the answer is read back (on Telegram). The
         order is the same wherever he says it: an edit in progress, reminders
-        and timers by rule, commands, skills, then her.
+        and timers by rule, commands, skills, then her. `quick`: he's talking
+        out loud in the control room; her fast lane may answer (Agent.answer).
         """
         kind = channel or ("voice" if voice else "text")
         # While a proposal is being edited, his next plain message is the
@@ -1260,7 +1261,7 @@ class Bot:
         ingested = await self._forward_context(chat_id)
         try:
             reply = await self._agent.answer(body, channel=kind, on_text=None if voice else live.update,
-                                             can_act=True, ingested=ingested)
+                                             can_act=True, ingested=ingested, quick=quick)
         finally:
             live.stop_typing()
         if reply.actions:

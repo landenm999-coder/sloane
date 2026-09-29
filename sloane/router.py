@@ -117,6 +117,18 @@ class Router:
             on_text=on_text,
         )
 
+    async def quick(self, system: str, prompt: str, *, max_tokens: int = 400, on_text=None) -> str:  # noqa: ANN001
+        """The quick lane: one short spoken turn on QUICK_PROVIDER, and nothing else.
+
+        No fallback through the other providers: when the fast model can't answer,
+        the caller hands the turn to the main lane, which is the fallback.
+        Raises NoProviderAvailable (also when QUICK_PROVIDER is blank).
+        """
+        name = self._config.quick_provider.strip()
+        if not name:
+            raise NoProviderAvailable("no quick lane configured")
+        return await self._run([name], system, prompt, max_tokens, bulk=True, purpose="reply", on_text=on_text)
+
     async def research(self, query: str) -> str:
         """A web lookup on the main lane's first provider. Raises NoProviderAvailable."""
         name = self._config.main_provider
@@ -177,8 +189,11 @@ class Router:
             purpose="bulk",
         )
 
-    async def speak(self, text: str) -> Audio:
-        """Text to WAV, degrading across speech providers like the text lanes."""
+    async def speak(self, text: str, *, purpose: str = "speak") -> Audio:
+        """Text to WAV, degrading across speech providers like the text lanes.
+
+        `purpose` is how it's accounted: "speak" (Telegram voice notes, which
+        DAILY_SPEAK_BUDGET rations) or "talk" (her voice in the control room)."""
         configured = self._config.speak_provider
         failures: list[str] = []
         for name in _lane(configured, SPEAK_ORDER):
@@ -196,10 +211,10 @@ class Router:
             except ProviderError as exc:
                 log.warning("speech provider %s failed: %s", name, exc.message)
                 failures.append(exc.message)
-                await self._record(Usage(provider=name), "speak", ok=False,
+                await self._record(Usage(provider=name), purpose, ok=False,
                                    error=exc.message, degraded_from=degraded_from)
                 continue
-            await self._record(audio.usage, "speak", ok=True, error=None,
+            await self._record(audio.usage, purpose, ok=True, error=None,
                                degraded_from=degraded_from)
             return audio
         raise NoProviderAvailable("; ".join(failures) or "no speech providers configured")
