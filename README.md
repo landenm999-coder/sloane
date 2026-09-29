@@ -6,9 +6,10 @@ Always-on personal assistant for Landen. Reached by Telegram text and voice
 notes. She runs the day: what's due, what shift, what slipped, what's next.
 
 **v1 is built: P0 (the spine), P1 (memory + school), P2 (rhythm), P3 (voice)
-and P4 (agency, including Gmail).** On top of it sit fifteen **skills** (lists,
+and P4 (agency, including Gmail).** On top of it sit twenty **skills** (lists,
 countdowns, weather, flashcards, habits, clients, a study plan, focus,
-birthdays, money, memory, college applications, DECA role-play practice, a coin flip, the workshop), a **heartbeat** that lets them speak up once when it
+birthdays, money, memory, college applications, DECA role-play practice, a coin flip, workouts, markets, news,
+Whoop, recent captures, the workshop), a **heartbeat** that lets them speak up once when it
 matters, and a **TV dashboard**. And she is built to feel like a **partner**
 rather than a help desk: she follows the conversation, has a character, answers
 fast (streamed), does what he asks, looks things up, and remembers what he tells
@@ -58,7 +59,7 @@ Total running cost: **$0/mo**, every layer on a free tier.
 | Voice briefs | `VOICE_BRIEFS=morning_brief` sends that brief as a voice note (text if voice fails) |
 | Status | `/status`: open problems, last sync, provider health, last brief, Gmail — from her own bookkeeping, no model |
 | Gmail | triage every 3h in one batched call; replies drafted in his voice, sent only on Approve |
-| Skills | nineteen plug-in skills (below): lists, countdowns, weather, flashcards + quizzes, habits, clients, a study plan, focus, birthdays, money, memory, college applications, DECA role-plays, a coin flip, workouts, markets, news, Whoop, and the workshop's Telegram side. Each adds its own commands, plain-English rules, FACTS lines, a TV card and nudges, without touching the core |
+| Skills | twenty plug-in skills (below): lists, countdowns, weather, flashcards + quizzes, habits, clients, a study plan, focus, birthdays, money, memory, college applications, DECA role-plays, a coin flip, workouts, markets, news, Whoop, `/recent` (what you just captured, read-only), and the workshop's Telegram side. Each adds its own commands, plain-English rules, FACTS lines, a TV card and nudges, without touching the core |
 | Heartbeat | every quarter hour, 7 AM–10 PM, no model: what the skills think is worth saying now (rain before your shift, a streak about to break, a follow-up due), each said once |
 | Control room | `/app` (and `/`): a private page (phone or laptop, over Tailscale, with its own password) where he talks to her — the same conversation as Telegram, streamed, commands and actions included, typed or spoken into the microphone (transcribed like a Telegram voice note), or **on a call**: hands-free, he talks and pauses, she answers out loud in her own voice (`POST /api/speak`, sentence by sentence as she writes, the browser's voice if the server has none) and listens again; small talk on the fast lane (`QUICK_PROVIDER`, Groq: a second or so), anything to do or look up on Claude — and sees and steers everything. Dark, IBM Plex (served by her, nothing loaded from outside), built from `docs/design/dashboard-mockup.html`. **The orb** by the clock shows what she's doing now (`GET /api/activity`, polled every 5 s: idle with her next check, thinking while a job runs, building with the Workshop's step, needs you; on the page, listening, with its bars following his voice, and speaking). **Today**: his life, not a school tracker. The day as a timeline (his calendar, shifts, reminders, a focus session running) with a moving now line and a Tomorrow toggle; the header's countdown to work, what's **waiting on him** (approvals, what's broken, failed jobs, workshop builds ready) and emails to answer; and every panel that's on, packed with no holes: weather, Whoop (recovery ring, sleep, strain), workouts (the week against his goal), markets (his watchlist with the day's line), the inbox (what triage kept), habits, news (headlines, as outside text), focus, money, countdowns, lists, birthdays, clients, **one small School panel** (due soon, overdue, grades, the next college deadline), the workshop and learned today. A panel with nothing in it yet says what it's for and has one button to fill it, so the grid is never bare. Grades, the week's heat, colleges, flashcards and DECA are panels of their own, off until he turns them on. On a laptop the chat stays open on the right; on a phone, Today/Talk/Workshop/More tabs and three panels to swipe. **Memory**: what she knows (filter, forget), loose ends, her diary. **Workshop**: the pipeline. **Engine**: status, jobs (run now), trust (take back), model use, and which panels show (`dashboard_prefs`, so every device agrees). Add it to the home screen and it opens like an app, with the orb as its icon |
 | Workshop | she builds features on herself, with his say at every step. He writes down what he wants (the control room's Workshop tab, `/idea`, or in words); she plans it; he says build; Claude Code builds it in a clone of her repo on its own branch (file tools scoped to the clone, no secrets in its environment), a guard in code refuses anything touching her safety rules (`deploy/protected.txt`, the hard lines, the owner checks) or carrying a credential, the tests and GitHub CI must pass; then it waits in **Ready for you**. **Accept** merges it and the box upgrades itself (`scripts/upgrade.sh`: health check, automatic rollback); **Undo** reverts it; **Deny** (with why) teaches her. At 1:10 AM she builds what he queued and one idea of her own, on Sonnet (`WORKSHOP_MODEL`), so there's a pipeline in the morning. Needs a GitHub token (DEPLOY 7h) |
@@ -109,6 +110,7 @@ with `SKILLS_DISABLED`.
 | Markets | `/watch AAPL`, `/watch btc, nvda`, `/unwatch AAPL`, `/markets`, "how's the market?", "what's bitcoin at?" | delayed quotes from Yahoo's chart API (CoinGecko for crypto when Yahoo won't answer), no key; with an empty list, the S&P 500, the Nasdaq and Bitcoin. In FACTS only from the cache, so no reply waits on a quote. She reports prices; she never trades or says what to buy |
 | News | "what's in the news?", "what's the news on the Broncos?", `/news tech`, `/news follow formula 1` | Google News RSS for `NEWS_REGION`, no key. Headlines are outside text: flattened to a line each, an answer that reads them is tainted (stored untrusted), and none ever goes in FACTS |
 | Whoop | "how did I sleep?", "what's my recovery?", `/whoop` | recovery, HRV, resting HR, last night's sleep and today's strain from Whoop's API (read-only), plus its workouts. Needs an app and `scripts/whoop_auth.py` (DEPLOY 7j); Whoop swaps the refresh token on every use, so she keeps the current one on her volume, never in the database or a backup |
+| Recent | "what did I just capture?", "last 5 captures", "what did I capture today?", `/recent`, `/recent 5`, `/recent today` | what he last saved by hand (`/idea`, `/remember`, `/followup`, `/list`, `/promise`, `/remind`, `/spent`), newest first, with when and where it went. Reads only; her own ideas, what she learns overnight, timers and snoozes aren't his captures |
 
 Everything a skill puts in FACTS is a row from SQL or a number from an API,
 never third-party text, and skill lines come **after** the school rows, so a
@@ -570,7 +572,8 @@ sloane/
   skills/
     __init__.py  the contract and the registry
     lists.py countdowns.py weather.py cards.py habits.py clients.py
-    plan.py focus.py birthdays.py money.py memory.py colleges.py deca.py coin.py
+    plan.py focus.py birthdays.py money.py memory.py colleges.py deca.py coin.py recent.py
+    workouts.py markets.py news.py whoop.py workshop.py
   memory/
     store.py     THE ONLY FILE THAT TALKS SQL
     embed.py     fastembed, 384-dim, local

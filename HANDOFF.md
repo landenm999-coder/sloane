@@ -410,6 +410,13 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
 - **The coin skill** (`sloane/skills/coin.py`, workshop item `/coin`): `/coin`, "flip a coin", "heads or tails?"
   give Heads or Tails from `secrets`. No SQL, no setting, no migration. `tests/test_coin.py` pins the
   command, both sides, and phrases it must not catch. Awaiting Landen's review.
+- **The recent skill** (`sloane/skills/recent.py`, workshop item "Show what I just captured"): `/recent`,
+  `/recent 5`, `/recent today`, and "what did I just capture?" show his latest hand-saved items (/idea,
+  /remember, /followup, /list, /promise, /remind, /spent), newest first, with when and where each went.
+  Reads only: one `Store.recent_captures` query (in its own section at the end of `Store`), no table, no
+  migration. `tests/test_recent.py` (integration, listed in run.py). Her build had no shell to run it, and
+  its first CI run failed: the test's `like 'learned.%'` with no parameters is a bad placeholder to
+  psycopg. Fixed (the pattern is a parameter), `main` merged in; the whole suite passes. Awaiting review.
 
 - **The workshop reaching the box** (landenm999-coder/sloane#15 is merged): rerunning `install.sh` installs
   the upgrader (`.deploy/`, `host.json`, `sloane-upgrade.path`), applies `sql/031` and asks for

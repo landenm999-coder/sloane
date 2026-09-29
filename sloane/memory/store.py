@@ -2548,6 +2548,43 @@ class Store:
     async def unwatch(self, symbol: str) -> bool:
         return await self._one("delete from watchlist where symbol = %s returning symbol", (symbol,)) is not None
 
+    # -- recent (reads only; no table of its own) -----------------------------------------------
+
+    async def recent_captures(self, limit: int, since: datetime | None = None) -> list[Row]:
+        """What he last saved by hand, newest first: kind, what, place, at.
+
+        One row per save across /idea, /remember, /followup, /list, /promise, /remind and /spent.
+        Only his own saves: not her ideas, nightly-learned facts, timers or snoozes.
+        """
+        return await self._fetch(
+            """
+            select * from (
+              select 'idea' as kind, title as what, status as place, created_at as at
+                from workshop_items where origin = 'him' and kind = 'build'
+              union all
+              select 'remember', value, null, updated_at
+                from state where category = 'learned' and pinned and source like 'told%%'
+              union all
+              select 'followup', summary, due_on::text, opened_at
+                from working_set where kind = 'follow_up'
+              union all
+              select 'list', item, list, added_at from list_items
+              union all
+              select 'promise', what, null, promised_at from commitments
+              union all
+              select 'remind', text, due_at::text, created_at
+                from reminders where source in ('telegram', 'capture') and cancelled_at is null
+              union all
+              select 'spent', what, category || ' ' || cents::text, created_at
+                from expenses where archived_at is null
+            ) captured
+             where (%s::timestamptz is null or at >= %s)
+             order by at desc
+             limit %s
+            """,
+            (since, since, limit),
+        )
+
 
 async def remember(what: str, coro: Awaitable[T]) -> T | None:
     """Run a memory write that must never cost us the reply.
