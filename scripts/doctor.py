@@ -28,7 +28,7 @@ EXPECTED_TABLES = {
     "emails", "reminders", "school_changes", "alerts", "skill_sessions", "nudges_said",
     "list_items", "countdowns", "cards", "card_reviews", "habits", "habit_log",
     "clients", "client_notes", "focus_sessions", "expenses", "skill_settings",
-    "colleges", "college_tasks", "roleplays", "capture_refs", "workshop_items",
+    "colleges", "college_tasks", "roleplays", "capture_refs", "workshop_items", "dashboard_prefs",
 }
 
 PASS, FAIL, SKIP, WARN = "PASS", "FAIL", "SKIP", "WARN"
@@ -138,7 +138,7 @@ async def check_provider(config: Settings, name: str, label: str, *, bulk: bool)
 
     provider = build(name, config, bulk=bulk)
     try:
-        completion = await provider.complete("Reply with the single word: ok", "ok", max_tokens=16)
+        completion = await provider.complete("Reply with the single word: ok", "ok", max_tokens=512)
     except ProviderError as exc:
         record(label, FAIL, f"{name} is configured but the call failed: {exc.message}")
         return
@@ -165,7 +165,7 @@ async def check_fallbacks(config: Settings) -> None:
             record(f"fallback: {name}", SKIP, "not set up (optional; LOCAL_MODELS.md)")
             continue
         try:
-            await provider.complete("Reply with the single word: ok", "ok", max_tokens=16)
+            await provider.complete("Reply with the single word: ok", "ok", max_tokens=512)
         except ProviderError as exc:
             record(
                 f"fallback: {name}",

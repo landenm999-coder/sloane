@@ -18,7 +18,9 @@ from sloane.providers.base import Completion, Provider, ProviderError, Usage
 class GroqProvider(Provider):
     name = "groq"
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, transport: httpx.AsyncBaseTransport | None = None) -> None:
+        # `transport` is for tests: a stub that sees the request instead of Groq.
+        self._transport = transport
         self._key = settings.groq_api_key
         self._base = settings.groq_base_url.rstrip("/")
         self._model = settings.groq_model
@@ -34,20 +36,26 @@ class GroqProvider(Provider):
         if not self._key:
             raise ProviderError(self.name, "GROQ_API_KEY is not set")
 
+        body: dict = {
+            "model": self._model,
+            "max_tokens": max_tokens,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": prompt},
+            ],
+        }
+        # gpt-oss reasons before it answers, and the reasoning counts against max_tokens:
+        # at its default effort a short budget is spent thinking and the answer comes back
+        # empty. Low effort leaves room for the words.
+        if "gpt-oss" in self._model:
+            body["reasoning_effort"] = "low"
         started = time.monotonic()
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
+            async with httpx.AsyncClient(timeout=60.0, transport=self._transport) as client:
                 response = await client.post(
                     f"{self._base}/chat/completions",
                     headers={"Authorization": f"Bearer {self._key}"},
-                    json={
-                        "model": self._model,
-                        "max_tokens": max_tokens,
-                        "messages": [
-                            {"role": "system", "content": system},
-                            {"role": "user", "content": prompt},
-                        ],
-                    },
+                    json=body,
                 )
         except httpx.HTTPError as exc:
             raise ProviderError(self.name, f"network error: {exc}") from exc
@@ -86,7 +94,7 @@ class GroqProvider(Provider):
         if not self._key:
             raise ProviderError(self.name, "GROQ_API_KEY is not set")
         try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
+            async with httpx.AsyncClient(timeout=120.0, transport=self._transport) as client:
                 response = await client.post(
                     f"{self._base}/audio/transcriptions",
                     headers={"Authorization": f"Bearer {self._key}"},
