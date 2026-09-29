@@ -169,6 +169,13 @@ async def main() -> None:
           sorted(store.workouts.values()), sorted([("run", 40, 6437, datetime(2026, 9, 28).date()),
                                                    ("lift", 45, None, datetime(2026, 9, 29).date())]))
 
+    # -- the heartbeat syncs workouts without anyone asking -------------------------------------------
+    store.workouts.clear()
+    now[0] += 16 * 60
+    calls = len(Stub.api_calls)
+    check("the heartbeat says nothing, but syncs",
+          (await skill.nudges(), len(Stub.api_calls) > calls, len(store.workouts)), ([], True, 2))
+
     # -- a restart: the token on the volume, not the used-up one in .env -----------------------------
     now[0] += 16 * 60
     again = build(SkillContext(store=store, config=config(), clock=clock))

@@ -16,7 +16,8 @@ log line or a reply.
 
 Numbers from the API are structured values, so they may go in FACTS, but only
 from the cache (fetched at most every 15 minutes): FACTS never waits on Whoop.
-Workouts Whoop records are logged in the workouts skill's table, once each.
+Workouts Whoop records are logged in the workouts skill's table, once each, as soon as the heartbeat's
+next visit sees them (not only when he asks).
 """
 
 from __future__ import annotations
@@ -36,7 +37,7 @@ from typing import Any
 
 import httpx
 
-from sloane.skills import Answer, Skill, SkillContext
+from sloane.skills import Answer, Nudge, Skill, SkillContext
 
 log = logging.getLogger(__name__)
 
@@ -346,6 +347,15 @@ class Whoop(Skill):
         if d.strain is not None:
             parts.append(f"strain so far {d.strain:.1f}")
         return [f"- WHOOP today: {', '.join(parts)}"] if parts else []
+
+    async def nudges(self) -> list[Nudge]:
+        """Says nothing. The heartbeat's visit keeps the cache warm, so his Whoop workouts reach the workouts
+        table without anyone asking Whoop (day() fetches at most every 15 minutes)."""
+        try:
+            await self.day()
+        except WhoopUnavailable:
+            pass
+        return []
 
     async def panel(self) -> dict | None:
         try:
