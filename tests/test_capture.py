@@ -203,8 +203,8 @@ async def main() -> None:
     posts = sorted(r.path for r in create_app().routes if "POST" in getattr(r, "methods", set()))
     check("POST routes", posts, [
         "/api/chat", "/api/followups/{item_id}/close", "/api/jobs/{name}/run", "/api/memory/forget",
-        "/api/prefs", "/api/proposals/{proposal_id}/{decision}", "/api/reminders/{reminder_id}/cancel", "/api/trust/revoke",
-        "/api/voice", "/api/workshop/ideas", "/api/workshop/{item_id}/{verb}",
+        "/api/prefs", "/api/proposals/{proposal_id}/{decision}", "/api/reminders/{reminder_id}/cancel", "/api/speak",
+        "/api/trust/revoke", "/api/voice", "/api/workshop/ideas", "/api/workshop/{item_id}/{verb}",
         "/app/login", "/app/logout", "/capture", "/jobs/{name}/run", "/sync",
     ])
 

@@ -305,14 +305,23 @@ everything she runs. The bare address, `/`, opens it too.
   step), or needs you. The line beside it says what.
 - **Talk:** on a laptop the chat is always open on the right; on a phone it's
   its own tab. Type, or tap the microphone and speak (it needs the `https://`
-  address below and `GROQ_API_KEY`, or a local Whisper). **Read aloud** has the
-  browser read her replies to you.
-- **Today:** the day as a timeline (classes, shifts, reminders, focus blocks,
-  what's due) with a line at now, and a Tomorrow toggle. The header counts
-  what's **waiting on you** (approvals, anything broken or failed, overdue work,
-  workshop builds) and what's due this week; tap either for the list. Beside the
-  timeline are panels: weather, countdowns, the workshop, habits, focus, grades,
-  the week, what she learned today, colleges (a phone shows three you swipe).
+  address below, or `localhost` through the SSH tunnel, and `GROQ_API_KEY`, or a
+  local Whisper). **Talk** (or tap the big orb) starts a hands-free call: just
+  talk, pause when you're done, and she answers out loud in her own voice (the
+  one her voice notes use), then listens again. Tap the orb to cut her off;
+  **End** or Esc hangs up. The speaker button has her say every reply, typed or
+  not. Small talk on a call is answered by her fast model (`QUICK_PROVIDER`,
+  Groq), a second or so; anything she has to do or look up goes to Claude.
+- **Today:** your day as a timeline (your calendar, shifts, reminders, a focus
+  session running) with a line at now, and a Tomorrow toggle. The header counts
+  what's **waiting on you** (approvals, anything broken or failed, workshop
+  builds) and emails to answer. Beside the timeline, every panel: weather, Whoop,
+  workouts, markets, your inbox, habits, news, focus, money, countdowns, lists,
+  birthdays, clients, one small **School** panel (due soon, overdue, grades; tap
+  a count for the list), the workshop, and what she learned today. One with
+  nothing in it yet says what it's for, with a button to start it. A phone
+  shows three you swipe. Grades, the week, colleges, flashcards and DECA have
+  panels of their own, off until you turn them on (Engine → Panels).
 - **Memory:** what she knows about you (filter it, forget anything), loose ends, her diary.
 - **Workshop:** what she's building on herself (7h).
 - **Engine:** how she's running, jobs you can run now, what she may do without
@@ -338,6 +347,18 @@ browser asks to use it; say yes. It is reachable only
 from your own tailnet devices, and even there it needs the password. Changing
 `DASHBOARD_TOKEN` (and restarting) signs every device out.
 
+**No Tailscale on this computer?** Use an SSH tunnel instead. In PowerShell (or
+any terminal), with your key and the box's IP:
+
+```
+ssh -i "C:\path\to\ssh-key.key" -L 8000:127.0.0.1:8000 ubuntu@YOUR.SERVER.IP
+```
+
+Leave that window open and go to `http://localhost:8000/app`. Nothing is
+opened to the internet: the page travels inside the SSH connection. If the page
+looks out of date after an upgrade, press Ctrl+Shift+R (the page refreshes its
+data every minute, not its own code).
+
 ## 7f. Optional: the TV dashboard (2 minutes)
 
 With `tailscale serve` from 7d running, open `https://<box>.<tailnet>.ts.net/tv`
@@ -357,6 +378,9 @@ WEATHER_LOCATION=39.52,-104.76   # already set for Parker; blank turns weather o
 PAY_RATE=15                      # your hourly pay, for "about $240 earned this week"
 PLAN_BEDTIME=22:30               # when /plan stops filling your evening
 ```
+
+Markets (`/watch AAPL`) and news (`/news follow <topic>`) need no key.
+`NEWS_REGION=GB` (or CA, AU, IN...) picks the news edition; US is the default.
 
 `SKILLS_DISABLED=money,habits` switches skills off by name. `doctor.py` lists
 which skills loaded and checks the weather reaches Open-Meteo.
@@ -400,6 +424,40 @@ the upgrader is installed. Also on Telegram: `/idea <what you want>` and
 `/workshop`. Settings: `WORKSHOP_MODEL`, `WORKSHOP_NIGHTLY`, `NIGHTLY_BUILDS`,
 `NIGHTLY_OWN_IDEAS` (`.env.example`).
 
+## 7j. Optional: Whoop (about 5 minutes, once)
+
+With this she knows your recovery, last night's sleep and today's strain ("how
+did I sleep?"), the control room shows them, and Whoop's workouts land in your
+workouts on their own. Read-only: she can't change anything in Whoop.
+
+1. Go to **developer.whoop.com**, sign in with your Whoop account, and
+   **Create App**. Any name. **Redirect URL**: `http://localhost:8765`. Tick the
+   scopes **read:recovery**, **read:cycles**, **read:sleep**, **read:workout**,
+   **read:profile** and **offline**.
+2. Copy its **Client ID** and **Client Secret** into `.env` on the box (they're
+   passwords: only there):
+
+   ```bash
+   nano /opt/sloane/.env    # WHOOP_CLIENT_ID=...  WHOOP_CLIENT_SECRET=...
+   ```
+
+3. On the box, outside Docker:
+
+   ```bash
+   cd /opt/sloane && python3 scripts/whoop_auth.py
+   ```
+
+   Open the link it prints (on your PC is fine), sign in, allow it. The browser
+   lands on a localhost page that won't load; that's expected. Copy that whole
+   address from the address bar and paste it into the box. It saves
+   `WHOOP_REFRESH_TOKEN` to `.env`.
+4. `sudo systemctl restart sloane`. The Whoop panel fills in within a minute.
+
+Whoop replaces the refresh token every time it's used, so she keeps the
+current one on her volume (`/var/lib/sloane/models/whoop.json`), never in the
+database or a backup. If she ever says Whoop refused her, run step 3 again and
+restart.
+
 ## 8. Run her
 
 ```bash
@@ -434,6 +492,10 @@ Each of these should work on day one. If one doesn't, `/status` and
 | forward her a friend's text | who it's from, what they want, and a reply you could send; `make it shorter` still sees it |
 | `remember that I'm vegetarian now`, then `/memory` | "Got it.", and it's listed; a correction later replaces it |
 | open `https://<box>.<tailnet>.ts.net/app` (7e) | the control room: talk to her there too, see your day, approve, run a job |
+| in the control room, press **Talk** and say "how's it going?", then "remind me in 5 minutes to stretch" | she answers out loud in a second or so, then does the reminder (a moment longer: that's Claude), and listens again |
+| `ran 3 miles`, `/workout goal 4`, then "how many workouts this week?" | logged, and the week against your goal (the Workouts panel too) |
+| `/watch NVDA`, then "how's the market?" | your watchlist's prices, up or down today |
+| "what's in the news?", then `/news follow broncos` | the top two headlines read out, the rest listed; the topic on your News panel |
 | Workshop tab: add "a /coin command that flips a coin", press **Build now** (7h) | a plan, then a few minutes later "Built and tested", Ready for you with what changed; Accept and she's back with it live |
 | `put batteries on the grocery list and remind me at 7 to charge the car` | both done in one go, each result shown under her reply |
 | `who won the Broncos game?` | "Checking.", then the answer with a source |
@@ -482,7 +544,10 @@ graduation may 22`, "is it going to rain?", `/card bio: q :: a` then `/quiz`,
 `/plan` for tonight, `/focus 25 essay`, `/birthday Keegan mar 3`, "spent 12 on
 lunch", `/college add CU Boulder EA nov 1` then "what's left for Boulder?", `/roleplay`
 for DECA practice (she plays the judge; answer by voice note for the real thing). `/end`
-stops a quiz or a role-play.
+stops a quiz or a role-play. "Ran 3 miles" or "45 minutes of lifting" logs a workout
+(`/workout goal 4` sets a weekly goal); `/watch NVDA` adds to your markets watchlist and
+"how's the market?" reads it; "what's in the news?" reads the headlines and
+`/news follow broncos` puts a topic on your news panel; "how did I sleep?" asks Whoop (7j).
 
 **College applications, first.** It's application season, so add every school you're
 applying to now: `/college add <school> <EA|ED|RD> <deadline>` (several at once, one per
@@ -497,7 +562,7 @@ weeks, a week, three days and a day out, and the morning of.
 **Backups.** Every night at 12:30 she writes what only you could recreate
 (state, promises, people, courses, trust, reminders, and every skill's data:
 lists, countdowns, flashcards, habits, clients, focus, spending, college
-applications, role-play scores) to
+applications, role-play scores, workouts, your watchlist) to
 `/var/lib/sloane/models/backups/sloane-YYYY-MM-DD.json` inside the `models`
 volume, keeping 14. Copy one off the box with
 `docker cp sloane:/var/lib/sloane/models/backups ./sloane-backups`.

@@ -16,16 +16,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from sloane.config import Settings, settings as default_settings
-from sloane.contract import Reply, parse
+from sloane.contract import Reply, loads_lenient, parse
 from sloane.jobs.conflicts import find as find_conflicts, render as render_conflicts
 from sloane.memory.embed import Embedder, EmbedUnavailable
 from sloane.memory.store import Store, remember
 from sloane.memory.tiers import assemble, conversation_that_fits, prioritize_state, usage_sink
-from sloane.persona import system_prompt
+from sloane.persona import QUICK, system_prompt
 from sloane.router import NoProviderAvailable, Router
 from sloane.skills import Registry
 
@@ -61,6 +62,33 @@ HARD_LINES: frozenset[tuple[str, str]] = frozenset(
 # check for "telegram" alone never matched one, and every recent exchange came
 # back a second time as RECALL, crowding out older memories.
 CHAT_CHANNELS = frozenset({"telegram", "text", "voice", "dashboard"})
+
+# A spoken turn on the fast model sees less: enough to talk (who he is, today, the
+# last few exchanges), a third of what the main lane reads. Groq's free tier counts
+# tokens a day, so a lighter prompt is more turns before it's spent.
+QUICK_BUDGETS = {"budget_state": 600, "budget_working_set": 400, "budget_episodes": 500,
+                 "budget_entities": 1200, "budget_conversation": 1200}
+# Asking her to DO something goes straight to the main lane (which can act),
+# not via the fast model and a hand-off. Only verbs: "what's on my list" can be
+# answered from what she's shown.
+_HANDS = re.compile(
+    r"\b(?:remind|add|set|schedule|reschedule|book|send|e-?mail|text|message|draft|reply|plan|build|make|"
+    r"create|change|cancel|move|delete|remove|remember|forget|look\s+(?:it\s+|that\s+)?up|search|google|"
+    r"research|order|buy|track|log|mark|write|save|start|stop|turn\s+(?:on|off)|pause|play|note\s+that)\b",
+    re.I)
+
+
+def needs_hands(text: str) -> bool:
+    """He's asking her to do something: the main lane's job, not the fast model's."""
+    return bool(_HANDS.search(text or ""))
+
+
+def _handed_off(raw: str) -> bool:
+    """The fast model said this one is for her full self ({"handoff": true})."""
+    data = loads_lenient(raw)
+    if isinstance(data, dict) and data.get("handoff"):
+        return True
+    return (raw or "").strip().strip('"`').upper().startswith("HANDOFF")
 
 
 def _stamp(moment: datetime) -> str:
@@ -229,6 +257,7 @@ class Agent:
         on_text=None,  # noqa: ANN001 - async (raw text so far) -> None, to show it as it's written
         can_act: bool = False,
         persist: bool = True,
+        quick: bool = False,
     ) -> Reply:
         """One turn. Returns a Reply even when the model is unreachable.
 
@@ -238,6 +267,10 @@ class Agent:
 
         `persist=False` keeps the turn out of her episodes (the think job: a
         silent "nothing to say" is not a memory).
+
+        `quick`: he said it out loud and is waiting to hear her. The fast model
+        (QUICK_PROVIDER) answers if it can; anything to do, look up or think
+        through goes to the main lane as usual (see `_quick`).
         """
         can_act = can_act and not ingested.strip()
         # Landen's clock, never the container's. Docker runs in UTC, and from
@@ -278,34 +311,44 @@ class Agent:
         if collisions:
             log.info("%s conflict(s) found for %s", len(collisions), when)
 
-        context = assemble(
-            state=prioritize_state(tiers["state"], question),
-            working_set=tiers["working_set"],
-            assignments=tiers["assignments"],
-            overdue=tiers["overdue"],
-            shifts=tiers["shifts"],
-            courses=tiers["courses"],
-            commitments=tiers["commitments"],
-            events=tiers["events"],
-            reminders=tiers["reminders"],
-            skill_facts=tiers["skills"],
-            conflicts=render_conflicts(collisions, self._config.timezone),
-            episodes=episodes,
-            conversation=conversation,
-            ingested=ingested,
-            config=self._config,
-        )
-        context.notes.extend(notes)
-        # Relative dates ("Friday", "tonight") are only answerable against a
-        # stated now. The Claude CLI happens to inject the date into its own
-        # prompt; Groq and the API do not, and a model guessing today is a
-        # model guessing deadlines.
-        context.now = (
-            _stamp(now_local)
-            if when == now_local.date()
-            else f"{when:%A %B} {when.day}, {when:%Y}"
-        )
+        def assembled(config: Settings):  # noqa: ANN202 - tiers.Context
+            ctx = assemble(
+                state=prioritize_state(tiers["state"], question),
+                working_set=tiers["working_set"],
+                assignments=tiers["assignments"],
+                overdue=tiers["overdue"],
+                shifts=tiers["shifts"],
+                courses=tiers["courses"],
+                commitments=tiers["commitments"],
+                events=tiers["events"],
+                reminders=tiers["reminders"],
+                skill_facts=tiers["skills"],
+                conflicts=render_conflicts(collisions, self._config.timezone),
+                episodes=episodes,
+                conversation=conversation,
+                ingested=ingested,
+                config=config,
+            )
+            ctx.notes.extend(notes)
+            # Relative dates ("Friday", "tonight") are only answerable against a
+            # stated now. The Claude CLI happens to inject the date into its own
+            # prompt; Groq and the API do not, and a model guessing today is a
+            # model guessing deadlines.
+            ctx.now = (
+                _stamp(now_local)
+                if when == now_local.date()
+                else f"{when:%A %B} {when.day}, {when:%Y}"
+            )
+            return ctx
 
+        if quick and not ingested.strip() and not needs_hands(question):
+            fast = await self._quick(question, assembled(self._config.model_copy(update=QUICK_BUDGETS)), on_text)
+            if fast is not None:
+                if persist:
+                    self._later(self._persist(question, fast, channel=channel, answered=True))
+                return fast
+
+        context = assembled(self._config)
         prompt = context.to_prompt(question)
         log.info(
             "context assembled: %s tokens (%s)",
@@ -341,6 +384,32 @@ class Agent:
         if persist:
             self._later(self._persist(question, reply, channel=channel, answered=True, origin=origin))
         return reply
+
+    async def _quick(self, question: str, context, on_text) -> Reply | None:  # noqa: ANN001
+        """A spoken turn on the fast model, or None to hand it to the main lane.
+
+        None when the fast model says it's not one for it ({"handoff": true}),
+        when it tries to act or look something up anyway (it may not), when it
+        says nothing, or when it can't be reached (over Groq's daily cap, down).
+        """
+        async def shown(text: str) -> None:
+            # A hand-off streaming in is never shown as if it were an answer.
+            if on_text is not None and '"handoff"' not in text[:40] and not text.lstrip().upper().startswith("HAND"):
+                await on_text(text)
+
+        try:
+            raw = await self._router.quick(system_prompt(QUICK, address=self._config.address_as),
+                                           context.to_prompt(question), on_text=shown if on_text else None)
+        except NoProviderAvailable as exc:
+            log.info("quick lane unavailable, the main lane answers: %s", exc)
+            return None
+        if _handed_off(raw):
+            log.info("quick lane handed off: %s", question[:60])
+            return None
+        reply = parse(raw)
+        if reply.actions or reply.lookup or not reply.speech.strip():
+            return None
+        return Reply(speech=reply.speech, detail=reply.detail)
 
     async def _looked_up(self, question: str, first: Reply, context, on_text) -> Reply:  # noqa: ANN001
         """Run the web lookup her first reply asked for, then answer from it.

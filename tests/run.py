@@ -44,13 +44,16 @@ UNIT = [
     "test_local.py",
     "test_web.py",  # its integration half runs when DATABASE_URL is set
     "test_workshop.py",  # likewise
+    "test_markets.py",  # likewise
+    "test_news.py",
+    "test_whoop.py",
 ]
 INTEGRATION = [
     "test_store.py", "test_school.py", "test_jobs.py", "test_agency.py", "test_mail.py",
     "test_reminders.py", "test_watchdog.py", "test_capture.py",
     "test_promises.py", "test_weekly.py", "test_heartbeat.py", "test_lists.py",
     "test_countdowns.py", "test_cards.py", "test_habits.py", "test_clients.py", "test_plan.py", "test_focus.py", "test_birthdays.py", "test_money.py",
-    "test_colleges.py", "test_deca.py", "test_hello.py", "test_boot.py",
+    "test_colleges.py", "test_deca.py", "test_workouts.py", "test_hello.py", "test_boot.py",
 ]
 
 

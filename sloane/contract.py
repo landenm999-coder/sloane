@@ -30,6 +30,14 @@ _LABELLED = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
+# Tool-call markup her model sometimes writes although `claude -p` gives it no
+# tools: "<invoke name="noop"></invoke>" before the JSON, "<answer></answer>"
+# mid-reply, even "<invoire>". Never part of what she says. Only these names,
+# so "<3" or "a < b" in a real reply is left alone.
+_STRAY = re.compile(r"</?(?:invo\w*|answer|function_calls?|parameters?|tool_\w+|antml:\w+)\b[^<>]*>", re.I)
+# A stray tag still being written at the end of a stream ("<invo").
+_STRAY_OPEN = re.compile(r"</?(?:i(?:n(?:v(?:o\w*)?)?)?|a(?:n(?:s(?:w(?:er?)?)?)?)?)?$", re.I)
+
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 _URL = re.compile(r"(?:https?://|www\.)\S+", re.IGNORECASE)
 _MD_LINK = re.compile(r"\[([^\]]*)\]\(([^)]*)\)")
@@ -61,6 +69,14 @@ class Reply:
     def __post_init__(self) -> None:
         if not isinstance(self.speech, str) or not isinstance(self.detail, str):
             raise TypeError("speech and detail must both be strings")
+
+
+def unstray(text: str) -> str:
+    """The model's output without stray tool-call tags; the blank lines they leave, closed up."""
+    if "<" not in text:
+        return text
+    cleaned = _STRAY.sub("", text)
+    return re.sub(r"\n[ \t]*(?:\n[ \t]*)+", "\n\n", cleaned) if cleaned != text else text
 
 
 def sentences(text: str) -> list[str]:
@@ -122,6 +138,28 @@ def _try_json(blob: str) -> Reply | None:
         return _from_mapping(json.loads(blob))
     except (ValueError, TypeError):
         return None
+
+
+def _each_object(text: str) -> Reply | None:
+    """The first JSON object in `text` that is a reply, read where it starts and no further.
+
+    For a reply followed by more text with a brace in it (a second object, the
+    "{}" a stray tag leaves): the greedy first-to-last-brace match spans all of
+    it and reads as nothing, and the command she wrote was lost.
+    """
+    decoder = json.JSONDecoder()
+    at = text.find("{")
+    while at >= 0:
+        try:
+            data, end = decoder.raw_decode(text, at)
+        except ValueError:
+            at = text.find("{", at + 1)
+            continue
+        found = _from_mapping(data) if isinstance(data, dict) else None
+        if found is not None:
+            return found
+        at = text.find("{", end)
+    return None
 
 
 def closed(text: str) -> str | None:
@@ -222,11 +260,16 @@ def partial_reply(raw: str) -> tuple[str, str]:
     which is what the contract promises. Prose (she sometimes skips the JSON)
     is shown as it comes, as speech.
     """
-    text = (raw or "").lstrip()
+    text = _STRAY_OPEN.sub("", unstray(raw or "")).lstrip()
     if text.startswith("```"):
         text = text.split("\n", 1)[1] if "\n" in text else ""
     if not text:
         return "", ""
+    # Prose, then the JSON after all ("Here is the reply as intended: {..."): once
+    # the JSON starts, it's the reply.
+    start = text.find('{"')
+    if start > 0:
+        text = text[start:]
     if not text.startswith("{"):
         # She answered in prose, not the JSON shape: show it as it comes (parse()
         # still decides what the finished reply is).
@@ -243,7 +286,7 @@ def parse(raw: str) -> Reply:
     Shape 4  labelled plain text -- "Speech: ... Detail: ..."
     Shape 5  unstructured prose -- detail is all of it, speech is derived
     """
-    text = (raw or "").strip()
+    text = unstray(raw or "").strip()
     if not text:
         return Reply(speech="", detail="")
 
@@ -261,7 +304,7 @@ def parse(raw: str) -> Reply:
     # 3 -- a JSON object embedded in prose. Greedy, so nested braces survive.
     match = _FIRST_OBJECT.search(text)
     if match is not None:
-        found = _try_json(match.group(0))
+        found = _try_json(match.group(0)) or _each_object(text)
         if found is not None:
             return found
 

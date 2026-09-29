@@ -139,6 +139,44 @@ for hostile in ["", "   ", "{", "{}", "[]", "null", '{"unrelated": 1}', "```\n``
 # so the raw text is still preserved rather than silently dropped.
 check("unrelated json keeps its text", parse('{"unrelated": 1}').detail, '{"unrelated": 1}')
 
+# --- stray tool-call markup ---------------------------------------------------
+# `claude -p` runs with no tools, and some days its model writes one anyway:
+# "<invoke name="noop"></invoke>" before the JSON (4 of 6 replies to one eval
+# question on 2026-09-29), "<answer></answer>" mid-reply, or a misspelled
+# "<invoire> </invoire>" as the whole of it. Parsed as it was, the tag became
+# her detail and the command she'd written ("do") was lost: the eval's
+# "put AA batteries on my grocery list" failed its critical check on it.
+TAG_FIRST = '\n<invoke name="noop"></invoke>\n```json\n{"speech": "On it.", "detail": "On it.", "do": ["/list add grocery: AA batteries"]}\n```'
+got = parse(TAG_FIRST)
+check("a stray tag before the JSON: the reply and its command", (got.speech, got.detail, got.actions),
+      ("On it.", "On it.", ("/list add grocery: AA batteries",)))
+got = parse('On it: batteries are on the list.\n\n<invoke name="none"></invoke>')
+check("a stray tag after prose never becomes the detail", (got.speech, got.detail),
+      ("On it: batteries are on the list.", "On it: batteries are on the list."))
+check("a reply that's only a stray tag is nothing, not the tag", parse("<invoire> </invoire>\n<invoke>\n</invoke>"),
+      Reply(speech="", detail=""))
+got = parse("Sure.\n<answer>\n</answer>\nSee you at 5.")
+check("prose with a tag in it keeps the prose, and only the prose", (got.speech, got.detail), ("Sure.", "See you at 5."))
+check("real text with angle brackets is left alone", parse("Scored <3 min on the mile, and a < b.").speech,
+      "Scored <3 min on the mile, and a < b.")
+check("streaming: the stray tag and the fence aren't shown, the speech is",
+      partial_reply('\n<invoke name="noop"></invoke>\n```json\n{"speech": "On it: AA batt'), ("On it: AA batt", ""))
+check("streaming: a tag still being written isn't shown either", partial_reply("<invo"), ("", ""))
+check("streaming: prose, a fragment, then the JSON: once the JSON starts, its speech",
+      partial_reply('On it.\n\n<answer>\n</answer>\n\nSorry, a stray fragment. As intended:\n\n{"speech": "On it, batt'),
+      ("On it, batt", ""))
+
+# Prose, then the JSON, then more with a brace in it: the eval's critical "just
+# finished my Boulder essays" came back with its /college command as text in the
+# detail, because the first-to-last-brace match took in what followed the reply.
+COLLEGE = '{"speech": "Marking the Boulder essays done.", "detail": "Marking the Boulder essays done.", "do": ["/college CU Boulder done Essays"]}'
+for label, tail in (("a second object", '\n\n{"speech": "Marking them done.", "detail": "Marking them done."}'),
+                    ("the {} a stray tag leaves", '\n\n<invoke name="noop">{}</invoke>'),
+                    ("a stray closing brace", "\n\n}")):
+    got = parse("Marking the essays done for CU Boulder.\n\n" + COLLEGE + tail)
+    check(f"the reply, then {label}: its command still runs", (got.speech, got.actions),
+          ("Marking the Boulder essays done.", ("/college CU Boulder done Essays",)))
+
 # --- speech never carries a URL, whatever the shape -------------------------
 for raw in [
     '{"speech": "See https://x.test/a", "detail": "d"}',
