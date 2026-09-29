@@ -636,10 +636,19 @@ function jobLabel(item) {
   return item.kind === "shift" ? "Work" : item.title.replace(/^Focus: /, "");
 }
 
+// A title cut to fit a line: "What was your biggest struggle…".
+function clip(text, most = 28) {
+  text = String(text || "");
+  return text.length > most ? text.slice(0, most - 1).trimEnd() + "…" : text;
+}
+
 // The header's countdown: work first (on it, or the next shift today), else what's next, else what's on.
+// Real things only: shifts, events, a focus session he started. Her plan's suggested stretches are on
+// the timeline, not here (the countdown once read "What was your biggest struggle… in 4m").
 function nextUp(data) {
   const now = nowMinutes();
-  const blocks = (data.agenda?.today?.items || []).filter((i) => !i.all_day && (i.kind === "shift" || i.kind === "event" || i.kind === "focus"));
+  const blocks = (data.agenda?.today?.items || []).filter((i) => !i.all_day
+    && (i.kind === "shift" || i.kind === "event" || (i.kind === "focus" && i.sub === "running now")));
   const on = (i) => i.start <= now && now < i.end;
   const shiftNow = blocks.find((i) => i.kind === "shift" && on(i));
   const shiftNext = blocks.find((i) => i.kind === "shift" && i.start > now);
@@ -648,8 +657,8 @@ function nextUp(data) {
   const box = $("#next-up");
   if (shiftNow) box.textContent = `At work until ${short(shiftNow.end)}`;
   else if (shiftNext) box.textContent = `Work in ${hm(shiftNext.start - now)}`;
-  else if (next) box.textContent = `${jobLabel(next)} in ${hm(next.start - now)}`;
-  else if (current) box.textContent = `${jobLabel(current)} until ${short(current.end)}`;
+  else if (next) box.textContent = `${clip(jobLabel(next))} in ${hm(next.start - now)}`;
+  else if (current) box.textContent = `${clip(jobLabel(current))} until ${short(current.end)}`;
   box.hidden = !(shiftNow || shiftNext || next || current);
 }
 
@@ -663,13 +672,17 @@ function renderHeader(data) {
   open.hidden = !waiting;
   open.textContent = `${waiting} waiting on you`;
   open.classList.toggle("hot", !!waiting);
+  const overdue = (data.overdue || []).length;
+  const late = $("#overdue-open");
+  late.hidden = !overdue;
+  late.textContent = `${overdue} overdue`;
   const due = $("#due-open");
   due.hidden = !data.due_week;
   due.textContent = `${data.due_week} due this week`;
-  $("#links").hidden = open.hidden && due.hidden;
+  $("#links").hidden = open.hidden && late.hidden && due.hidden;
 }
 
-// -- what's waiting on him: approvals, what's broken, overdue work, builds to accept ------------
+// -- what's waiting on him: approvals, what's broken, builds to accept; overdue work apart ---------
 
 const JOBS = {
   entity_sync: "Canvas and calendar sync", morning_brief: "Morning brief", pre_shift: "Before your shift",
@@ -680,13 +693,15 @@ const JOBS = {
 function jobName(name) { return JOBS[name] || name.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase()); }
 
 function readyBuilds() { return (shop?.items || []).filter((i) => i.status === "ready"); }
+const OVERDUE_SHOWN = 12;
 
+// What needs him to act: an approval, something broken, a failed job, a build to accept. Overdue
+// work is counted on its own: with every missed Canvas item in it, this read "55 waiting on you".
 function needsCount() {
   const data = latest;
   if (!data) return 0;
   return (data.proposals || []).length + (data.alerts || []).length + (data.unreadable || []).length
-    + (data.jobs || []).filter((j) => j.status === "failed").length + (data.overdue || []).length
-    + (readyBuilds().length ? 1 : 0);
+    + (data.jobs || []).filter((j) => j.status === "failed").length + (readyBuilds().length ? 1 : 0);
 }
 
 function renderNeeds() {
@@ -714,8 +729,18 @@ function renderNeeds() {
     list.append(row("Job failed", jobName(job.name), job.error,
       [button("Run again", () => post(`/api/jobs/${job.name}/run`), "btn", { "aria-label": `Run ${jobName(job.name)} again` })], "bad"));
   }
-  for (const a of data.overdue || []) list.append(row("Overdue", a.title, [a.course, a.when].filter(Boolean).join(" · "), [], "bad"));
   if (!list.children.length) list.append(el("li", {}, el("span", { class: "empty", text: "Nothing needs you." })));
+
+  // Overdue, most recent first (the ones still worth saving), a dozen at most.
+  const overdue = data.overdue || [];
+  const late = $("#overdue-list");
+  late.replaceChildren(...overdue.slice(0, OVERDUE_SHOWN).map((a) => el("li", {},
+    el("span", { class: "text" }, a.title, el("span", { class: "sub", text: [a.course, a.when].filter(Boolean).join(" · ") })))));
+  if (overdue.length > OVERDUE_SHOWN) {
+    late.append(el("li", {}, el("span", { class: "empty", text: `And ${overdue.length - OVERDUE_SHOWN} older. Handed one in on paper? Tell her: /done and its name.` })));
+  }
+  $("#overdue-count").textContent = overdue.length ? String(overdue.length) : "";
+  $("#overdue-wrap").hidden = !overdue.length;
 
   const due = $("#due-list");
   due.replaceChildren();
@@ -731,12 +756,13 @@ const waiting = $("#waiting");
 function openWaiting(at) {
   renderNeeds();
   if (!waiting.open) waiting.showModal();
-  (at === "due" ? $("#due-title") : $("#waiting-title")).scrollIntoView({ block: "nearest" });
+  ({ due: $("#due-title"), overdue: $("#overdue-title") }[at] || $("#waiting-title")).scrollIntoView({ block: "nearest" });
   $("#waiting-close").focus();
 }
 function closeWaiting() { if (waiting.open) waiting.close(); }
 $("#waiting-open").addEventListener("click", () => openWaiting("needs"));
 $("#due-open").addEventListener("click", () => openWaiting("due"));
+$("#overdue-open").addEventListener("click", () => openWaiting("overdue"));
 $("#waiting-close").addEventListener("click", closeWaiting);
 waiting.addEventListener("click", (event) => { if (event.target === waiting) closeWaiting(); });
 
@@ -761,7 +787,8 @@ function timelineRow(item, now, live) {
   return el("li", { class: `row ${item.kind}${past ? " past" : ""}${item.all_day ? " all-day" : ""}` },
     el("span", { class: "h" }, el("span", { "aria-hidden": "true", text: item.all_day ? "all day" : short(item.start) }),
       el("span", { class: "sr", text: item.all_day ? "All day" : item.time })),
-    el("div", { class: "ev" }, el("div", {}, item.title, sub ? el("small", { text: sub }) : null), cancel));
+    el("div", { class: "ev" }, el("div", {}, el("span", { class: "t", text: item.title, title: item.title }),
+      sub ? el("small", { text: sub }) : null), cancel));
 }
 
 function renderTimeline() {
@@ -782,6 +809,15 @@ function renderTimeline() {
   }
   if (!placed) list.append(nowbar());
   if (!items.length) list.append(el("li", { class: "empty", text: live ? "Nothing on the calendar today." : "A clear day." }));
+  // Opened late in the day, the morning is behind him: start with now near the top, once.
+  if (live && !renderTimeline.scrolled) {
+    const bar = list.querySelector(".nowbar");
+    const col = list.closest(".line-col");
+    if (bar && col && col.scrollHeight > col.clientHeight) {
+      renderTimeline.scrolled = true;
+      col.scrollTop = Math.max(0, bar.offsetTop - col.offsetTop - 96);
+    }
+  }
   for (const c of day?.clashes || []) {
     list.append(el("li", { class: "clash", text: `${c.what} ${c.hard ? "clashes with" : "is tight against"} ${c.against}.` }));
   }
@@ -1050,6 +1086,28 @@ function workPanel() {
     el("div", { class: "sub", text: `${w.week_hours}h this week (${w.done_hours}h done) · ${w.last_week_hours}h last week` }));
 }
 
+// The panels he can start from the chat, and how. Shown on a desk while any of them has nothing yet,
+// so a new install's grid says how to fill it instead of sitting empty.
+const STARTERS = [
+  ["habits", "Track a habit", "/habit add "],
+  ["countdowns", "Count down to a day", "/countdown "],
+  ["colleges", "Add a college", "/college add "],
+  ["focus", "Start a focus block", "/focus 25 "],
+];
+
+function setupPanel() {
+  const missing = STARTERS.filter(([id]) => panelOn(id) && !buildPanel(id));
+  if (!missing.length) return null;
+  const chips = el("div", { class: "starts" }, ...missing.map(([, label, command]) => el("button", {
+    type: "button", class: "chip", text: label, "aria-label": `${label}: puts ${command.trim()} in the message box`,
+    onclick: () => { input.value = command; grow(); input.focus(); input.setSelectionRange(command.length, command.length); },
+  })));
+  const box = pn("Add to your day", "", chips,
+    el("div", { class: "sub", text: "Each puts a command in the message box: finish it and send. More panels in Engine → Panels." }));
+  box.classList.add("setup", "span2");
+  return box;
+}
+
 function linesPanel(p) {
   const list = el("ul", {});
   for (const text of (p.lines || []).slice(0, 6)) list.append(el("li", { text }));
@@ -1093,6 +1151,10 @@ function renderPanels() {
       if (!panelOn(id)) continue;
       const node = buildPanel(id);
       if (node) out.push(node);
+    }
+    if (out.length < DESK_PANELS) {
+      const setup = setupPanel();
+      if (setup) out.push(setup);
     }
   } else {
     // The phone's three, as he chose them; with no data for one, the next panel that's on.
@@ -1194,7 +1256,7 @@ function renderEngine(data) {
     body.append(el("tr", { class: status === "failed" ? "failed" : "" },
       el("td", {}, el("span", { class: "job-name", text: jobName(job.name) }), el("span", { class: `pill ${status}`, text: job.status }),
         el("span", { class: "job-id", text: job.name }),
-        job.error ? el("span", { class: "job-error", text: job.error }) : null),
+        job.error ? el("span", { class: status === "failed" ? "job-error" : "job-note", text: job.error }) : null),
       el("td", { class: "mono", text: job.last || "—" }),
       el("td", { class: "mono", text: job.next || "—" }),
       el("td", {}, button("Run now", () => post(`/api/jobs/${job.name}/run`), "btn", { "aria-label": `Run ${jobName(job.name)} now` }))));

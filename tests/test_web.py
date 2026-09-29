@@ -125,6 +125,14 @@ check("every orb state can be forced for review", states.group(1) if states else
 check("the old look is gone: no brass, no serif, no S badge",
       ("--brass" in css, "serif" in css.replace("sans-serif", ""), 'class="mark' in page + door), (False, False, False))
 check("the door has the orb", 'class="orb"' in door, True)
+# On his first night the header read "55 waiting on you" (every missed Canvas item) and counted down
+# to one of her suggested study stretches by its full assignment title.
+needs = re.search(r"function needsCount\(\) \{(.*?)\n\}", js, re.S)
+check("'waiting on you' is what needs him; overdue work is its own count",
+      (needs is not None and "overdue" not in needs.group(1), 'id="overdue-open"' in page), (True, True))
+upcoming = re.search(r"function nextUp\(data\) \{(.*?)\n\}", js, re.S)
+check("the header counts down to real things, never her plan's stretches, and keeps titles short",
+      (upcoming is not None and 'i.sub === "running now"' in upcoming.group(1) and "clip(" in upcoming.group(1)), True)
 
 # -- the panel choices ---------------------------------------------------------------------------
 check("nothing chosen: the defaults, and the phone's three",

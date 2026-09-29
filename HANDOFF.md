@@ -239,6 +239,19 @@ Timeline, dark only, an orb that shows what she's doing, more panels) and asked 
   on the phone. Every text colour ≥4.5:1 on every surface (`--dim` is only for strokes). Past timeline rows
   are at 45% opacity, as the design asks, which puts their text under 4.5:1.
 
+**First night on real data (2026-09-28, his Surface under WSL).** Landen installed her (Ubuntu-24.04 under
+WSL; Docker Desktop's `docker` on the Windows PATH made the installer skip installing Docker Engine, so he
+installed it by hand with get.docker.com: the installer's check should look past a `docker` under `/mnt/`,
+backlog). His screenshots showed what the seeded demo hid: the header said "55 waiting on you" (every missed
+Canvas item counted as needing him) and counted down to one of her plan's suggested stretches by its full
+assignment title; most of the grid was empty on a new install; Windows drew grey scrollbars with arrows; a
+deferred job's "gmail is not configured" was red. Fixed: "waiting" is approvals, what's broken, failed jobs
+and builds to accept, with "N overdue" its own link and popover section (a dozen, then "and N older", with
+the /done hint); the countdown is shifts, events and a running focus session, clipped to 28 characters; an
+"Add to your day" panel (dashed) offers habit/countdown/college/focus commands into the message box while
+those panels have nothing; thin dark scrollbars; a deferred job's reason is grey; timeline titles stop at
+two lines; the timeline opens scrolled to now.
+
 **She has never run against the real services.** This sandbox can't reach Telegram, Groq, Canvas, Google or
 Supabase. Everything external is tested against local stubs, and the real-model eval (via `claude -p`) scores
 58/58. The next real milestone is Landen deploying it.
@@ -353,6 +366,10 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
    needs `TELEGRAM_CHAT_ID`), and the mockup's **Market** panel (needs a market data source first).
    Drag to reorder panels (today the order is fixed; Engine → Panels switches them on and off).
 7. A weekday lunch slot for `think`, if Landen wants one (school hours are skipped today).
+8. `scripts/install.sh` under WSL with Docker Desktop installed: `command -v docker` finds Docker Desktop's
+   CLI through the Windows PATH (even with WSL integration off), so Docker Engine is never installed and the
+   run stops at "Docker here isn't a system service". Treat a `docker` resolving under `/mnt/` as absent
+   (install Engine), keeping the integration message for a `/usr/bin/docker` that links into Docker Desktop.
 
 ## Only Landen can do (the whole list; see DEPLOY.md)
 
