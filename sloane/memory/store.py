@@ -1358,7 +1358,7 @@ class Store:
     BACKUP_TABLES = ("state", "people", "commitments", "courses", "trust", "reminders", "jobs",
                      "list_items", "countdowns", "cards", "habits", "habit_log",
                      "clients", "client_notes", "focus_sessions", "expenses", "skill_settings",
-                     "colleges", "college_tasks", "roleplays", "workshop_items")
+                     "colleges", "college_tasks", "roleplays", "workshop_items", "dashboard_prefs")
 
     async def restore_rows(self, table: str, rows: Sequence[Row]) -> int:
         """Merge backed-up rows back in. Existing rows win; returns rows inserted.
@@ -1590,6 +1590,24 @@ class Store:
             """,
             (limit,),
         )
+
+    # -- the control room's panels (sql/032) ---------------------------------------------
+
+    async def dashboard_prefs(self) -> Row | None:
+        return await self._one("select shown, hidden, phone, updated_at from dashboard_prefs where id = 1")
+
+    async def set_dashboard_prefs(self, *, shown: Sequence[str], hidden: Sequence[str], phone: Sequence[str]) -> Row:
+        row = await self._one(
+            """
+            insert into dashboard_prefs (id, shown, hidden, phone) values (1, %s, %s, %s)
+            on conflict (id) do update
+              set shown = excluded.shown, hidden = excluded.hidden, phone = excluded.phone, updated_at = now()
+            returning shown, hidden, phone, updated_at
+            """,
+            (list(shown), list(hidden), list(phone)),
+        )
+        assert row is not None
+        return row
 
     # -- ops ------------------------------------------------------------------
 
@@ -1909,7 +1927,7 @@ class Store:
         """Every countdown that has not passed, soonest first."""
         return await self._fetch(
             """
-            select id, name, on_date from countdowns
+            select id, name, on_date, created_at from countdowns
              where archived_at is null and on_date >= %s
              order by on_date, created_at
             """,

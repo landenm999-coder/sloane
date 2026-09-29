@@ -103,6 +103,9 @@ async def integration() -> None:
         now["at"] = datetime(2026, 9, 24, 12, 0, tzinfo=DEN)
         check("no nudge at noon", await habits.nudges(), [])
         check("panel", (await habits.panel())["lines"][0], "· reading — 2 days")
+        check("the control room's dot grid: fourteen days, oldest first, today last",
+              (await habits.panel())["habits"][0], {"name": "reading", "days": [False] * 11 + [True, True, False],
+                                                    "streak": 2})
 
 
 if os.environ.get("DATABASE_URL"):

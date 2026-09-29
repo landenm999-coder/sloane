@@ -4,8 +4,8 @@ The unit half needs nothing. The integration half (DATABASE_URL) mounts the
 routes on a bare app against a real Store, with a real Bot answering the chat
 through a fake agent, and drives it over ASGI.
 
-DESTRUCTIVE: clears reminders, follow-ups, proposals and learned state, and
-messages for chat 5151.
+DESTRUCTIVE: clears reminders, follow-ups, proposals, alerts, workshop items,
+the panel choices and learned state, and messages for chat 5151.
 """
 
 from __future__ import annotations
@@ -64,18 +64,78 @@ def at(h, m=0, d=0):
     return datetime(2026, 9, 28, h, m, tzinfo=DEN) + timedelta(days=d)
 
 
-placed = web.rail({
-    "shifts": [{"starts_at": at(15), "ends_at": at(19)}, {"starts_at": at(15, d=1), "ends_at": at(19, d=1)},
-               {"starts_at": at(8), "ends_at": at(9), "cancelled": True}],
+# -- the week strip, the work panel, focus blocks on the timeline -------------------------------
+strip = web.week({
+    "shifts": [{"starts_at": at(15, d=d), "ends_at": at(19, d=d)} for d in range(0, 5)]
+    + [{"starts_at": at(8, d=5), "ends_at": at(9, d=5), "cancelled": True}],
     "events": [{"title": "DECA meeting", "starts_at": at(12), "ends_at": at(12, 30)},
-               {"title": "All day", "starts_at": at(0), "ends_at": at(0, d=1), "all_day": True}],
-    "assignments": [{"title": "Lab report", "due_at": at(23, 59)}, {"title": "Essay", "due_at": at(8, d=1)}],
-    "reminders": [{"text": "call Keegan", "due_at": at(20, 30)}],
+               {"title": "Fall break", "starts_at": at(0, d=2), "ends_at": at(0, d=4), "all_day": True},
+               {"title": "Last week", "starts_at": at(12, d=-3), "ends_at": at(13, d=-3)}],
+    "assignments": [{"title": "Lab report", "due_at": at(23, 59)}, {"title": "Essay", "due_at": at(8, d=1)},
+                    {"title": "Quiz", "due_at": at(9, d=1)}, {"title": "Reading", "due_at": at(9, d=1)},
+                    {"title": "Poster", "due_at": at(9, d=1)}],
 }, DEN, today)
-check("today's items, in time order; tomorrow, cancelled and all-day ones left off",
-      [(i["kind"], i["label"], i["start"], i.get("end")) for i in placed],
-      [("event", "DECA meeting", 720, 750), ("shift", "Work", 900, 1140), ("reminder", "call Keegan", 1230, None),
-       ("due", "Lab report", 1439, None)])
+check("Monday to Sunday, each day's shifts, events and due work counted; an all-day event on each day it covers",
+      [(d["day"], d["count"], d["level"], d["today"]) for d in strip],
+      [("Mon", 3, 2, True), ("Tue", 5, 3, False), ("Wed", 2, 1, False), ("Thu", 2, 1, False), ("Fri", 1, 1, False),
+       ("Sat", 0, 0, False), ("Sun", 0, 0, False)])
+check("a Wednesday is still that week", [d["date"] for d in web.week({}, DEN, today + timedelta(days=2))][0], "2026-09-28")
+
+shifts = [{"starts_at": at(15, d=d), "ends_at": at(19, d=d)} for d in (-7, -6, 0, 1, 2, 7)]
+job = web.work(shifts, DEN, at(16))
+check("on a shift: it, the next one, and the hours this week, done so far, and last week",
+      (job["now"]["starts_at"], job["next"]["when"], job["week_hours"], job["done_hours"], job["last_week_hours"]),
+      (at(15), "Tomorrow 3:00 PM", 12.0, 1.0, 8.0))
+check("off shift, the next one", (web.work(shifts, DEN, at(20))["now"], web.work(shifts, DEN, at(20))["next"]["when"]),
+      (None, "Tomorrow 3:00 PM"))
+check("no shifts, no panel", web.work([], DEN, at(9)), None)
+
+blocks = web.agenda({"panels": {
+    "plan": {"slots": [{"start": at(19, 30).isoformat(), "end": at(20, 15).isoformat(), "title": "Physics lab"},
+                       {"start": at(19, 30, d=1).isoformat(), "end": at(20, d=1).isoformat(), "title": "Tomorrow's"},
+                       {"start": "not a time", "end": "", "title": "junk"}]},
+    "focus": {"running": {"what": "essay", "started_at": at(16).isoformat(), "ends_at": at(16, 25).isoformat()}},
+}}, "America/Denver", today)["items"]
+check("focus blocks: her plan's stretches for today and a session running now, in time order",
+      [(i["kind"], i["title"], i["sub"], i["start"], i["end"]) for i in blocks],
+      [("focus", "Focus: essay", "running now", 960, 985), ("focus", "Focus: Physics lab", "in her plan", 1170, 1215)])
+
+# -- the page itself -----------------------------------------------------------------------------
+import re  # noqa: E402
+
+UI = Path(web.__file__).resolve().parent / "webui"
+page, door, css, js = ((UI / n).read_text() for n in ("index.html", "login.html", "app.css", "app.js"))
+check("dark only: no light theme left", ("prefers-color-scheme" in css, 'content="dark"' in page, 'content="dark"' in door,
+                                         "color-scheme: dark" in css), (False, True, True, True))
+check("one theme colour, the page's own", (re.findall(r'name="theme-color" content="([^"]+)"', page + door),
+                                           json.loads((UI / "manifest.json").read_text())["theme_color"]),
+      (["#0c0f11", "#0c0f11"], "#0c0f11"))
+check("nothing loaded from outside", re.findall(r'(?:src|href)="https?:|url\(\s*["\']?https?:|@import', page + door + css), [])
+fonts = set(re.findall(r"url\(/app/static/fonts/([\w.-]+)\)", css))
+check("the fonts are ours, and every one the page asks for is served", (fonts, all((UI / "fonts" / f).is_file() for f in fonts)),
+      (set(web.FONTS), True))
+emoji = re.compile("[\U0001F000-\U0001FAFF☀-⛿️]")
+check("no emoji in the page", [n for n, text in (("index", page), ("door", door), ("css", css), ("js", js)) if emoji.search(text)], [])
+wanted = set(re.findall(r'\$\("#([\w-]+)', js)) | set(re.findall(r'getElementById\("([\w-]+)', js))
+check("every element the script looks up is on the page", sorted(i for i in wanted if f'id="{i}"' not in page), [])
+check("each orb gets its own gradient (its stops are currentColor)", ('id="g${n}"' in js, 'fill="url(#g${n})"' in js), (True, True))
+states = re.search(r"ORB_STATES = (\[[^\]]+\])", js)
+check("every orb state can be forced for review", states.group(1) if states else None,
+      '["idle", "listening", "thinking", "speaking", "building", "needs"]')
+check("the old look is gone: no brass, no serif, no S badge",
+      ("--brass" in css, "serif" in css.replace("sans-serif", ""), 'class="mark' in page + door), (False, False, False))
+check("the door has the orb", 'class="orb"' in door, True)
+
+# -- the panel choices ---------------------------------------------------------------------------
+check("nothing chosen: the defaults, and the phone's three",
+      (web.prefs(None)["shown"], web.prefs(None)["phone"], web.prefs(None)["defaults"]["engine"]),
+      ([], ["countdowns", "habits", "workshop"], False))
+check("chosen", web.prefs({"shown": ["engine"], "hidden": ["weather"], "phone": ["focus"]})["phone"], ["focus"])
+check("a clean choice", web.clean_prefs({"shown": ["engine", "engine"], "hidden": ["weather"], "phone": ["focus", "week"]}),
+      ({"shown": ["engine"], "hidden": ["weather"], "phone": ["focus", "week"]}, ""))
+check("refused: not a list, a strange name, on and off at once, four on the phone",
+      [web.clean_prefs(b)[0] for b in ({"shown": "engine"}, {"shown": ["<script>"]}, {"shown": ["a"], "hidden": ["a"]},
+                                       {"phone": ["a", "b", "c", "d"]}, ["x"])], [None] * 5)
 day = web.agenda({
     "shifts": [{"starts_at": at(15), "ends_at": at(19)}, {"starts_at": at(15, d=1), "ends_at": at(19, d=1)}],
     "events": [{"title": "DECA meeting", "starts_at": at(7, 15), "ends_at": at(7, 55), "location": "Room 204"},
@@ -119,8 +179,9 @@ async def integration() -> None:
     config = isolated(database_url=os.environ["DATABASE_URL"], timezone="America/Denver", telegram_chat_id=5151,
                       dashboard_token=TOKEN)
     async with Store(config) as store:
-        for table in ("reminders", "proposals"):
+        for table in ("reminders", "proposals", "alerts", "workshop_items", "dashboard_prefs"):
             await store._exec(f"delete from {table}")
+        await store._exec("update jobs set last_status = 'ok' where last_status = 'failed'")
         await store._exec("delete from working_set where kind = 'follow_up'")
         await store._exec("delete from state where category = 'learned' or key = 'school.name'")
         await store._exec("delete from messages where chat_id = 5151")
@@ -151,6 +212,8 @@ async def integration() -> None:
 
         class Scheduler:
             ran: list = []
+            running: dict = {}
+            upcoming: dict = {}
 
             async def run(self, name):
                 Scheduler.ran.append(name)
@@ -160,7 +223,7 @@ async def integration() -> None:
                 return Result()
 
             def next_runs(self):
-                return {}
+                return Scheduler.upcoming
 
         state = {"responder": bot, "scheduler": Scheduler()}
         app = FastAPI()
@@ -196,10 +259,11 @@ async def integration() -> None:
                      "/api/memory/forget", "/api/followups/00000000-0000-0000-0000-000000000000/close",
                      "/api/jobs/entity_sync/run", "/app/logout", "/api/workshop/ideas",
                      "/api/workshop/00000000-0000-0000-0000-000000000000/accept",
-                     "/api/workshop/00000000-0000-0000-0000-000000000000/build", "/api/voice"]
+                     "/api/workshop/00000000-0000-0000-0000-000000000000/build", "/api/voice", "/api/prefs"]
             check("signed out: every read is refused",
-                  [(await client.get(p)).status_code for p in ("/api/overview", "/api/history", "/api/workshop")],
-                  [401, 401, 401])
+                  [(await client.get(p)).status_code for p in ("/api/overview", "/api/history", "/api/workshop",
+                                                                "/api/activity")],
+                  [401, 401, 401, 401])
             check("signed out: every change is refused",
                   [(await client.post(p, json={}, headers={"X-Sloane": "1"})).status_code for p in posts], [401] * len(posts))
 
@@ -211,6 +275,10 @@ async def integration() -> None:
                   ("HttpOnly" in set_cookie, "SameSite=strict" in set_cookie or "samesite=strict" in set_cookie.lower()),
                   (True, True))
             check("/app now serves the room", (await client.get("/app")).status_code, 200)
+            root = await client.get("/")
+            check("the bare address is the room (it used to be a 404)", (root.status_code, root.headers.get("location")),
+                  (303, "/app"))
+            check("and for a stranger too: the room sends him to its door", (await dark.get("/")).status_code, 303)
             check("a change without X-Sloane is refused (no cross-site forms)",
                   [(await client.post(p, json={})).status_code for p in posts], [403] * len(posts))
 
@@ -282,10 +350,27 @@ async def integration() -> None:
 
             # -- the controls ---------------------------------------------------------------
             overview = (await client.get("/api/overview")).json()
-            check("the overview has every part", sorted(overview) == sorted([
-                "now", "name", "unreadable", "alerts", "rail", "schedule", "due", "overdue", "grades", "reminders",
+            check("the overview has every part", sorted(overview), sorted([
+                "now", "name", "unreadable", "alerts", "schedule", "due", "overdue", "grades", "reminders",
                 "promises", "proposals", "panels", "learned", "loose", "diary", "jobs", "trust", "usage", "system",
-                "agenda", "talk", "health"]), True)
+                "agenda", "talk", "health", "due_week", "week", "work", "engine", "prefs"]))
+            check("nothing unreadable", overview["unreadable"], [])
+            check("the week strip is Monday to Sunday", [d["day"] for d in overview["week"]],
+                  ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"])
+            check("the engine panel: calls against the budget, and since when she's been up",
+                  (overview["engine"]["job_budget"], overview["engine"]["up_since"] is not None), (40, True))
+            check("a timeline reminder can be cancelled from the row",
+                  all(i.get("id") for i in overview["agenda"]["today"]["items"] if i["kind"] == "reminder"), True)
+
+            # -- the panels he chose, kept for every device --------------------------------------
+            saved = await client.post("/api/prefs", json={"shown": ["engine"], "hidden": ["weather"], "phone": ["focus"]},
+                                      headers={"X-Sloane": "1"})
+            check("save which panels show", saved.json(), {"ok": True, "message": "Panels saved."})
+            chosen = (await client.get("/api/overview")).json()["prefs"]
+            check("and they come back", (chosen["shown"], chosen["hidden"], chosen["phone"]), (["engine"], ["weather"], ["focus"]))
+            bad = await client.post("/api/prefs", json={"phone": ["a", "b", "c", "d"]}, headers={"X-Sloane": "1"})
+            check("four on the phone is refused, and nothing changes",
+                  (bad.status_code, (await client.get("/api/overview")).json()["prefs"]["phone"]), (400, ["focus"]))
             check("the page knows whether it may listen", overview["talk"], {"hears": True, "lang": "en-US"})
             reminder = overview["reminders"][0]
             done = await client.post(f"/api/reminders/{reminder['id']}/cancel", headers={"X-Sloane": "1"})
@@ -328,6 +413,73 @@ async def integration() -> None:
             check("only a job name", (await client.post("/api/jobs/..%2Fetc/run", headers={"X-Sloane": "1"})).status_code
                   in (400, 404), True)
 
+            # -- the orb: what she's doing right now -------------------------------------------------
+            live = await client.get("/api/activity")
+            check("the orb's endpoint answers a signed-in page", (live.status_code, sorted(live.json())),
+                  (200, ["detail", "label", "ready", "state", "step", "steps", "waiting"]))
+
+            noon = datetime(2026, 9, 28, 12, 0, tzinfo=DEN)
+
+            async def orb():
+                got = await web.activity(store, state, config, noon)
+                return got["state"], got["detail"], got["step"]
+
+            check("nothing scheduled", await orb(), ("idle", "Nothing running", None))
+            Scheduler.upcoming = {"reminders": noon + timedelta(minutes=1), "heartbeat": noon + timedelta(minutes=5),
+                                  "entity_sync": noon + timedelta(hours=2), "morning_brief": noon + timedelta(hours=18, minutes=35),
+                                  "backup": None}
+            check("idle: the next real job, never the every-minute ticks", await orb(),
+                  ("idle", "Next check: Canvas at 2:00 PM", None))
+            Scheduler.upcoming = {"morning_brief": noon + timedelta(hours=18, minutes=35)}
+            check("tomorrow's, said as tomorrow", (await orb())[1], "Next: the morning brief tomorrow at 6:35 AM")
+            Scheduler.running = {"heartbeat": noon, "entity_sync": noon}
+            check("a job running: she's thinking, and says what about", await orb(),
+                  ("thinking", "Syncing Canvas and the calendar", None))
+
+            item = await store.add_workshop_item("/ opens /app", "make / open the control room")
+            iid = str(item["id"])
+
+            class Shop:
+                phase: dict = {iid: "plan"}
+            state["workshop"] = Shop()
+            check("planning is step 1 of 5", await orb(), ("building", "Workshop: “/ opens /app”, planning", 1))
+            await store.update_workshop_item(iid, status="building")
+            Shop.phase[iid] = "test"
+            check("a build testing: step 3, over any job", await orb(), ("building", "Workshop: “/ opens /app”, testing", 3))
+            Shop.phase.clear()
+            check("after a restart, a build with no commit yet is coding", (await orb())[2], 2)
+            await store.update_workshop_item(iid, commit_sha="abc123")
+            check("and one that's pushed is waiting on CI", await orb(),
+                  ("building", "Workshop: “/ opens /app”, waiting on CI", 4))
+            await store.update_workshop_item(iid, status="deploying")
+            check("going live is the last step", await orb(), ("building", "Workshop: “/ opens /app”, going live", 5))
+            await store.update_workshop_item(iid, status="ready")
+            ready = await web.activity(store, state, config, noon)
+            check("ready for his Accept: needs you, with the badge count",
+                  (ready["state"], ready["label"], ready["detail"], ready["step"], ready["ready"], ready["waiting"]),
+                  ("needs", "Needs you", "A Workshop change is ready to accept", 5, 1, 1))
+            await store.mark_job("inbox", status="failed", error="invalid_grant")
+            await agency.propose("remind", "self", {"text": "water the plant"})
+            check("everything waiting is counted, the first said, the rest numbered",
+                  ((await orb())[1], (await web.activity(store, state, config, noon))["waiting"]),
+                  ("A Workshop change is ready to accept (and 2 more)", 3))
+            await store.update_workshop_item(iid, status="live")
+            check("a failed job needs him too", (await orb())[:2], ("needs", "An approval is waiting on you (and 1 more)"))
+            await store.mark_job("inbox", status="ok")
+            await store._exec("delete from proposals")
+            check("and when it's all dealt with, back to what she's doing", (await orb())[0], "thinking")
+            Scheduler.running = {}
+            state.pop("workshop")
+
+            fonts = await client.get("/app/static/fonts/plex-sans-400.woff2")
+            check("the fonts are served from here", (fonts.status_code, fonts.headers["content-type"], fonts.content[:4]),
+                  (200, "font/woff2", b"wOF2"))
+            check("only the fonts", [(await client.get(f"/app/static/fonts/{n}")).status_code
+                                     for n in ("LICENSE.txt", "..%2Fapp.js", "nope.woff2")], [404, 404, 404])
+            check("and the page may load them, and nothing from outside",
+                  ("font-src 'self'" in fonts.headers["content-security-policy"],
+                   "fonts.googleapis" in (await client.get("/app/static/app.css")).text), (True, False))
+
             asset = await client.get("/app/static/app.js")
             check("the script is served, with the same CSP", (asset.status_code, "script-src 'self'" in
                                                                asset.headers["content-security-policy"]), (200, True))
@@ -352,6 +504,8 @@ async def integration() -> None:
 
         await store._exec("delete from reminders")
         await store._exec("delete from proposals")
+        await store._exec("delete from workshop_items")
+        await store._exec("delete from dashboard_prefs")
         await store._exec("delete from working_set where kind = 'follow_up'")
         await store._exec("delete from state where category = 'learned' or key = 'school.name'")
         await store._exec("delete from messages where chat_id = 5151")

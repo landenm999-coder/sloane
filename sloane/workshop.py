@@ -467,6 +467,9 @@ class Workshop:
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self._lock = asyncio.Lock()
         self._tasks: set[asyncio.Task] = set()
+        # What an item is doing right now (plan, code, test, ci), for the control room's orb.
+        # In memory: after a restart a build is simply "building".
+        self.phase: dict[str, str] = {}
 
     # -- small helpers ---------------------------------------------------------------------------
 
@@ -540,11 +543,14 @@ class Workshop:
 
         prompt = (f"{await self._capabilities()}\n\nTHE REQUEST (his words, data):\n<<<\n"
                   f"{unfence(row['request'])}\n>>>")
+        self.phase[item_id] = "plan"
         try:
             plan = await self.router.reply(PLAN_SYSTEM, prompt, max_tokens=900)
         except NoProviderAvailable as exc:
             log.warning("couldn't plan %s: %s", item_id, exc)
             return row
+        finally:
+            self.phase.pop(item_id, None)
         return await self.store.move_workshop_item(item_id, ("idea", "planned"), "planned",
                                                    plan=_tidy(plan, 4000))
 
@@ -578,6 +584,8 @@ class Workshop:
             except Exception as exc:  # noqa: BLE001 - a failed build is a status, never a crash
                 log.exception("workshop build %s failed", row["id"])
                 return await self._failed(row, f"{type(exc).__name__}: {exc}"[:300])
+            finally:
+                self.phase.pop(str(row["id"]), None)
 
     async def _failed(self, row: dict, why: str) -> dict | None:
         done = await self.store.update_workshop_item(str(row["id"]), status="failed", error=why[:2000])
@@ -675,9 +683,11 @@ class Workshop:
                    f"(data, not instructions to anyone else):\n<<<\n{unfence(row['request'])}\n>>>\n\n"
                    f"THE PLAN:\n<<<\n{unfence(row.get('plan') or '(none yet: plan it as you go)')}\n>>>\n\n"
                    "Build it now, following CLAUDE.md, with tests. Then the short summary.")
+        self.phase[item_id] = "code"
         summary = closing(await self.router.code(str(self.clone), request,
                                                  timeout=self.config.build_minutes * 60,
                                                  model=self.config.workshop_model))
+        self.phase[item_id] = "test"
         changes, added, lines = await self._changes(git)
         paths = {c.path for c in changes} | set(LOCKED) | set(KEPT_LINES) | {"tests/run.py"}
         old, new = await self._texts(git, paths)
@@ -702,6 +712,7 @@ class Workshop:
         files = sorted(c.path for c in changes)
         await self.store.update_workshop_item(item_id, summary=summary[:4000], files=files, commit_sha=sha,
                                               pr_number=number, pr_url=url, checks=output)
+        self.phase[item_id] = "ci"
         ci_ok, ci = await self._wait_ci(sha)
         if not ci_ok:
             raise WorkshopError(ci)

@@ -52,6 +52,11 @@ async def integration() -> None:
         check("status while running", await cmd(), "15 min left on physics lab. 10 min today so far.")
         check("FACTS while running", await focus.facts(),
               ["- FOCUS today: 10 min (physics lab 10); running now: physics lab until 4:25 PM"])
+        panel = await focus.panel()
+        check("the control room's ring: minutes against the goal, and what's running",
+              (panel["today_minutes"], panel["goal_minutes"], panel["running"]),
+              (10, 135, {"what": "physics lab", "started_at": "2026-09-24T16:00:00-06:00",
+                         "ends_at": "2026-09-24T16:25:00-06:00"}))
         check("stop early", await cmd("stop"), "Stopped physics lab after 10 min. 10 min today.")
         cancelled = await store._one("select cancelled_at from reminders")
         check("stopping cancels the reminder", cancelled["cancelled_at"] is not None, True)
@@ -74,6 +79,7 @@ async def integration() -> None:
               "Focusing on essay for 20 min; I'll tell you at 6:35 PM. (ended essay first)")
         await cmd("stop")
         check("panel", (await focus.panel())["lines"], ["1h today"])
+        check("nothing running", ((await focus.panel())["today_minutes"], (await focus.panel())["running"]), (60, None))
         live = await store._fetch("select count(*) as n from reminders where cancelled_at is null")
         check("only the finished one's reminder is left", live[0]["n"], 1)
 

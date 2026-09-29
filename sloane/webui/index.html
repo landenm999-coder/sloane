@@ -3,9 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="color-scheme" content="dark light">
-<meta name="theme-color" content="#11131a" media="(prefers-color-scheme: dark)">
-<meta name="theme-color" content="#f3f4f7" media="(prefers-color-scheme: light)">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0c0f11">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -14,184 +13,215 @@
 <link rel="icon" href="/app/static/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/app/static/icon-180.png">
 <link rel="manifest" href="/app/static/manifest.json">
+<link rel="preload" href="/app/static/fonts/plex-sans-400.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/app/static/fonts/plex-mono-500.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/app/static/app.css">
 <script src="/app/static/app.js" defer></script>
 </head>
-<body>
+<body data-view="today">
 <a class="skip" href="#composer-input">Skip to the message box</a>
 
-<header class="top">
-  <div class="mark" aria-hidden="true">S</div>
-  <div class="who">
-    <h1 class="name">Sloane</h1>
-    <span class="date" id="date"></span>
-  </div>
-  <span class="clock" id="clock"></span>
-  <button type="button" class="pulse" id="pulse">Connecting…</button>
-  <button type="button" class="quiet" id="signout">Sign out</button>
-</header>
+<div class="shell">
+  <nav class="nav" aria-label="Sections">
+    <button type="button" class="nav-item" data-view="today" aria-current="page">
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>
+      <span>Today</span>
+    </button>
+    <button type="button" class="nav-item" data-view="talk">
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5h16v10H9.5L5 19.5v-4H4z"/></svg>
+      <span>Talk</span>
+    </button>
+    <button type="button" class="nav-item" data-view="workshop">
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 4.5a4.5 4.5 0 0 0-4.2 6.1L4 16.9 7.1 20l6.3-6.3a4.5 4.5 0 0 0 6.1-4.2l-2.7 2.7-3-.3-.3-3z"/></svg>
+      <span>Workshop</span>
+      <i class="dot" id="workshop-dot" hidden></i>
+    </button>
+    <button type="button" class="nav-item wide-only" data-view="memory">
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3.5h12v17l-6-4.5-6 4.5z"/></svg>
+      <span>Memory</span>
+    </button>
+    <button type="button" class="nav-item wide-only" data-view="engine">
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17a8 8 0 1 1 16 0"/><path d="M12 17l4-5"/><circle cx="12" cy="17" r="1.3"/></svg>
+      <span>Engine</span>
+    </button>
+    <button type="button" class="nav-item narrow-only" data-view="more">
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="18" cy="12" r="1.4"/></svg>
+      <span>More</span>
+    </button>
+  </nav>
 
-<nav class="tabs" aria-label="Sections">
-  <button type="button" class="tab talk-tab" data-view="talk" aria-current="page">
-    <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5h16v10H9.5L5 19.5v-4H4z"/></svg>
-    <span>Talk</span>
-  </button>
-  <button type="button" class="tab" data-view="today">
-    <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>
-    <span>Today</span>
-    <span class="badge" id="today-badge" hidden></span>
-  </button>
-  <button type="button" class="tab" data-view="memory">
-    <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3.5h12v17l-6-4.5-6 4.5z"/></svg>
-    <span>Memory</span>
-  </button>
-  <button type="button" class="tab" data-view="workshop">
-    <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 4.5a4.5 4.5 0 0 0-4.2 6.1L4 16.9 7.1 20l6.3-6.3a4.5 4.5 0 0 0 6.1-4.2l-2.7 2.7-3-.3-.3-3z"/></svg>
-    <span>Workshop</span>
-    <span class="badge" id="workshop-badge" hidden></span>
-  </button>
-  <button type="button" class="tab" data-view="engine">
-    <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17a8 8 0 1 1 16 0"/><path d="M12 17l4-5"/><circle cx="12" cy="17" r="1.3"/></svg>
-    <span>Engine</span>
-  </button>
-</nav>
+  <main class="main" id="main">
+    <header class="top" aria-label="Sloane right now">
+      <div class="hdr">
+        <div class="orb js-orb" aria-hidden="true"></div>
+        <div class="clock mono" id="clock"></div>
+        <div class="status" id="status"><b id="status-label">Connecting</b><span id="status-detail"></span></div>
+      </div>
+      <div class="meta">
+        <div class="meta-day"><span id="date"></span><span id="weather-short"></span></div>
+        <div class="meta-line">
+          <span class="next" id="next-up" hidden></span>
+          <span class="links" id="links" hidden>
+            <button type="button" class="link" id="waiting-open" hidden></button>
+            <button type="button" class="link" id="due-open" hidden></button>
+          </span>
+        </div>
+      </div>
+    </header>
 
-<main class="room">
-  <section class="pane talk" id="talk" aria-labelledby="talk-title">
-    <div class="talk-head">
-      <h2 id="talk-title">Talk <span class="hint-inline">the same conversation as Telegram</span></h2>
-      <button type="button" class="toggle" id="read-aloud" aria-pressed="false">
+    <section class="view today" id="today" aria-labelledby="today-title">
+      <h1 class="sr" id="today-title">Today</h1>
+      <div class="line-col">
+        <div class="seg" role="group" aria-label="Which day">
+          <button type="button" class="seg-b" id="day-today" aria-pressed="true">Today</button>
+          <button type="button" class="seg-b" id="day-tomorrow" aria-pressed="false">Tomorrow</button>
+        </div>
+        <ol class="timeline" id="timeline" aria-label="The day, in order"></ol>
+        <div class="later" id="later-wrap" hidden>
+          <h2 class="kicker">Coming up</h2>
+          <ul class="plain" id="later"></ul>
+        </div>
+      </div>
+      <div class="panel-col">
+        <div class="panels" id="panels" aria-label="Panels"></div>
+      </div>
+    </section>
+
+    <section class="view" id="memory" aria-labelledby="memory-title" hidden>
+      <div class="subnav narrow-only" role="group" aria-label="More">
+        <button type="button" class="seg-b" data-go="memory" aria-pressed="true">Memory</button>
+        <button type="button" class="seg-b" data-go="engine" aria-pressed="false">Engine</button>
+      </div>
+      <h1 class="view-title" id="memory-title">Memory</h1>
+      <div class="cols">
+        <section class="block wide" aria-labelledby="learned-title">
+          <div class="block-head">
+            <h2 class="kicker" id="learned-title">What she knows <span class="count mono" id="learned-count"></span></h2>
+            <label class="filter">
+              <span class="sr">Filter what she knows</span>
+              <input type="search" id="learned-filter" placeholder="Filter" autocomplete="off">
+            </label>
+          </div>
+          <ul class="plain" id="learned"></ul>
+        </section>
+        <section class="block" aria-labelledby="loose-title">
+          <h2 class="kicker" id="loose-title">Loose ends <span class="count mono" id="loose-count"></span></h2>
+          <ul class="plain" id="loose"></ul>
+        </section>
+        <section class="block" aria-labelledby="diary-title">
+          <h2 class="kicker" id="diary-title">Diary</h2>
+          <ol class="plain diary" id="diary"></ol>
+        </section>
+      </div>
+    </section>
+
+    <section class="view" id="workshop" aria-labelledby="workshop-title" hidden>
+      <h1 class="view-title" id="workshop-title">Workshop</h1>
+      <ol class="stages" id="stages" aria-label="The pipeline"></ol>
+      <p class="notice" id="shop-notice" hidden></p>
+      <form class="idea" id="idea-form">
+        <label for="idea-input" class="sr">A new idea for the workshop</label>
+        <textarea id="idea-input" rows="2" maxlength="2000"
+          placeholder="Something you want her to be able to do, like a skill that tracks my workouts"></textarea>
+        <button type="submit" class="btn primary">Add idea</button>
+      </form>
+      <div class="lanes">
+        <section class="lane" aria-labelledby="lane-ready"><h2 class="kicker" id="lane-ready">Ready for you</h2><div id="shop-ready"></div></section>
+        <section class="lane" aria-labelledby="lane-moving"><h2 class="kicker" id="lane-moving">Building</h2><div id="shop-moving"></div></section>
+        <section class="lane" aria-labelledby="lane-planned"><h2 class="kicker" id="lane-planned">Planned and ideas</h2><div id="shop-planned"></div></section>
+        <section class="lane" aria-labelledby="lane-live"><h2 class="kicker" id="lane-live">Live</h2><div id="shop-live"></div></section>
+      </div>
+      <details class="history"><summary>History: turned down, failed, rolled back</summary><div id="shop-history"></div></details>
+    </section>
+
+    <section class="view" id="engine" aria-labelledby="engine-title" hidden>
+      <div class="subnav narrow-only" role="group" aria-label="More">
+        <button type="button" class="seg-b" data-go="memory" aria-pressed="false">Memory</button>
+        <button type="button" class="seg-b" data-go="engine" aria-pressed="true">Engine</button>
+      </div>
+      <div class="view-head">
+        <h1 class="view-title" id="engine-title">Engine</h1>
+        <button type="button" class="btn" id="signout">Sign out</button>
+      </div>
+      <div class="tiles" id="system" role="list"></div>
+      <div class="cols">
+        <section class="block wide" aria-labelledby="jobs-title">
+          <div class="block-head">
+            <h2 class="kicker" id="jobs-title">Jobs</h2>
+            <button type="button" class="btn" id="sync-now">Sync Canvas and calendar now</button>
+          </div>
+          <div class="table-wrap"><table class="table" id="jobs">
+            <thead><tr><th scope="col">Job</th><th scope="col">Last run</th><th scope="col">Next</th><th scope="col"><span class="sr">Run</span></th></tr></thead>
+            <tbody></tbody>
+          </table></div>
+        </section>
+        <section class="block" aria-labelledby="prefs-title">
+          <h2 class="kicker" id="prefs-title">Panels</h2>
+          <form id="prefs-form" class="prefs">
+            <fieldset>
+              <legend>Show on Today</legend>
+              <div id="prefs-shown" class="checks"></div>
+            </fieldset>
+            <fieldset>
+              <legend>On the phone <span class="mono" id="prefs-phone-count"></span></legend>
+              <div id="prefs-phone" class="checks"></div>
+            </fieldset>
+            <button type="submit" class="btn primary">Save panels</button>
+          </form>
+        </section>
+        <section class="block" aria-labelledby="trust-title">
+          <h2 class="kicker" id="trust-title">What she may do without asking</h2>
+          <ul class="plain" id="trust"></ul>
+        </section>
+        <section class="block" aria-labelledby="usage-title">
+          <h2 class="kicker" id="usage-title">Model calls, last 24 hours</h2>
+          <ul class="plain bars" id="usage"></ul>
+        </section>
+        <section class="block" aria-labelledby="skills-title">
+          <h2 class="kicker" id="skills-title">Skills</h2>
+          <ul class="chips" id="skills"></ul>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <aside class="chat" id="talk" aria-labelledby="talk-title">
+    <div class="chat-head">
+      <div class="orb sm js-orb" aria-hidden="true"></div>
+      <h2 id="talk-title">Sloane</h2>
+      <span class="short mono" id="status-short"></span>
+      <button type="button" class="icon-btn" id="read-aloud" aria-pressed="false" aria-label="Read her replies aloud">
         <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path class="wave" d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/></svg>
-        <span>Read aloud</span>
       </button>
     </div>
     <ol class="thread" id="thread" aria-live="polite" aria-relevant="additions" aria-label="Conversation"></ol>
     <div class="starters" id="starters" role="group" aria-label="Things to ask"></div>
     <form class="composer" id="composer">
-      <button type="button" class="mic" id="mic" aria-label="Record a voice message" hidden>
-        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg>
-      </button>
       <label for="composer-input" class="sr">Message Sloane</label>
       <textarea id="composer-input" rows="1" maxlength="4000" placeholder="Message Sloane" autocomplete="off"
         aria-describedby="composer-hint"></textarea>
-      <button type="submit" class="send" id="send">Send</button>
-      <p class="composer-hint" id="composer-hint">Enter sends, Shift+Enter for a new line. Commands work too.</p>
+      <button type="button" class="icon-btn mic" id="mic" aria-label="Record a voice message" hidden>
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg>
+      </button>
+      <button type="submit" class="icon-btn send" id="send" aria-label="Send">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg>
+      </button>
+      <p class="sr" id="composer-hint">Enter sends, Shift+Enter makes a new line. Commands work too.</p>
     </form>
-  </section>
+  </aside>
+</div>
 
-  <section class="pane view" id="today" aria-labelledby="today-title" hidden>
-    <div class="day-head">
-      <p class="eyebrow" id="today-title">Today</p>
-      <p class="her-line" id="her-line">&nbsp;</p>
-      <div class="day-chips">
-        <span class="next-chip" id="next-chip" hidden></span>
-        <a class="needs-chip" id="needs-chip" href="#needs" hidden></a>
-      </div>
-    </div>
-    <div class="rail" id="rail" aria-hidden="true"></div>
-    <div class="agenda-wrap">
-      <h2 class="section-title">The day</h2>
-      <ol class="agenda" id="agenda-today"></ol>
-    </div>
-    <div class="grid">
-      <article class="card attention" id="needs" tabindex="-1" aria-labelledby="needs-title">
-        <h2 id="needs-title">Needs you</h2>
-        <ul class="lines" id="needs-list"></ul>
-      </article>
-      <article class="card" aria-labelledby="due-title"><h2 id="due-title">Due soon</h2><ul class="lines" id="due"></ul></article>
-      <article class="card" aria-labelledby="tomorrow-title"><h2 id="tomorrow-title">Tomorrow</h2><ol class="agenda compact" id="agenda-tomorrow"></ol></article>
-      <article class="card" aria-labelledby="reminders-title"><h2 id="reminders-title">Reminders</h2><ul class="lines" id="reminders"></ul></article>
-      <article class="card" aria-labelledby="grades-title"><h2 id="grades-title">Grades</h2><ul class="lines" id="grades"></ul></article>
-      <article class="card" aria-labelledby="promises-title"><h2 id="promises-title">Promises</h2><ul class="lines" id="promises"></ul></article>
-      <div class="panels" id="panels"></div>
-    </div>
-  </section>
-
-  <section class="pane view" id="memory" aria-labelledby="memory-title" hidden>
-    <div class="view-head">
-      <h2 class="view-title" id="memory-title">Memory</h2>
-      <p class="hint">What she's learned from you, what she's waiting to hear back about, and her diary.</p>
-    </div>
-    <div class="grid">
-      <article class="card wide" aria-labelledby="learned-title">
-        <div class="card-head">
-          <h2 id="learned-title">What she knows about you <span class="count" id="learned-count"></span></h2>
-          <label class="filter">
-            <span class="sr">Filter what she knows</span>
-            <input type="search" id="learned-filter" placeholder="Filter" autocomplete="off">
-          </label>
-        </div>
-        <p class="hint">From what you say, and whatever you tell her to remember. Forget anything that's wrong.</p>
-        <ul class="lines" id="learned"></ul>
-      </article>
-      <article class="card" aria-labelledby="loose-title">
-        <h2 id="loose-title">Loose ends <span class="count" id="loose-count"></span></h2>
-        <p class="hint">Things you said you'd do. She asks how they went.</p>
-        <ul class="lines" id="loose"></ul>
-      </article>
-      <article class="card diary-card" aria-labelledby="diary-title">
-        <h2 id="diary-title">Her diary</h2>
-        <p class="hint">One entry a night, so last month is still findable.</p>
-        <ol class="diary" id="diary"></ol>
-      </article>
-    </div>
-  </section>
-
-  <section class="pane view" id="workshop" aria-labelledby="workshop-title" hidden>
-    <div class="view-head">
-      <h2 class="view-title" id="workshop-title">Workshop</h2>
-      <p class="hint">Things you want her to have. She plans them, builds them on her own branch and tests them.
-        Nothing goes live until you accept it. At night she builds what you queued, and one idea of her own.</p>
-    </div>
-    <ol class="stages" id="stages" aria-label="The pipeline"></ol>
-    <p class="notice" id="shop-notice" hidden></p>
-    <form class="idea" id="idea-form">
-      <label for="idea-input" class="sr">A new idea for the workshop</label>
-      <textarea id="idea-input" rows="2" maxlength="2000"
-        placeholder="Something you want her to be able to do, like a skill that tracks my workouts and nags me on rest days"></textarea>
-      <button type="submit" class="send">Add idea</button>
-    </form>
-    <div class="lanes">
-      <section class="lane" aria-labelledby="lane-ready"><h3 id="lane-ready">Ready for you</h3><div id="shop-ready"></div></section>
-      <section class="lane" aria-labelledby="lane-moving"><h3 id="lane-moving">Building</h3><div id="shop-moving"></div></section>
-      <section class="lane" aria-labelledby="lane-planned"><h3 id="lane-planned">Planned and ideas</h3><div id="shop-planned"></div></section>
-      <section class="lane" aria-labelledby="lane-live"><h3 id="lane-live">Live</h3><div id="shop-live"></div></section>
-    </div>
-    <details class="history"><summary>Turned down, failed, rolled back</summary><div id="shop-history"></div></details>
-  </section>
-
-  <section class="pane view" id="engine" aria-labelledby="engine-title" hidden>
-    <div class="view-head">
-      <h2 class="view-title" id="engine-title">Engine</h2>
-      <p class="hint">How she's running, the jobs she runs on her own, and what she may do without asking.</p>
-    </div>
-    <div class="tiles" id="system" role="list"></div>
-    <div class="grid">
-      <article class="card wide" aria-labelledby="jobs-title">
-        <div class="card-head">
-          <h2 id="jobs-title">Jobs</h2>
-          <button type="button" class="act" id="sync-now">Sync Canvas and calendar now</button>
-        </div>
-        <div class="table-wrap"><table class="table" id="jobs">
-          <thead><tr><th scope="col">Job</th><th scope="col">Last run</th><th scope="col">Next</th><th scope="col"><span class="sr">Run</span></th></tr></thead>
-          <tbody></tbody>
-        </table></div>
-      </article>
-      <article class="card" aria-labelledby="trust-title">
-        <h2 id="trust-title">What she may do without asking</h2>
-        <ul class="lines" id="trust"></ul>
-      </article>
-      <article class="card" aria-labelledby="usage-title">
-        <h2 id="usage-title">Model calls, last 24 hours</h2>
-        <ul class="lines bars" id="usage"></ul>
-      </article>
-      <article class="card" aria-labelledby="skills-title">
-        <h2 id="skills-title">Skills</h2>
-        <ul class="chips" id="skills"></ul>
-      </article>
-    </div>
-  </section>
-</main>
+<dialog class="pop" id="waiting" aria-labelledby="waiting-title">
+  <div class="pop-head">
+    <h2 class="kicker" id="waiting-title">Waiting on you</h2>
+    <button type="button" class="icon-btn" id="waiting-close" aria-label="Close">
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+  </div>
+  <ul class="plain" id="needs-list"></ul>
+  <h2 class="kicker" id="due-title">Due soon</h2>
+  <ul class="plain" id="due-list"></ul>
+</dialog>
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 </body>

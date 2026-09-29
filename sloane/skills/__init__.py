@@ -14,7 +14,11 @@ A skill may offer any of these:
                so a Capture note never starts one
     facts      lines for FACTS, the exact tier 4 block every answer and brief reads
     panel      a JSON-able dict for the TV dashboard: {"title": ..., "lines": [...]}
-               is what /tv renders; anything else rides along in /panels
+               is what /tv renders; anything else rides along in /panels and the
+               control room's overview. The control room draws some skills from
+               those structured fields (weather's hours, habits' days, focus's
+               minutes...: sloane/webui/app.js `BUILT`) and every other from its
+               lines, so lines are always enough
     nudges     things worth saying unprompted right now (the heartbeat job asks)
 
 Rules every skill keeps, because the core invariants apply here too:

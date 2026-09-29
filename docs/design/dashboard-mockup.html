@@ -1,0 +1,391 @@
+<title>Sloane Dashboard Directions</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one committed dark direction (Timeline + orb). Brief, orb state demo, phone + desktop frames, then a panel gallery. Single dark look by choice. */
+:root {
+  --bg: #0c0f11; --raise: #13171a; --raise-2: #191e22; --line: #232a2f; --fg: #e4e8ea; --mut: #7b868c; --dim: #4f595f;
+  --now: #7fd1c1; --class: #93a8d8; --work: #d8b37a; --due: #e8897a; --good: #8fcf8a;
+  --ui: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font: 14.5px/1.5 var(--ui); padding-inline: 20px; padding-block: 32px 64px; }
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.wrap { max-width: 1280px; margin: 0 auto; display: grid; gap: 48px; }
+h1 { font-size: 26px; font-weight: 600; margin: 0 0 6px; letter-spacing: -0.01em; text-wrap: balance; }
+h2 { font-size: 19px; font-weight: 600; margin: 0; text-wrap: balance; }
+p { margin: 0; max-width: 70ch; }
+.mut { color: var(--mut); }
+.tag { font: 500 11px var(--mono); color: var(--mut); letter-spacing: .06em; margin-bottom: 8px; }
+section { display: grid; gap: 18px; }
+
+/* ---------------- the orb: a HUD-style core with rings, built as inline SVG ---------------- */
+.orb { --size: 44px; width: var(--size); height: var(--size); position: relative; flex: none; color: #7fd1c1; }
+.orb svg { width: 100%; height: 100%; overflow: visible; display: block; }
+.orb .spin { transform-origin: 50px 50px; transform-box: view-box; }
+.orb .r1 { animation: rot 40s linear infinite; }
+.orb .r2 { animation: rot 18s linear infinite reverse; }
+.orb .r3 { animation: rot 7s linear infinite; }
+.orb .core { transform-origin: 50px 50px; transform-box: view-box; animation: breathe 5s ease-in-out infinite; filter: drop-shadow(0 0 5px currentColor); }
+.orb .bars line { stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; opacity: 0; transform-origin: 50px 50px; transform-box: view-box; }
+.orb .prog { opacity: 0; transition: opacity .3s; }
+.orb .glow { position: absolute; inset: 20%; border-radius: 50%; background: currentColor; filter: blur(calc(var(--size) * .22)); opacity: .28; }
+.orb[data-state="idle"] { color: #6fb8ab; }
+.orb[data-state="idle"] .r3 { animation-duration: 14s; }
+.orb[data-state="listening"] { color: #9ee6d6; }
+.orb[data-state="listening"] .bars line { opacity: .9; animation: bar .9s ease-in-out infinite; }
+.orb[data-state="listening"] .r3 { opacity: .3; }
+.orb[data-state="thinking"] { color: #a9b8f0; }
+.orb[data-state="thinking"] .r2 { animation-duration: 4s; }
+.orb[data-state="thinking"] .r3 { animation-duration: 1.4s; }
+.orb[data-state="speaking"] { color: #b6f0e2; }
+.orb[data-state="speaking"] .core { animation: talk .38s ease-in-out infinite alternate; }
+.orb[data-state="speaking"] .glow { opacity: .45; }
+.orb[data-state="building"] { color: #e8c486; }
+.orb[data-state="building"] .prog { opacity: 1; }
+.orb[data-state="building"] .r3 { animation-duration: 3s; }
+.orb[data-state="needs"] { color: #f0a08f; }
+.orb[data-state="needs"] .core { animation: breathe 1.4s ease-in-out infinite; }
+.orb[data-state="needs"] .r1, .orb[data-state="needs"] .r2 { animation-play-state: paused; }
+.orb.sm .r1, .orb.sm .bars, .orb.sm .prog { display: none; }
+@keyframes rot { to { transform: rotate(360deg); } }
+@keyframes breathe { 50% { transform: scale(1.08); } }
+@keyframes talk { from { transform: scale(.94); } to { transform: scale(1.12); } }
+@keyframes bar { 0%, 100% { transform: scale(.92); } 50% { transform: scale(1.06); } }
+@media (prefers-reduced-motion: reduce) { .orb *, .orb .core { animation: none !important; } }
+
+.demo { display: flex; flex-wrap: wrap; align-items: center; gap: 20px 28px; padding: 20px; background: var(--raise); border: 1px solid var(--line); border-radius: 12px; }
+.demo .big { --size: 120px; }
+.demo-copy { display: grid; gap: 10px; min-width: 0; flex: 1 1 320px; }
+.states { display: flex; flex-wrap: wrap; gap: 6px; }
+.states button { font: 500 12.5px var(--ui); color: var(--mut); background: none; border: 1px solid var(--line); border-radius: 999px; padding: 5px 12px; cursor: pointer; }
+.states button[aria-pressed="true"] { color: var(--fg); border-color: var(--mut); background: var(--raise-2); }
+.states button:focus-visible { outline: 2px solid var(--now); outline-offset: 2px; }
+.state-line { font-size: 15px; }
+.state-line .mut { font-size: 13px; }
+
+/* ---------------- frames ---------------- */
+.stage { display: grid; grid-template-columns: 310px minmax(0, 1fr); gap: 28px; align-items: start; }
+@media (max-width: 1000px) { .stage { grid-template-columns: 1fr; } .phone { margin: 0 auto; } }
+.frame-col { min-width: 0; }
+.phone { width: 310px; max-width: 100%; height: 660px; border-radius: 36px; border: 8px solid #000; overflow: hidden; background: var(--bg); display: flex; flex-direction: column; box-shadow: 0 0 0 1px var(--line); }
+.desk-wrap { overflow-x: auto; border-radius: 10px; border: 1px solid var(--line); }
+.desk { width: 1180px; height: 700px; display: grid; grid-template-columns: 58px 1fr 310px; background: var(--bg); }
+
+/* shared bits */
+.hdr { display: flex; align-items: center; gap: 14px; }
+.hdr .orb { --size: 54px; }
+.clock { font: 500 32px/1 var(--mono); letter-spacing: -0.02em; }
+.status { font-size: 12.5px; color: var(--mut); line-height: 1.35; min-width: 0; }
+.status b { color: var(--fg); font-weight: 500; }
+.row { display: grid; grid-template-columns: 42px 1fr; gap: 12px; min-height: 44px; }
+.row .h { color: var(--mut); font: 11.5px var(--mono); padding-top: 2px; }
+.ev { border-left: 2px solid var(--c, var(--dim)); padding: 1px 0 10px 10px; }
+.ev small { display: block; color: var(--mut); font-size: 11.5px; }
+.ev.past { opacity: .45; }
+.nowbar { display: grid; grid-template-columns: 42px 1fr; gap: 12px; align-items: center; margin: 0 0 8px; color: var(--now); font: 11px var(--mono); }
+.nowbar i { height: 1px; background: var(--now); position: relative; }
+.nowbar i::before { content: ""; position: absolute; left: -3px; top: -3px; width: 7px; height: 7px; border-radius: 50%; background: var(--now); }
+.tabs { display: flex; justify-content: space-around; padding: 9px 0 14px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--mut); }
+.tabs .on { color: var(--fg); }
+.tabs em { font-style: normal; color: var(--work); }
+
+/* phone specifics */
+.p-top { padding: 18px 16px 14px; border-bottom: 1px solid var(--line); display: grid; gap: 12px; }
+.p-meta { display: flex; justify-content: space-between; font-size: 12px; color: var(--mut); }
+.p-line { padding: 12px 16px 4px; flex: 1; overflow: hidden; }
+.p-strip { display: flex; gap: 8px; overflow-x: auto; padding: 0 12px 12px; scrollbar-width: none; }
+.p-strip .pn { flex: 0 0 132px; }
+
+/* desktop specifics */
+.rail { border-right: 1px solid var(--line); display: grid; align-content: start; justify-items: center; gap: 20px; padding-top: 20px; color: var(--mut); font-size: 10px; }
+.rail span { display: grid; justify-items: center; gap: 4px; }
+.rail span::before { content: ""; width: 18px; height: 18px; border: 1.5px solid currentColor; border-radius: 5px; }
+.rail .on { color: var(--fg); }
+.d-main { display: grid; grid-template-rows: auto 1fr; min-width: 0; overflow: hidden; }
+.d-top { padding: 20px 26px 16px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; gap: 20px; }
+.d-top .hdr .orb { --size: 66px; }
+.d-top .right { text-align: right; font-size: 12.5px; color: var(--mut); line-height: 1.5; }
+.d-top .right b { color: var(--fg); font-weight: 500; }
+.d-body { display: grid; grid-template-columns: 280px 1fr; min-height: 0; }
+.d-line { padding: 16px 22px; border-right: 1px solid var(--line); overflow: hidden; }
+.d-panels { padding: 16px; display: grid; grid-template-columns: repeat(3, 1fr); grid-auto-rows: min-content; gap: 12px; align-content: start; overflow: hidden; }
+.d-panels .span2 { grid-column: span 2; }
+.chat { border-left: 1px solid var(--line); background: var(--raise); display: flex; flex-direction: column; min-width: 0; }
+.chat-head { padding: 14px 16px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.chat-head .orb { --size: 26px; }
+.msgs { flex: 1; padding: 16px; display: grid; gap: 12px; align-content: end; font-size: 13px; }
+.msgs .me { justify-self: end; border: 1px solid var(--line); background: var(--bg); padding: 6px 10px; border-radius: 8px; max-width: 85%; }
+.msgs .act { font: 11.5px var(--mono); color: var(--mut); border-left: 2px solid var(--line); padding-left: 8px; }
+.inp { margin: 12px; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; color: var(--mut); background: var(--bg); display: flex; justify-content: space-between; align-items: center; }
+
+/* ---------------- panels ---------------- */
+.pn { background: var(--raise); border: 1px solid var(--line); border-radius: 10px; padding: 12px 13px; display: grid; gap: 9px; align-content: start; min-width: 0; }
+.pn h4 { margin: 0; font-size: 10.5px; font-weight: 500; letter-spacing: .09em; text-transform: uppercase; color: var(--mut); display: flex; justify-content: space-between; }
+.big-n { font: 500 26px/1 var(--mono); letter-spacing: -0.02em; }
+.sub { font-size: 11.5px; color: var(--mut); }
+/* weather */
+.wx { display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px; align-items: end; height: 42px; }
+.wx i { background: linear-gradient(to top, #2b4552, #7fb6c9); border-radius: 2px 2px 0 0; }
+.wx-l { display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px; font: 9.5px var(--mono); color: var(--dim); text-align: center; }
+/* countdown */
+.cd { display: grid; gap: 7px; }
+.cd div { display: grid; grid-template-columns: 38px 1fr; gap: 8px; align-items: baseline; font-size: 12.5px; }
+.cd .mono { font-size: 15px; color: var(--fg); }
+.cd .bar { grid-column: 2; height: 3px; background: var(--raise-2); border-radius: 2px; overflow: hidden; }
+.cd .bar i { display: block; height: 100%; background: var(--now); }
+/* habits */
+.hb { display: grid; gap: 6px; font-size: 12px; }
+.hb .r { display: grid; grid-template-columns: 58px 1fr 24px; gap: 8px; align-items: center; }
+.dots { display: grid; grid-template-columns: repeat(14, 1fr); gap: 2px; }
+.dots i { aspect-ratio: 1; border-radius: 2px; background: var(--raise-2); max-width: 100%; }
+.dots i.y { background: var(--good); }
+/* grades */
+.gr { display: grid; gap: 6px; font-size: 12px; }
+.gr .r { display: grid; grid-template-columns: 1fr 40px; gap: 8px; }
+.gr .r .bar { grid-column: 1 / -1; height: 3px; background: var(--raise-2); border-radius: 2px; }
+.gr .r .bar i { display: block; height: 100%; border-radius: 2px; background: var(--class); }
+.gr .low i { background: var(--due) !important; }
+/* workshop */
+.steps { display: grid; grid-template-columns: repeat(5, 1fr); gap: 3px; }
+.steps i { height: 4px; border-radius: 2px; background: var(--raise-2); }
+.steps i.d { background: var(--work); }
+.steps i.a { background: var(--work); animation: blink 1.2s ease-in-out infinite; }
+@keyframes blink { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .steps i.a { animation: none; } }
+/* focus ring */
+.ring { display: flex; align-items: center; gap: 12px; }
+.ring svg { flex: none; }
+/* week heat */
+.wk { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; text-align: center; font: 10px var(--mono); color: var(--mut); }
+.wk b { display: block; height: 30px; border-radius: 4px; margin-bottom: 3px; background: var(--raise-2); }
+.wk b.l1 { background: #1f3a3a; } .wk b.l2 { background: #2c5c57; } .wk b.l3 { background: #3f8a80; } .wk b.today { outline: 1.5px solid var(--now); }
+/* learned */
+.lr { display: grid; gap: 5px; font-size: 12px; }
+.lr div::before { content: "+ "; color: var(--now); font-family: var(--mono); }
+/* engine */
+.en { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 11.5px; color: var(--mut); }
+.en .mono { display: block; font-size: 16px; color: var(--fg); }
+.meter { height: 4px; background: var(--raise-2); border-radius: 2px; grid-column: 1 / -1; }
+.meter i { display: block; height: 100%; width: 5%; background: var(--now); border-radius: 2px; }
+/* college */
+.cl { display: grid; gap: 6px; font-size: 12px; }
+.cl .r { display: flex; justify-content: space-between; gap: 8px; }
+.pips { display: flex; gap: 3px; }
+.pips i { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid var(--dim); }
+.pips i.y { background: var(--now); border-color: var(--now); }
+
+.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
+.gallery .pn p { font-size: 12px; color: var(--mut); }
+.cut { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 6px 28px; padding: 0; margin: 0; list-style: none; font-size: 13.5px; }
+.cut li { border-top: 1px solid var(--line); padding: 8px 0; min-width: 0; }
+.ask ol { margin: 0; padding-left: 20px; display: grid; gap: 6px; max-width: 72ch; }
+</style>
+
+<div class="wrap">
+
+<section>
+  <div>
+    <h1>Sloane dashboard: Timeline, dark, with her orb</h1>
+    <p class="mut">Round 3 from your notes: the Timeline layout, dark only, an orb that shows what she's doing, and more panels. Everything shown is example content. Correct anything and I'll revise before building.</p>
+  </div>
+</section>
+
+<section aria-labelledby="orb-t">
+  <h2 id="orb-t">The orb</h2>
+  <div class="demo">
+    <div class="orb big" id="orb-demo" data-state="building" aria-hidden="true"></div>
+    <div class="demo-copy">
+      <div class="state-line" id="state-line"></div>
+      <div class="states" role="group" aria-label="Preview an orb state">
+        <button type="button" data-s="idle">Idle</button>
+        <button type="button" data-s="listening">Listening</button>
+        <button type="button" data-s="thinking">Thinking</button>
+        <button type="button" data-s="speaking">Speaking</button>
+        <button type="button" data-s="building">Building</button>
+        <button type="button" data-s="needs">Needs you</button>
+      </div>
+      <p class="mut" style="font-size:13px">Tap a state to preview it; every orb on this page changes. Next to it is one line of what she's doing, pulled live from her jobs, the Workshop, and the chat. It sits by the clock on phone and desktop, and small at the top of the chat.</p>
+    </div>
+  </div>
+</section>
+
+<section aria-labelledby="scr-t">
+  <h2 id="scr-t">Today</h2>
+  <div class="stage">
+    <div class="frame-col"><div class="tag">S23</div>
+      <div class="phone">
+        <div class="p-top">
+          <div class="hdr"><div class="orb js-orb" data-state="building" aria-hidden="true"></div>
+            <div><div class="clock mono">1:52</div></div>
+            <div class="status js-status" style="margin-left:auto;text-align:right;max-width:130px"></div></div>
+          <div class="p-meta"><span>Mon Sep 28 · 67° clear</span><span style="color:var(--work)">shift in 2h 08m</span></div>
+        </div>
+        <div class="p-line">
+          <div class="row"><span class="h">9:10</span><div class="ev past" style="--c:var(--class)">English 12</div></div>
+          <div class="row"><span class="h">1:45</span><div class="ev" style="--c:var(--class)">Marketing<small>DECA prep · until 2:40</small></div></div>
+          <div class="nowbar"><span>now</span><i></i></div>
+          <div class="row"><span class="h">4:00</span><div class="ev" style="--c:var(--work)">Work<small>until 8:00</small></div></div>
+          <div class="row"><span class="h">7:00</span><div class="ev">Charge the car<small>reminder</small></div></div>
+          <div class="row"><span class="h">11:59</span><div class="ev" style="--c:var(--due)">Physics lab due<small>tomorrow night</small></div></div>
+        </div>
+        <div class="p-strip" aria-label="Panels, swipe sideways">
+          <div class="pn"><h4>DECA districts</h4><div class="big-n">66<span class="sub"> days</span></div><div class="sub">Dec 3</div></div>
+          <div class="pn"><h4>Habits</h4><div class="hb"><div class="r" style="grid-template-columns:1fr 24px"><span>Gym</span><span class="mono">4 days</span></div></div><div class="dots">
+            <i class="y"></i><i></i><i class="y"></i><i class="y"></i><i></i><i class="y"></i><i class="y"></i><i></i><i class="y"></i><i></i><i class="y"></i><i class="y"></i><i class="y"></i><i class="y"></i></div></div>
+          <div class="pn"><h4>Workshop</h4><div style="font-size:12.5px">/ → /app</div><div class="steps"><i class="d"></i><i class="d"></i><i class="a"></i><i></i><i></i></div><div class="sub">testing</div></div>
+        </div>
+        <div class="tabs"><span class="on">Today</span><span>Talk</span><span>Workshop <em>•</em></span><span>More</span></div>
+      </div>
+    </div>
+
+    <div class="frame-col"><div class="tag">DESKTOP · SCROLLS SIDEWAYS IF YOUR SCREEN IS NARROW</div>
+      <div class="desk-wrap"><div class="desk">
+        <div class="rail"><span class="on">Today</span><span>Talk</span><span>Shop</span><span>Mem</span><span>Eng</span></div>
+        <div class="d-main">
+          <div class="d-top">
+            <div class="hdr"><div class="orb js-orb" data-state="building" aria-hidden="true"></div>
+              <div class="clock mono" style="font-size:38px">1:52</div>
+              <div class="status js-status" style="max-width:280px"></div></div>
+            <div class="right">Monday, September 28 · 67° clear<br><b style="color:var(--work)">Work in 2h 08m</b> · 1 waiting on you · 2 due this week</div>
+          </div>
+          <div class="d-body">
+            <div class="d-line">
+              <div class="row"><span class="h">7:30</span><div class="ev past" style="--c:var(--class)">AP Physics</div></div>
+              <div class="row"><span class="h">9:10</span><div class="ev past" style="--c:var(--class)">English 12</div></div>
+              <div class="row"><span class="h">11:20</span><div class="ev past" style="--c:var(--class)">Calculus</div></div>
+              <div class="row"><span class="h">1:45</span><div class="ev" style="--c:var(--class)">Marketing<small>DECA prep · until 2:40</small></div></div>
+              <div class="nowbar"><span>now</span><i></i></div>
+              <div class="row"><span class="h">4:00</span><div class="ev" style="--c:var(--work)">Work<small>until 8:00</small></div></div>
+              <div class="row"><span class="h">7:00</span><div class="ev">Charge the car<small>reminder</small></div></div>
+              <div class="row"><span class="h">9:00</span><div class="ev" style="--c:var(--now)">Focus: physics lab<small>she blocked 45 min</small></div></div>
+              <div class="row"><span class="h">11:59</span><div class="ev" style="--c:var(--due)">Physics lab due<small>tomorrow</small></div></div>
+            </div>
+            <div class="d-panels">
+              <div class="pn"><h4>Weather <span>Parker</span></h4><div class="big-n">67°</div>
+                <div class="wx"><i style="height:80%"></i><i style="height:92%"></i><i style="height:100%"></i><i style="height:90%"></i><i style="height:74%"></i><i style="height:58%"></i><i style="height:44%"></i><i style="height:36%"></i></div>
+                <div class="wx-l"><span>2p</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span></div></div>
+              <div class="pn"><h4>Countdowns</h4><div class="cd">
+                <div><span class="mono">34d</span><span>CU Boulder EA</span><span class="bar"><i style="width:62%"></i></span></div>
+                <div><span class="mono">66d</span><span>DECA districts</span><span class="bar"><i style="width:28%"></i></span></div></div></div>
+              <div class="pn"><h4>Workshop <span style="color:var(--work)">building</span></h4><div style="font-size:13px">Make / open /app</div>
+                <div class="steps"><i class="d"></i><i class="d"></i><i class="a"></i><i></i><i></i></div><div class="sub">plan · code · <b style="color:var(--fg);font-weight:500">test</b> · CI · ready</div></div>
+              <div class="pn span2"><h4>Habits <span>last 14 days</span></h4><div class="hb">
+                <div class="r"><span>Gym</span><div class="dots"><i class="y"></i><i></i><i class="y"></i><i class="y"></i><i></i><i class="y"></i><i class="y"></i><i></i><i class="y"></i><i></i><i class="y"></i><i class="y"></i><i class="y"></i><i class="y"></i></div><span class="mono">4</span></div>
+                <div class="r"><span>Reading</span><div class="dots"><i class="y"></i><i class="y"></i><i></i><i></i><i class="y"></i><i></i><i></i><i class="y"></i><i class="y"></i><i class="y"></i><i></i><i class="y"></i><i class="y"></i><i></i></div><span class="mono">0</span></div>
+                <div class="r"><span>Protein</span><div class="dots"><i class="y"></i><i class="y"></i><i class="y"></i><i class="y"></i><i class="y"></i><i></i><i class="y"></i><i class="y"></i><i class="y"></i><i class="y"></i><i class="y"></i><i class="y"></i><i class="y"></i><i class="y"></i></div><span class="mono">7</span></div></div></div>
+              <div class="pn"><h4>Focus</h4><div class="ring">
+                <svg width="54" height="54" viewBox="0 0 54 54" aria-hidden="true"><circle cx="27" cy="27" r="22" fill="none" stroke="#191e22" stroke-width="5"/><circle cx="27" cy="27" r="22" fill="none" stroke="#7fd1c1" stroke-width="5" stroke-linecap="round" stroke-dasharray="138.2" stroke-dashoffset="52" transform="rotate(-90 27 27)"/></svg>
+                <div><div class="mono" style="font-size:17px">1h 25m</div><div class="sub">focused today<br>goal 2h 15m</div></div></div></div>
+              <div class="pn"><h4>Grades</h4><div class="gr">
+                <div class="r"><span>AP Physics</span><span class="mono">88%</span><span class="bar"><i style="width:88%"></i></span></div>
+                <div class="r"><span>English 12</span><span class="mono">94%</span><span class="bar"><i style="width:94%"></i></span></div>
+                <div class="r low"><span>Calculus</span><span class="mono">79%</span><span class="bar"><i style="width:79%"></i></span></div></div></div>
+              <div class="pn"><h4>This week</h4><div class="wk">
+                <span><b class="l2"></b>M</span><span><b class="l3"></b>T</span><span><b class="l1"></b>W</span><span><b class="l3"></b>T</span><span><b class="l2"></b>F</span><span><b class="l1"></b>S</span><span><b></b>S</span></div><div class="sub">How packed each day is. Tue is the heavy one.</div></div>
+              <div class="pn"><h4>Learned today</h4><div class="lr"><div>Shift moved to 4 on Mondays</div><div>Wants lab reminders the day before</div></div></div>
+            </div>
+          </div>
+        </div>
+        <div class="chat">
+          <div class="chat-head"><div class="orb sm js-orb" data-state="building" aria-hidden="true"></div><span>Sloane</span><span class="mut js-short" style="margin-left:auto;font-size:11.5px"></span></div>
+          <div class="msgs">
+            <div class="me">what do I have tonight</div>
+            <div>Work 4 to 8. I blocked 9:00 for the physics lab, since it's due at midnight tomorrow.</div>
+            <div class="act">added · focus block 9:00–9:45</div>
+            <div class="me">cool. also fix the homepage thing</div>
+            <div>On it. It's in the Workshop now, testing.</div>
+          </div>
+          <div class="inp"><span>Message Sloane</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg></div>
+        </div>
+      </div></div>
+    </div>
+  </div>
+</section>
+
+<section aria-labelledby="gal-t">
+  <h2 id="gal-t">Panel menu</h2>
+  <p class="mut">Pick the ones you want. The desktop shows up to 9 at once; the phone shows 3 you swipe through. Everything here uses data she already has, except Market.</p>
+  <div class="gallery">
+    <div class="pn"><h4>Weather</h4><p>Temperature now plus an hourly curve through tonight.</p></div>
+    <div class="pn"><h4>Countdowns</h4><p>DECA, college deadlines, anything from /countdown, with a progress bar.</p></div>
+    <div class="pn"><h4>Workshop</h4><p>What she's building and which of the 5 steps it's on.</p></div>
+    <div class="pn"><h4>Habits</h4><p>A 14-day dot grid per habit, with the current streak.</p></div>
+    <div class="pn"><h4>Focus</h4><p>A ring of focused time today against your goal.</p></div>
+    <div class="pn"><h4>Grades</h4><p>Canvas grades per class. Anything under 80% turns red.</p></div>
+    <div class="pn"><h4>This week</h4><p>A heat strip showing how packed each day is.</p></div>
+    <div class="pn"><h4>Learned today</h4><p>New things she picked up about you. Tap one to forget it.</p></div>
+    <div class="pn"><h4>College</h4><div class="cl"><div class="r"><span>CU Boulder</span><span class="pips"><i class="y"></i><i class="y"></i><i class="y"></i><i></i><i></i></span></div></div><p>Checklist pips per school.</p></div>
+    <div class="pn"><h4>Engine</h4><div class="en"><span><span class="mono">42</span>calls today</span><span><span class="mono">3d 4h</span>up</span><span class="meter"><i></i></span></div><p>Free-tier usage and uptime.</p></div>
+    <div class="pn"><h4>Market <span style="color:var(--work)">new</span></h4><p>Watchlist sparklines. Needs a market data source first, so she has nothing to show yet.</p></div>
+    <div class="pn"><h4>Up next at work</h4><p>Shift countdown, then hours this week vs. last week.</p></div>
+  </div>
+</section>
+
+<section aria-labelledby="cut-t">
+  <h2 id="cut-t">What changes from the current dashboard</h2>
+  <ul class="cut">
+    <li>The nine shadowed cards become a timeline plus small, flat panels.</li>
+    <li>The explainer sentences under every heading are removed.</li>
+    <li>The gold "S" badge and brass glow are replaced by the orb.</li>
+    <li>On desktop, chat stays open on the right instead of being its own tab.</li>
+    <li>Phone gets 4 tabs: Today, Talk, Workshop, More (Memory and Engine).</li>
+    <li>Colors mean something: blue class, amber work, red due, teal now.</li>
+  </ul>
+</section>
+
+<section class="ask" aria-labelledby="ask-t">
+  <h2 id="ask-t">Correct me on</h2>
+  <ol>
+    <li>Orb size and placement: next to the clock (shown), or bigger and centered at the top?</li>
+    <li>Which panels you want, and which 3 go on the phone.</li>
+    <li>Should the orb react while you talk to her on voice (pulse with your voice)?</li>
+    <li>Anything else from the current dashboard you want kept?</li>
+  </ol>
+</section>
+
+</div>
+
+<script>
+(function () {
+
+  const bars = Array.from({length: 36}, (_, i) => {
+    const a = i * 10 * Math.PI / 180, r1 = 25, r2 = 25 + (i % 3 === 0 ? 5 : i % 2 ? 3 : 4);
+    return `<line x1="${(50 + r1 * Math.sin(a)).toFixed(2)}" y1="${(50 - r1 * Math.cos(a)).toFixed(2)}" x2="${(50 + r2 * Math.sin(a)).toFixed(2)}" y2="${(50 - r2 * Math.cos(a)).toFixed(2)}" style="animation-delay:${(i * 0.07).toFixed(2)}s"/>`;
+  }).join("");
+  const svgFor = n => `<span class="glow"></span><svg viewBox="0 0 100 100" aria-hidden="true">
+    <defs><radialGradient id="g${n}" cx="42%" cy="38%" r="65%"><stop offset="0" stop-color="#fff" stop-opacity=".95"/><stop offset=".35" stop-color="currentColor" stop-opacity=".95"/><stop offset="1" stop-color="currentColor" stop-opacity=".15"/></radialGradient></defs>
+    <g class="spin r1"><circle cx="50" cy="50" r="46" fill="none" stroke="currentColor" stroke-width=".8" stroke-dasharray=".7 3.3" opacity=".55"/></g>
+    <g class="spin r2"><circle cx="50" cy="50" r="40" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="54 72" stroke-linecap="round" opacity=".8"/></g>
+    <circle class="prog" cx="50" cy="50" r="35" fill="none" stroke="currentColor" stroke-width="2.4" stroke-dasharray="132 220" transform="rotate(-90 50 50)" stroke-linecap="round"/>
+    <circle cx="50" cy="50" r="31" fill="none" stroke="currentColor" stroke-width=".6" opacity=".35"/>
+    <g class="spin r3"><circle cx="50" cy="50" r="31" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="14 181" stroke-linecap="round"/></g>
+    <g class="bars">${bars}</g>
+    <circle class="core" cx="50" cy="50" r="17" fill="url(#g${n})"/>
+    <circle cx="50" cy="50" r="21" fill="none" stroke="currentColor" stroke-width=".5" opacity=".5"/>
+  </svg>`;
+  document.querySelectorAll(".orb").forEach((o, n) => o.innerHTML = svgFor(n));
+  const lines = {
+    idle: ["Idle", "Next check: Canvas at 2:00"],
+    listening: ["Listening", "Recording your voice note"],
+    thinking: ["Thinking", "Working out tonight's plan"],
+    speaking: ["Speaking", "Reading her reply aloud"],
+    building: ["Building", "Workshop: “/ opens /app”, testing (step 3 of 5)"],
+    needs: ["Needs you", "A Workshop change is ready to accept"]
+  };
+  const orbs = document.querySelectorAll("#orb-demo, .js-orb");
+  const buttons = document.querySelectorAll(".states button");
+  function set(s) {
+    orbs.forEach(o => o.dataset.state = s);
+    buttons.forEach(b => b.setAttribute("aria-pressed", String(b.dataset.s === s)));
+    const [k, v] = lines[s];
+    document.getElementById("state-line").innerHTML = "<b>" + k + "</b> <span class=\"mut\">· " + v + "</span>";
+    document.querySelectorAll(".js-status").forEach(e => e.innerHTML = "<b>" + k + "</b><br>" + v);
+    document.querySelectorAll(".js-short").forEach(e => e.textContent = k.toLowerCase());
+  }
+  buttons.forEach(b => b.addEventListener("click", () => set(b.dataset.s)));
+  set("building");
+})();
+</script>

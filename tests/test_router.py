@@ -219,6 +219,30 @@ finally:
     _cc.asyncio.create_subprocess_exec = _real
     _cc.ClaudeCodeProvider.legacy = _cc.ClaudeCodeProvider.no_stream = False
 
+# -- Groq: gpt-oss spends a short budget reasoning unless told to keep it low -----
+# doctor's check came back "empty completion" on openai/gpt-oss-120b while Groq was fine.
+import json as _json
+
+import httpx as _httpx
+
+from sloane.providers.groq import GroqProvider
+
+_sent: list[dict] = []
+
+
+def _groq(request: _httpx.Request) -> _httpx.Response:
+    _sent.append(_json.loads(request.content))
+    return _httpx.Response(200, json={"model": "m", "choices": [{"message": {"content": "ok"}}], "usage": {}})
+
+
+for _model in ("openai/gpt-oss-120b", "llama-3.3-70b-versatile"):
+    _provider = GroqProvider(Settings(database_url="", groq_api_key="gsk_x", groq_model=_model),
+                             transport=_httpx.MockTransport(_groq))
+    run(_provider.complete("s", "p", max_tokens=512))
+check("gpt-oss is asked for low reasoning effort; other models aren't sent the field",
+      [(b["model"], b.get("reasoning_effort"), b["max_tokens"]) for b in _sent],
+      [("openai/gpt-oss-120b", "low", 512), ("llama-3.3-70b-versatile", None, 512)])
+
 # -- request URLs carry credentials; httpx must not log them -------------------
 import logging as _logging
 

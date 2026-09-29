@@ -190,6 +190,21 @@ async def main() -> None:
         await runner.run("wrap", local(22))
         check("his question is 'reply'; a job's call is 'job'", purposes, ["reply", "job", "job"])
 
+        # The control room's orb asks what's running: a job is, while its handler runs, and
+        # isn't once it's done, failed or not.
+        seen: list = []
+
+        async def probe(ctx, now=None):  # noqa: ANN001
+            seen.append(sorted(runner.running))
+            raise RuntimeError("probe")
+
+        HANDLERS["_probe"] = probe
+        try:
+            await runner.run("_probe")
+        finally:
+            del HANDLERS["_probe"]
+        check("running while it runs, and not after, even when it fails", (seen, runner.running), ([["_probe"]], {}))
+
         # -- she thinks: one thing worth saying, or nothing ----------------------
         await store._exec("update jobs set runs = 0, last_run_at = null")
         await store._exec("truncate usage_log restart identity")

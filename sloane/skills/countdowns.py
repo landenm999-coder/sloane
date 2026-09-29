@@ -131,8 +131,11 @@ class Countdowns(Skill):
         return {
             "title": "Countdowns",
             "lines": [self._line(r, today) for r in rows[:8]],
+            # When each was set, so the control room can show how much of the wait is gone.
             "items": [{"name": r["name"], "date": r["on_date"].isoformat(),
-                       "days": (r["on_date"] - today).days} for r in rows],
+                       "days": (r["on_date"] - today).days,
+                       "created_on": r["created_at"].astimezone(self.ctx.now().tzinfo).date().isoformat()
+                       if r.get("created_at") else None} for r in rows],
         }
 
     async def nudges(self) -> list[Nudge]:

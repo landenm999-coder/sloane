@@ -343,10 +343,15 @@ class Coder:
         self.idea = '{"title": "Rest-day nudges", "request": "Nudge me on rest days.", "why": "He said he overtrains."}'
         self.prompts: list[str] = []
         self.models: list[str] = []
+        # What the workshop said each item was doing when she was called (the control room's orb).
+        self.shop = None
+        self.phases: list[dict] = []
 
     async def code(self, workdir, request, *, timeout, model=""):  # noqa: ANN001
         self.prompts.append(request)
         self.models.append(model)
+        if self.shop is not None:
+            self.phases.append(dict(self.shop.phase))
         for path, text in self.edits.items():
             target = Path(workdir) / path
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -355,6 +360,8 @@ class Coder:
 
     async def reply(self, system, prompt, **k):  # noqa: ANN001
         self.prompts.append(prompt)
+        if self.shop is not None:
+            self.phases.append(dict(self.shop.phase))
         return self.idea if "overnight" in system else self.plan
 
 
@@ -392,11 +399,20 @@ async def integration() -> None:
 
         async with Store(config) as store:
             await store._exec("delete from workshop_items")
-            shop = ws.Workshop(store, config, coder, say=say, transport=httpx.MockTransport(hub.handler))
+            ci_phases: list[dict] = []
+
+            def watched(request):  # the orb's view of the build while GitHub CI is asked about
+                if "/actions/runs" in str(request.url):
+                    ci_phases.append(dict(shop.phase))
+                return hub.handler(request)
+
+            shop = ws.Workshop(store, config, coder, say=say, transport=httpx.MockTransport(watched))
+            coder.shop = shop
 
             # -- an idea, planned, built, ready ----------------------------------------------
             idea = await shop.add_idea("a skill that tracks my workouts\nand nags me on rest days")
             await shop.settle()
+            iid = str(idea["id"])
             row = await store.workshop_item(str(idea["id"]))
             check("an idea gets a title and a plan", (row["title"], row["status"], row["plan"].startswith("**What")),
                   ("A skill that tracks my workouts", "planned", True))
@@ -405,6 +421,9 @@ async def integration() -> None:
             await shop.queue(str(idea["id"]))
             built = await shop.build_next()
             check("built and waiting for him", built["status"], "ready")
+            check("the orb saw it plan, code and wait on CI, and nothing once it was done",
+                  ([p.get(iid) for p in coder.phases if iid in p], ci_phases[-1].get(iid), shop.phase),
+                  (["plan", "code"], "ci", {}))
             check("on the cheaper model", coder.models[-1], "sonnet")
             check("told as his words and her plan, fenced", ("<<<" in coder.prompts[-1], "nags me on rest days" in coder.prompts[-1]),
                   (True, True))

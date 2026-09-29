@@ -298,19 +298,30 @@ checks a password, and it stays off until you set one.
 
 `/app` is a private page where you talk to her (the same conversation as
 Telegram: commands, reminders and actions all work) and see and steer
-everything she runs:
+everything she runs. The bare address, `/`, opens it too.
 
-- **Talk:** type, or tap the microphone and speak (it needs the `https://`
-  address below and `GROQ_API_KEY`, or a local Whisper). **Read aloud** has
-  the browser read her replies to you.
-- **Today:** her line on your day, what's next, the day on a rail and as a
-  list, one **Needs you** list (approvals, anything broken or failed, overdue
-  work, workshop builds), what's due, reminders, grades.
+- **The orb**, by the clock, shows what she's doing right now: idle (with her
+  next check), listening, thinking, speaking, building (the Workshop, with its
+  step), or needs you. The line beside it says what.
+- **Talk:** on a laptop the chat is always open on the right; on a phone it's
+  its own tab. Type, or tap the microphone and speak (it needs the `https://`
+  address below and `GROQ_API_KEY`, or a local Whisper). **Read aloud** has the
+  browser read her replies to you.
+- **Today:** the day as a timeline (classes, shifts, reminders, focus blocks,
+  what's due) with a line at now, and a Tomorrow toggle. The header counts
+  what's **waiting on you** (approvals, anything broken or failed, overdue work,
+  workshop builds) and what's due this week; tap either for the list. Beside the
+  timeline are panels: weather, countdowns, the workshop, habits, focus, grades,
+  the week, what she learned today, colleges (a phone shows three you swipe).
 - **Memory:** what she knows about you (filter it, forget anything), loose ends, her diary.
 - **Workshop:** what she's building on herself (7h).
-- **Engine:** how she's running, jobs you can run now, what she may do without asking, model use.
+- **Engine:** how she's running, jobs you can run now, what she may do without
+  asking, model use, and **Panels**: which show on Today and which three the
+  phone shows. They're saved on the box, so every device gets them. On a phone,
+  Memory and Engine are under **More**.
 
-Press `/` anywhere to jump to the message box.
+Press `/` anywhere to jump to the message box. The page loads nothing from the
+internet (its fonts are served by her), so it works on a tailnet with no internet.
 
 The installer makes its password, `DASHBOARD_TOKEN`, for you. Read it on the
 box with:
