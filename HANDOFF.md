@@ -239,10 +239,19 @@ Timeline, dark only, an orb that shows what she's doing, more panels) and asked 
   on the phone. Every text colour ≥4.5:1 on every surface (`--dim` is only for strokes). Past timeline rows
   are at 45% opacity, as the design asks, which puts their text under 4.5:1.
 
-**First night on real data (2026-09-28, his Surface under WSL).** Landen installed her (Ubuntu-24.04 under
-WSL; Docker Desktop's `docker` on the Windows PATH made the installer skip installing Docker Engine, so he
-installed it by hand with get.docker.com: the installer's check should look past a `docker` under `/mnt/`,
-backlog). His screenshots showed what the seeded demo hid: the header said "55 waiting on you" (every missed
+**She's live on the Oracle box.** An earlier session (not recorded here until now) set her up on an Oracle
+Cloud ARM instance (`ubuntu@<its public IP>`, hostname `sloane`; the SSH key is `ssh-key-2026-09-27.key` in
+his Downloads). By 2026-09-28 she was running there for real: Telegram polling, the jobs on schedule,
+Canvas and the calendar syncing, the Piper British voice, and the workshop building `/coin` and merging it
+on his Accept. Upgrading is: SSH in, rerun the installer. With no Tailscale set up on his laptop, the control
+room is reached through an SSH tunnel (DEPLOY 7e).
+
+**First night on real data (2026-09-28).** Asked to deploy #18, a session (not knowing about the Oracle box)
+walked him through a second install on his Surface, in Ubuntu-24.04 under WSL. It shared the box's
+Supabase, so it re-seeded the same starting facts and courses (no harm) and, until it was switched off
+(`systemctl disable --now sloane sloane-upgrade.path` there), polled the same Telegram bot. The box was then
+upgraded over SSH. That detour found an installer gap (Docker Desktop's `docker` on the Windows PATH made
+it skip installing Docker Engine; backlog 8). His screenshots showed what the seeded demo hid: the header said "55 waiting on you" (every missed
 Canvas item counted as needing him) and counted down to one of her plan's suggested stretches by its full
 assignment title; most of the grid was empty on a new install; Windows drew grey scrollbars with arrows; a
 deferred job's "gmail is not configured" was red. Fixed: "waiting" is approvals, what's broken, failed jobs
@@ -252,9 +261,9 @@ the /done hint); the countdown is shifts, events and a running focus session, cl
 those panels have nothing; thin dark scrollbars; a deferred job's reason is grey; timeline titles stop at
 two lines; the timeline opens scrolled to now.
 
-**She has never run against the real services.** This sandbox can't reach Telegram, Groq, Canvas, Google or
-Supabase. Everything external is tested against local stubs, and the real-model eval (via `claude -p`) scores
-58/58. The next real milestone is Landen deploying it.
+**Testing here is still against stubs.** This sandbox can't reach Telegram, Groq, Canvas, Google or Supabase:
+everything external is tested against local stubs, and the real-model eval (via `claude -p`) scores 68/68. Her
+real behaviour is on the Oracle box; ask Landen for screenshots or `doctor.py` output when it matters.
 
 ---
 
@@ -350,8 +359,9 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
 
 ## Backlog (ideas, in priority order)
 
-1. Whatever the first real week turns up. She has never run against real Telegram, Canvas, the calendar or
-   Groq; expect small fixes (DEPLOY's "try everything" table is the checklist). The workshop's first real
+1. Whatever her first real weeks turn up (she's live on the Oracle box; DEPLOY's "try everything" table is
+   the checklist). His first night with the new control room found real-data gaps the seeded demo hid
+   (fixed in #19); expect more of that kind. The workshop's first real
    builds on the box are part of that: watch the first few (CI time, how often the guard refuses, whether
    Sonnet's builds pass on the first go).
 2. The workshop, next: a "revise" button (his notes → a second build on the same branch, instead of Deny and
@@ -373,21 +383,18 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
 
 ## Only Landen can do (the whole list; see DEPLOY.md)
 
-0. Merge the control-room PR from branch `claude/nifty-thompson-5h6l2x` and landenm999-coder/capture#2 (the
-   installer deploys `main`), then on the box: `bash /opt/sloane/scripts/install.sh`.
-0b. Make the workshop's GitHub token (DEPLOY §7h: fine-grained, this repo only; Contents and Pull requests
-   read and write, Actions read), then rerun the installer on the box and paste it when asked.
-0c. Optional: the control room (START_HERE step 7). Local models are optional too: he has no Raspberry Pi
-   yet, and nothing needs one (`LOCAL_MODELS.md` is there if he ever gets one).
-1. Create the Oracle Cloud ARM instance (DEPLOY §1).
-2. SSH in and run the one-command installer (DEPLOY "The fast way"):
+Done: the Oracle box, the installer, the workshop's GitHub token, the control room, the British voice.
+
+0. After each merge to `main`, upgrade the box: in PowerShell,
+   `ssh -i "C:\Users\lande\Downloads\ssh-key-2026-09-27.key" ubuntu@<the box's IP>`, then
    `curl -fsSL https://raw.githubusercontent.com/landenm999-coder/sloane/main/scripts/install.sh | bash`.
-   It asks for the seven `.env` values and walks him through the one Claude login. It's also the upgrade
-   command. (The manual steps are DEPLOY §2–8.)
-3. Optional Gmail (DEPLOY §7c): a Google Cloud Desktop OAuth client, **published In production** (Testing tokens
+   (Accepted workshop builds upgrade the box by themselves.) Merge landenm999-coder/capture#2 too.
+1. Optional tidy-up on his PC: the second install in WSL is switched off but still holds a copy of `.env`
+   (his credentials). `wsl --unregister Ubuntu-24.04` deletes it, and `wsl --unregister Ubuntu` the empty
+   Ubuntu made by accident. Neither holds anything she needs; her memory is in Supabase.
+2. Optional Gmail (DEPLOY §7c): a Google Cloud Desktop OAuth client, **published In production** (Testing tokens
    die after 7 days), then `python3 scripts/gmail_auth.py` on the box.
-4. Optional British voice: `SPEAK_PROVIDER=piper` and `PIPER_VOICE=en_GB-cori-medium` in `.env` (DEPLOY §7b).
-5. Capture on the phone: Tailscale on the phone, `CAPTURE_TOKEN` + `CORS_ORIGINS` on the box, then
+3. Capture on the phone: Tailscale on the phone, `CAPTURE_TOKEN` + `CORS_ORIGINS` on the box, then
    Capture → Settings → Sloane (DEPLOY §7d).
 
 Security rules he follows: never paste tokens or credentials into chat. Credentials live only in `.env`

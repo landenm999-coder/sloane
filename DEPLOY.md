@@ -338,6 +338,18 @@ browser asks to use it; say yes. It is reachable only
 from your own tailnet devices, and even there it needs the password. Changing
 `DASHBOARD_TOKEN` (and restarting) signs every device out.
 
+**No Tailscale on this computer?** Use an SSH tunnel instead. In PowerShell (or
+any terminal), with your key and the box's IP:
+
+```
+ssh -i "C:\path\to\ssh-key.key" -L 8000:127.0.0.1:8000 ubuntu@YOUR.SERVER.IP
+```
+
+Leave that window open and go to `http://localhost:8000/app`. Nothing is
+opened to the internet: the page travels inside the SSH connection. If the page
+looks out of date after an upgrade, press Ctrl+Shift+R (the page refreshes its
+data every minute, not its own code).
+
 ## 7f. Optional: the TV dashboard (2 minutes)
 
 With `tailscale serve` from 7d running, open `https://<box>.<tailnet>.ts.net/tv`
