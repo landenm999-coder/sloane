@@ -9,8 +9,9 @@ It's kept up to date at the end of every work session. Last updated: 2026-09-29.
   Groq model), landenm999-coder/sloane#14 (memory, control room, think, local models) and
   landenm999-coder/sloane#15 (the workshop: she builds on herself) and landenm999-coder/sloane#16 (the
   control room rebuilt) are **merged**, and so are landenm999-coder/sloane#20 (talk to her, a life
-  dashboard) and landenm999-coder/sloane#23 (the recent skill). The control room's redesign (one page, a
-  chat that pops in and out, every widget a control) is on branch `claude/nifty-thompson-5h6l2x`, in a draft PR.
+  dashboard), landenm999-coder/sloane#23 (the recent skill), landenm999-coder/sloane#26 (the control room
+  redesigned: one page, a chat that pops in and out, every widget a control) and landenm999-coder/sloane#27
+  (Whoop past Cloudflare). All of it is live on the Oracle box, Whoop connected, as of 2026-09-29.
 - Separate from **Capture** (`landenm999-coder/capture`), a voice-capture PWA that will later feed Sloane
   through an API. Keep them in separate repos. The old `claude/sloane-personal-assistant-nodd15` branch on
   capture is stale and can be deleted by Landen.
@@ -425,16 +426,18 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
 
 ## In flight
 
-- **Whoop past Cloudflare** (branch `claude/nifty-thompson-5h6l2x`). Connecting his Whoop on 2026-09-29, the
+- **Whoop past Cloudflare** (landenm999-coder/sloane#27, merged; live on the box). Connecting his Whoop on 2026-09-29, the
   token exchange in `scripts/whoop_auth.py` came back 403 "error code: 1010": Cloudflare, in front of Whoop,
   turns Python's own user-agents away (urllib's, and so presumably httpx's for the skill's refreshes and
   reads). Both now send `AGENT` ("Mozilla/5.0 (compatible; Sloane/1.0)"). `tests/test_whoop.py`'s stub
   refuses Python's user-agents the same way and runs `whoop_auth.main` end to end (it failed on the old
-  code). He finished the consent with a one-off opener carrying that user-agent; the skill's fetches need
-  this merged and the installer rerun. DEPLOY 7j now says to open the link in an incognito window: his
-  normal one got nginx's "400 Request Header Or Cookie Too Large" from Whoop's cookies.
+  code). DEPLOY 7j now says to open the link in an incognito window: his normal one got nginx's "400 Request
+  Header Or Cookie Too Large" from Whoop's cookies. After the installer, whoop_auth.py and a restart, his
+  recovery, sleep, strain and Whoop workouts show in the control room (he confirmed it working). The one
+  snag: the widget stayed on "Connect it" until `sudo systemctl restart sloane` after the consent (step 4 of
+  7j); the skill only switches on when all three WHOOP_ settings are there at startup.
 
-- **The control room, redesigned** (branch `claude/nifty-thompson-5h6l2x`, draft PR). Landen: "still looks
+- **The control room, redesigned** (landenm999-coder/sloane#26, merged; live on the box). Landen: "still looks
   like AI... bad inconsistent spacings, the page should not scroll on the home, one full page dashboard...
   make the chat be able to pop in and out... make sure all of the widgets are doing something and
   connected, and the buttons do something... like a real paid product everywhere". Built:
