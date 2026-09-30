@@ -427,6 +427,27 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
 
 ## In flight
 
+- **A Jarvis upgrade, from four open-source Jarvis repos** (this branch, after #29's dashboard work). Landen sent
+  OpenJarvis (Stanford, Apache 2.0), isair/jarvis (non-commercial licence, desktop app), Microsoft's JARVIS
+  (HuggingGPT, 2023, unmaintained) and Advanced-Jarvis (a Windows hobby project), and chose "keep Sloane,
+  add the best" over rebuilding on OpenJarvis. Their ideas are rebuilt here, not their code copied. Phase 1:
+  - *Research* (`skills/research.py`, `sql/037`): OpenJarvis's deep_research, on the lookup path she already
+    has (`claude -p` with WebSearch and WebFetch only; `providers/claude_code.DEEP_SYSTEM`, `Router.deep_research`).
+    A run in the background, the report sent tainted (`Bot.say(tainted=True)`) and kept; the control room's
+    Research widget and a reader dialog (escaped, source links clickable). One at a time, `RESEARCH_DAILY`.
+  - *Monitors* (`skills/monitors.py`, `sql/038`, the `monitors` job): OpenJarvis's scheduled monitor. Price
+    lines (markets' quotes), public pages (words or any change; `public()` refuses private addresses, each
+    redirect checked, usual ports only), and questions for the web (her lookup, yes or no). Said once, held
+    by quiet hours and focus; the Monitors widget.
+  - *Secrets out* (`sloane/redact.py`): isair's redaction. Outside text (`safe_field`, `unfence`), the
+    conversation log (`Store.log_message`), his words before a model (`Bot.respond`, and she says what she
+    left out), and every log line (`LogScrubber`, installed in `main.py`).
+  - She may start research and monitors for him when he asks in words (`actions.SKILLS`, never stopping one).
+  - Next: Phase 2 (room mode: she joins a conversation when she hears her name, with the last two minutes
+    as context, transcribed on the box) and Phase 3 (MCP tools he approves, new connectors, multi-step
+    requests). `sloane/redact.py`, `skills/bank.py` and `scripts/simplefin_auth.py` belong on
+    `deploy/protected.txt` (her safety and credentials); that file is Landen's to change.
+
 - **The dashboard, filled; the bank and Fidelity; Whoop's rings** (this branch's PR). Landen, 2026-09-29: fill
   every box ("I don't want a bunch of empty space sitting around"); Whoop as three circles (sleep, recovery,
   strain) with HRV and resting heart rate as bars against his averages; workouts really from Whoop, centered;

@@ -34,6 +34,7 @@ from sloane.memory.embed import Embedder
 from sloane.memory.store import Store
 from sloane.skills import SkillContext, load as load_skills
 from sloane.telegram import Bot
+from sloane.redact import install as redact_install
 
 log = logging.getLogger(__name__)
 
@@ -55,6 +56,8 @@ def create_app() -> FastAPI:
     # apscheduler logs every run of the every-minute reminders tick at INFO.
     for noisy in ("httpx", "httpcore", "apscheduler"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
+    # And whatever a log line says, a password, card number or key in it is scrubbed first.
+    redact_install()
 
     store = Store(config)
     state: dict = {}

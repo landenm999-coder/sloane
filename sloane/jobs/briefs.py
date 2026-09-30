@@ -532,6 +532,33 @@ async def heartbeat(ctx: JobContext, now: datetime | None = None) -> JobResult:
                      reason=f"said {len(new)}: " + ", ".join(key for key, _ in new))
 
 
+async def monitors(ctx: JobContext, now: datetime | None = None) -> JobResult:
+    """Every quarter hour in waking hours: what he asked her to watch for (skills/monitors.py).
+    Each one that happened is said once and then it's over; one that couldn't be said is
+    kept, and said next time. Quiet hours and a focus block hold it all."""
+    watcher = ctx.skills.get("monitors") if ctx.skills is not None else None
+    if watcher is None:
+        return JobResult("monitors", ran=False, reason="no monitors skill")
+    if ctx.say is None:
+        return JobResult("monitors", ran=False, reason="no chat to deliver to")
+    speaking = ctx.governor.may_send(now)
+    if not speaking:
+        return JobResult("monitors", ran=False, reason=speaking.reason)
+    held = await ctx.skills.holding()
+    if held:
+        return JobResult("monitors", ran=False, reason=f"held: {held}")
+    said = 0
+    for monitor_id, text, tainted in await watcher.check():
+        try:
+            await ctx.say(text, tainted=tainted)
+        except Exception as exc:  # noqa: BLE001 - kept, and said on the next run
+            log.warning("monitor message not delivered, will retry: %s", exc)
+            continue
+        await watcher.done(monitor_id, text)
+        said += 1
+    return JobResult("monitors", ran=True, sent=bool(said), reason=f"said {said}" if said else "nothing yet")
+
+
 async def bank_sync(ctx: JobContext, now: datetime | None = None) -> JobResult:
     """Every three hours in waking hours, silent: his accounts from SimpleFIN (skills/bank.py)."""
     bank = ctx.skills.get("bank") if ctx.skills is not None else None
@@ -579,4 +606,5 @@ HANDLERS: dict[str, Callable[..., Awaitable[JobResult]]] = {
     "heartbeat": heartbeat,
     "learn": learn,
     "bank_sync": bank_sync,
+    "monitors": monitors,
 }

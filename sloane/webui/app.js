@@ -1386,7 +1386,8 @@ $("#day-tomorrow").addEventListener("click", () => setDay(true));
 
 const PANEL_NAMES = {
   weather: "Weather", whoop: "Whoop", workouts: "Workouts", markets: "Markets", inbox: "Inbox", habits: "Habits",
-  news: "News", focus: "Focus", money: "Money", portfolio: "Portfolio", countdowns: "Countdowns", lists: "Lists", birthdays: "Birthdays",
+  news: "News", focus: "Focus", money: "Money", portfolio: "Portfolio", research: "Research", monitors: "Monitors",
+  countdowns: "Countdowns", lists: "Lists", birthdays: "Birthdays",
   clients: "Clients", school: "School", workshop: "Workshop", learned: "Learned today", grades: "Grades",
   week: "This week", colleges: "College", cards: "Flashcards", deca: "DECA practice", engine: "Engine",
   work: "Up next at work", plan: "Tonight's plan", memory: "Loose ends",
@@ -1415,6 +1416,8 @@ const ICONS = {
   focus: '<circle cx="12" cy="13" r="7"/><path d="M12 9.5V13l2.5 1.5M9.5 3.5h5"/>',
   money: '<rect x="3.5" y="6.5" width="17" height="11" rx="2"/><circle cx="12" cy="12" r="2.2"/>',
   portfolio: '<path d="M12 3.5a8.5 8.5 0 1 0 8.5 8.5H12z"/><path d="M14.5 2.8v6.7h6.7a6.8 6.8 0 0 0-6.7-6.7z"/>',
+  research: '<circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5M8 10.5h5M10.5 8v5"/>',
+  monitors: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/>',
   lists: '<path d="M10 7h9.5M10 12h9.5M10 17h9.5"/><path d="M4.5 7l1 1 2-2M4.5 12l1 1 2-2M4.5 17l1 1 2-2"/>',
   countdowns: '<path d="M7 3.5h10M7 20.5h10M8 3.5c0 5 8 5 8 8.5s-8 3.5-8 8.5M16 3.5c0 5-8 5-8 8.5s8 3.5 8 8.5"/>',
   birthdays: '<rect x="4" y="10.5" width="16" height="9.5" rx="2"/><path d="M4 14.5c2.7 1.4 5.3 1.4 8 0s5.3-1.4 8 0M12 10.5V7.5"/><path d="M12 3.8c.9 1 .9 2 0 2.7-.9-.7-.9-1.7 0-2.7z"/>',
@@ -1530,6 +1533,12 @@ const FORMS = {
   command: (v) => v.what && v.when && `/remind ${v.when} ${v.what}` },
   remember: { title: "Tell her something to keep", submit: "Keep it", fields: [{ name: "what", placeholder: "Like: I'm vegetarian now", size: "wide" }],
     command: (v) => v.what && `/remember ${v.what}` },
+  research: { title: "Research something", submit: "Start", fields: [
+    { name: "what", placeholder: "Like: the best laptops for college under $1,000", size: "wide" }],
+  command: (v) => v.what && `/research ${v.what}` },
+  monitor: { title: "Watch for something", submit: "Watch", fields: [
+    { name: "what", placeholder: "Like: NVDA above 150, a page and words, or anything", size: "wide" }],
+  command: (v) => v.what && `/monitor ${v.what}` },
   focus: { title: "Start a focus block", submit: "Start", fields: [
     { name: "what", placeholder: "On what", size: "wide" }, { name: "minutes", placeholder: "Minutes", inputmode: "numeric", value: "25" }],
   command: (v) => `/focus ${Number(v.minutes) || 25} ${v.what}`.trim() },
@@ -2010,6 +2019,60 @@ function portfolioW() {
     actions: [asking("Ask about your portfolio", "How's my portfolio doing?")] }, head, chart, list);
 }
 
+// A research report: web text, so escaped like her replies (markdown()), its bare source links made
+// clickable, and said to be what it is.
+const reader = $("#reader");
+function openReader(title, text, note) {
+  $("#reader-title").textContent = title;
+  $("#reader-note").textContent = note || "";
+  $("#reader-body").innerHTML = markdown(text).replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g,
+    '$1<a href="$2" target="_blank" rel="noopener noreferrer">$2</a>');
+  if (!reader.open) reader.showModal();
+  $("#reader-close").focus();
+}
+$("#reader-close").addEventListener("click", () => reader.close());
+reader.addEventListener("click", (event) => { if (event.target === reader) reader.close(); });
+
+function researchW() {
+  const p = panelOf("research");
+  const items = p?.items || [];
+  if (!items.length) return null;
+  const words = { running: "Researching", done: "Done", failed: "Didn't finish" };
+  const list = el("ul", { class: "fit rs" });
+  for (const r of items) {
+    const pill = el("span", { class: `pill ${r.status === "running" ? "now pulse" : r.status === "failed" ? "bad" : "good"}`,
+      text: words[r.status] || r.status });
+    const row = item({ one: r.question, two: r.status === "failed" ? (r.error || "") : r.when, val: pill,
+      label: `${r.question}: ${words[r.status] || r.status}` });
+    if (r.status === "done" && r.report) {
+      row.classList.add("clickable");
+      row.tabIndex = 0;
+      row.setAttribute("role", "button");
+      const open = () => openReader(r.question, r.report, "From the web: her summary of what the pages say, with their sources.");
+      row.addEventListener("click", open);
+      row.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } });
+    }
+    list.append(row);
+  }
+  return widget("research", { meta: p.running ? "Working on it" : "", metaCls: p.running ? "good" : "",
+    actions: [adding("Research something", FORMS.research)] }, list);
+}
+
+function monitorsW() {
+  const p = panelOf("monitors");
+  const items = p?.items || [];
+  if (!items.length) return null;
+  const list = el("ul", { class: "fit" });
+  for (const m of items) {
+    const drop = m.open && m.n ? careful(tool("x", `Stop watching: ${m.said}`, null, "icon-btn sm hover"), `/monitor stop ${m.n}`,
+      `Press again to stop watching: ${clip(m.said, 40)}`) : null;
+    list.append(item({ one: m.said, two: m.state, cls: m.open ? "" : "done",
+      val: m.open ? null : el("span", { class: `pill ${m.fired ? "now" : ""}`, text: m.state }), tail: drop }));
+  }
+  const open = items.filter((m) => m.open).length;
+  return widget("monitors", { meta: open ? `${open} watching` : "", actions: [adding("Watch for something", FORMS.monitor)] }, list);
+}
+
 let listShown = "";
 function listsW() {
   const lists = panelOf("lists")?.lists || {};
@@ -2249,6 +2312,10 @@ const EMPTY = {
   habits: { text: "The things you mean to do every day. Tick them off here and keep the streak.", form: FORMS.habit, cta: "Track a habit" },
   money: { text: "What you spend each week, against a budget if you set one. Connect your bank and it fills in on its own.",
     note: "Your bank and card, read-only: DEPLOY.md, section 7k.", form: FORMS.spent, cta: "Log spending" },
+  research: { text: "Ask her to look into something properly. She searches, reads and sends you a short report with its sources.",
+    form: FORMS.research, cta: "Research something" },
+  monitors: { text: "Tell her what you're waiting on: a price, a page, a release date. She tells you once, when it happens.",
+    form: FORMS.monitor, cta: "Watch for something" },
   portfolio: { text: "Your Fidelity accounts: what they're worth, today's move, and each holding.",
     note: "Connect it read-only through SimpleFIN: DEPLOY.md, section 7k.", ask: ["How do I connect it?", "How do I connect my bank and Fidelity to you?"] },
   countdowns: { text: "Days to go until the things you're waiting for.", form: FORMS.countdown, cta: "Add a countdown" },
@@ -2274,7 +2341,8 @@ function emptyWidget(id) {
 
 const BUILT = {
   weather: weatherW, whoop: whoopW, workouts: workoutsW, markets: marketsW, inbox: inboxW, habits: habitsW,
-  news: newsW, focus: focusW, money: moneyW, portfolio: portfolioW, lists: listsW, countdowns: countdownsW, birthdays: birthdaysW,
+  news: newsW, focus: focusW, money: moneyW, portfolio: portfolioW, research: researchW, monitors: monitorsW,
+  lists: listsW, countdowns: countdownsW, birthdays: birthdaysW,
   clients: clientsW, school: schoolW, workshop: workshopW, learned: learnedW, grades: gradesW, week: weekW,
   colleges: collegesW, engine: engineW, work: workW,
 };

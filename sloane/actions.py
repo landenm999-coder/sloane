@@ -52,6 +52,11 @@ SKILLS: dict[str, str] = {
     "roleplay": "/roleplay [area] -- starts a DECA practice role-play (marketing, finance, hospitality ...)",
     "workout": "/workout <what> [distance] [minutes] [yesterday] -- e.g. /workout run 3 mi 28 min  ·  /workout goal <n a week>",
     "watch": "/watch <ticker or name> -- onto his markets watchlist, e.g. /watch NVDA",
+    "research": "/research <question> -- when he asks you to look into something properly: minutes of "
+                "searching and reading, then a report with sources sent to him",
+    "monitor": "/monitor <what to watch for, in his words> -- she tells him once when it happens, e.g. "
+               "/monitor NVDA above 150  ·  /monitor https://store.example/item for in stock  ·  "
+               "/monitor the iPhone 18 release date is announced",
 }
 MAX_LENGTH = 300
 
@@ -100,6 +105,10 @@ RULES: dict[str, object] = {
     # Logging one or setting the goal; never taking one back.
     "workout": _first_not("undo", "delete", "remove", "oops"),
     "watch": bool,
+    # Starting a run; reading one back (a number) is his to type.
+    "research": lambda a: bool(a) and not (len(a) == 1 and a[0].isdigit()),
+    # Setting one up; never stopping one.
+    "monitor": lambda a: bool(a) and a[0] not in {"stop", "end", "cancel", "delete", "remove", "off", "list"},
 }
 
 
