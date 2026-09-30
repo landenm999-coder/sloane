@@ -1359,7 +1359,7 @@ class Store:
                      "list_items", "countdowns", "cards", "habits", "habit_log",
                      "clients", "client_notes", "focus_sessions", "expenses", "skill_settings",
                      "colleges", "college_tasks", "roleplays", "workshop_items", "dashboard_prefs",
-                     "workouts", "watchlist")
+                     "workouts", "watchlist", "bank_accounts", "bank_history")
 
     async def restore_rows(self, table: str, rows: Sequence[Row]) -> int:
         """Merge backed-up rows back in. Existing rows win; returns rows inserted.
@@ -2501,17 +2501,24 @@ class Store:
     # -- workouts (sql/033) -------------------------------------------------------------------
 
     async def add_workout(self, *, kind: str, minutes: int | None, distance_m: float | None, done_on: date,
-                          logged_at: datetime, source: str = "him", source_id: str | None = None) -> Row | None:
-        """The row, or None when that source's workout was already logged."""
-        return await self._one(
+                          logged_at: datetime, source: str = "him", source_id: str | None = None,
+                          strain: float | None = None, heart_rate: int | None = None) -> Row | None:
+        """The row, or None when that source's workout was already logged (its numbers are
+        brought up to date then: Whoop rescores a workout after it ends)."""
+        row = await self._one(
             """
-            insert into workouts (kind, minutes, distance_m, done_on, logged_at, source, source_id)
-            values (%s, %s, %s, %s, %s, %s, %s)
-            on conflict (source, source_id) where source_id is not null do nothing
-            returning *
+            insert into workouts (kind, minutes, distance_m, done_on, logged_at, source, source_id, strain, heart_rate)
+            values (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            on conflict (source, source_id) where source_id is not null do update
+               set minutes = excluded.minutes, distance_m = excluded.distance_m,
+                   strain = excluded.strain, heart_rate = excluded.heart_rate
+            returning *, (xmax = 0) as inserted
             """,
-            (kind, minutes, distance_m, done_on, logged_at, source, source_id),
+            (kind, minutes, distance_m, done_on, logged_at, source, source_id, strain, heart_rate),
         )
+        if row is None or not row.pop("inserted"):
+            return None
+        return row
 
     async def workouts_since(self, since: date) -> list[Row]:
         return await self._fetch(
@@ -2583,6 +2590,120 @@ class Store:
              limit %s
             """,
             (since, since, limit),
+        )
+
+    # -- bank (sql/036) ---------------------------------------------------------------------
+
+    async def bank_save(self, accounts: Sequence[dict], transactions: Sequence[dict],
+                        holdings: dict[str, Sequence[dict]], on_day: date) -> None:
+        """One sync, all or nothing: the accounts as the bank says they are now, their
+        transactions (new ones added, known ones updated as they post), each account's
+        holdings replaced, and today's balance for its history line."""
+        if self._pool is None:
+            await self.open()
+        assert self._pool is not None
+        async with self._pool.connection() as conn:
+            async with conn.cursor() as cur:
+                for a in accounts:
+                    await cur.execute(
+                        """
+                        insert into bank_accounts (id, org, name, currency, kind, balance_cents, available_cents,
+                                                   balance_at, seen_at)
+                        values (%(id)s, %(org)s, %(name)s, %(currency)s, %(kind)s, %(balance_cents)s,
+                                %(available_cents)s, %(balance_at)s, now())
+                        on conflict (id) do update
+                           set org = excluded.org, name = excluded.name, currency = excluded.currency,
+                               kind = excluded.kind, balance_cents = excluded.balance_cents,
+                               available_cents = excluded.available_cents, balance_at = excluded.balance_at,
+                               seen_at = now()
+                        """,
+                        a,
+                    )
+                    if a.get("balance_cents") is not None:
+                        await cur.execute(
+                            """
+                            insert into bank_history (account_id, on_day, balance_cents) values (%s, %s, %s)
+                            on conflict (account_id, on_day) do update set balance_cents = excluded.balance_cents
+                            """,
+                            (a["id"], on_day, a["balance_cents"]),
+                        )
+                if transactions:
+                    await cur.executemany(
+                        """
+                        insert into bank_transactions (account_id, id, posted_on, amount_cents, description, pending,
+                                                       category, trusted)
+                        values (%(account_id)s, %(id)s, %(posted_on)s, %(amount_cents)s, %(description)s,
+                                %(pending)s, %(category)s, false)
+                        on conflict (account_id, id) do update
+                           set posted_on = excluded.posted_on, amount_cents = excluded.amount_cents,
+                               description = excluded.description, pending = excluded.pending,
+                               category = excluded.category, seen_at = now()
+                        """,
+                        list(transactions),
+                    )
+                for account_id, rows in holdings.items():
+                    await cur.execute("delete from bank_holdings where account_id = %s", (account_id,))
+                    if rows:
+                        await cur.executemany(
+                            """
+                            insert into bank_holdings (account_id, id, symbol, description, shares, market_value_cents,
+                                                       cost_basis_cents)
+                            values (%(account_id)s, %(id)s, %(symbol)s, %(description)s, %(shares)s,
+                                    %(market_value_cents)s, %(cost_basis_cents)s)
+                            on conflict (account_id, id) do nothing
+                            """,
+                            [{**r, "account_id": account_id} for r in rows],
+                        )
+
+    async def bank_accounts(self) -> list[Row]:
+        return await self._fetch("select * from bank_accounts order by kind, org, name")
+
+    async def bank_transactions_between(self, start: date, end: date) -> list[Row]:
+        """Every account's transactions posted on a local-date range, newest first, with the account's kind."""
+        return await self._fetch(
+            """
+            select t.*, a.kind, a.name as account, a.org
+              from bank_transactions t join bank_accounts a on a.id = t.account_id
+             where t.posted_on between %s and %s
+             order by t.posted_on desc, t.seen_at desc
+            """,
+            (start, end),
+        )
+
+    async def bank_spent_between(self, start: date, end: date) -> int:
+        """What he spent from his checking and cards on a date range, in cents (positive): money
+        out, less transfers between his own accounts and card payments."""
+        row = await self._one(
+            """
+            select coalesce(-sum(t.amount_cents), 0)::bigint as cents
+              from bank_transactions t join bank_accounts a on a.id = t.account_id
+             where t.posted_on between %s and %s and t.amount_cents < 0
+               and a.kind in ('cash', 'credit') and t.category not in ('transfer', 'income')
+            """,
+            (start, end),
+        )
+        return int(row["cents"]) if row else 0
+
+    async def bank_holdings(self) -> list[Row]:
+        return await self._fetch(
+            """
+            select h.*, a.name as account, a.org
+              from bank_holdings h join bank_accounts a on a.id = h.account_id
+             order by h.market_value_cents desc nulls last
+            """
+        )
+
+    async def bank_history(self, since: date) -> list[Row]:
+        """Each day's total by kind of account: {on_day, kind, cents}, oldest first."""
+        return await self._fetch(
+            """
+            select h.on_day, a.kind, sum(h.balance_cents)::bigint as cents
+              from bank_history h join bank_accounts a on a.id = h.account_id
+             where h.on_day >= %s
+             group by h.on_day, a.kind
+             order by h.on_day
+            """,
+            (since,),
         )
 
 

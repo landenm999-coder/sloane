@@ -16,7 +16,11 @@ log line or a reply.
 
 Numbers from the API are structured values, so they may go in FACTS, but only
 from the cache (fetched at most every 15 minutes): FACTS never waits on Whoop.
-Workouts Whoop records are logged in the workouts skill's table, once each.
+Today's HRV and resting heart rate are measured against his own average over
+the recoveries before today (up to BASELINE_DAYS of them). Workouts Whoop
+records are logged in the workouts skill's table, once each, with their strain
+and heart rate. The heartbeat asks every quarter hour, so they arrive whether
+or not the control room is open, and a new one is told to him once.
 """
 
 from __future__ import annotations
@@ -36,7 +40,7 @@ from typing import Any
 
 import httpx
 
-from sloane.skills import Answer, Skill, SkillContext
+from sloane.skills import Answer, Nudge, Skill, SkillContext
 
 log = logging.getLogger(__name__)
 
@@ -48,6 +52,9 @@ TIMEOUT_SECONDS = 8.0
 # Whoop sits behind Cloudflare, which turns Python's own user-agents away (403, "error code: 1010").
 AGENT = "Mozilla/5.0 (compatible; Sloane/1.0)"
 SCOPES = "offline read:recovery read:cycles read:sleep read:workout read:profile"
+BASELINE_DAYS = 24   # the recoveries before today that make his average (Whoop pages at 25)
+BASELINE_MIN = 3     # fewer than this is not an average yet
+STRAIN_MAX = 21.0
 
 _ASK = re.compile(
     r"^\s*(?:hey\s+)?(?:how\s+(?:did|'d)\s+i\s+sleep|how'?d\s+i\s+sleep|how\s+was\s+my\s+sleep|"
@@ -71,6 +78,10 @@ class Day:
     sleep_performance: int | None
     strain: float | None
     workouts: tuple[dict, ...] = ()
+    hrv_avg: float | None = None
+    rhr_avg: float | None = None
+    avg_days: int = 0
+    sleep_need_minutes: int | None = None
 
 
 def zone(recovery: int | None) -> str:
@@ -106,10 +117,24 @@ def _when(raw: Any) -> datetime | None:
         return None
 
 
+def _scored(record: Any) -> dict:
+    return (record.get("score") or {}) if isinstance(record, dict) and record.get("score_state") == "SCORED" else {}
+
+
+def _mean(values: list[float]) -> float | None:
+    return sum(values) / len(values) if len(values) >= BASELINE_MIN else None
+
+
 def parse_day(recovery: dict, cycle: dict, sleep: dict, workouts: dict) -> Day:
-    """Whoop's four answers into the numbers she uses. Unscored parts are None."""
+    """Whoop's four answers into the numbers she uses. Unscored parts are None.
+
+    `recovery` is newest first: the first is today's, the rest (up to BASELINE_DAYS) are
+    his baseline."""
     rec = _first(recovery)
-    rec_score = rec.get("score") or {} if rec.get("score_state") == "SCORED" else {}
+    rec_score = _scored(rec)
+    before = [_scored(r) for r in ((recovery or {}).get("records") or [])[1:BASELINE_DAYS + 1]]
+    hrvs = [v for v in (_num(b.get("hrv_rmssd_milli")) for b in before) if v]
+    rhrs = [v for v in (_num(b.get("resting_heart_rate")) for b in before) if v]
     cyc = _first(cycle)
     cyc_score = cyc.get("score") or {} if cyc.get("score_state") == "SCORED" else {}
     nights = [r for r in (sleep or {}).get("records") or [] if isinstance(r, dict) and not r.get("nap")]
@@ -118,6 +143,10 @@ def parse_day(recovery: dict, cycle: dict, sleep: dict, workouts: dict) -> Day:
     stages = sleep_score.get("stage_summary") or {}
     in_bed, awake = _num(stages.get("total_in_bed_time_milli")), _num(stages.get("total_awake_time_milli"))
     asleep = round((in_bed - (awake or 0)) / 60000) if in_bed else None
+    needed = sleep_score.get("sleep_needed") or {}
+    need_parts = [_num(needed.get(k)) for k in ("baseline_milli", "need_from_sleep_debt_milli",
+                                                 "need_from_recent_strain_milli", "need_from_recent_nap_milli")]
+    need = round(sum(p for p in need_parts if p is not None) / 60000) if need_parts[0] else None
     moves = []
     for w in (workouts or {}).get("records") or []:
         if not isinstance(w, dict) or not w.get("id"):
@@ -126,9 +155,12 @@ def parse_day(recovery: dict, cycle: dict, sleep: dict, workouts: dict) -> Day:
         if start is None or end is None or end <= start:
             continue
         score = w.get("score") or {}
-        moves.append({"id": str(w["id"]), "sport": str(w.get("sport_name") or "workout")[:40], "start": start,
-                      "minutes": max(1, round((end - start).total_seconds() / 60)),
-                      "meters": _num(score.get("distance_meter")), "strain": _num(score.get("strain"))})
+        heart, strain, meters = (_num(score.get(k)) for k in ("average_heart_rate", "strain", "distance_meter"))
+        moves.append({"id": str(w["id"])[:80], "sport": str(w.get("sport_name") or "workout")[:40], "start": start,
+                      "minutes": min(1440, max(1, round((end - start).total_seconds() / 60))),
+                      "meters": meters if meters and 0 < meters <= 500000 else None,
+                      "strain": round(strain, 1) if strain is not None and 0 <= strain <= STRAIN_MAX else None,
+                      "heart": round(heart) if heart and 20 <= heart <= 250 else None})
     recovery_score = _num(rec_score.get("recovery_score"))
     performance = _num(sleep_score.get("sleep_performance_percentage"))
     return Day(
@@ -139,6 +171,10 @@ def parse_day(recovery: dict, cycle: dict, sleep: dict, workouts: dict) -> Day:
         sleep_performance=round(performance) if performance is not None else None,
         strain=_num(cyc_score.get("strain")),
         workouts=tuple(moves),
+        hrv_avg=_mean(hrvs),
+        rhr_avg=_mean(rhrs),
+        avg_days=max(len(hrvs), len(rhrs)),
+        sleep_need_minutes=need if need and 60 <= need <= 16 * 60 else None,
     )
 
 
@@ -229,6 +265,7 @@ class Whoop(Skill):
         self._cache: tuple[float, Day] | None = None
         self._retry_at = 0.0
         self._lock = asyncio.Lock()
+        self._new: list[dict] = []   # workouts logged since the heartbeat last asked
 
     # -- fetching -----------------------------------------------------------------------------
 
@@ -258,13 +295,14 @@ class Whoop(Skill):
                         # One token first, so the four reads don't race to rotate it.
                         await self.tokens.bearer(client)
                         parts = await asyncio.gather(
-                            self._get(client, "/recovery", {"limit": 1}), self._get(client, "/cycle", {"limit": 1}),
+                            self._get(client, "/recovery", {"limit": BASELINE_DAYS + 1}),
+                            self._get(client, "/cycle", {"limit": 1}),
                             self._get(client, "/activity/sleep", {"limit": 3}),
                             self._get(client, "/activity/workout", {"limit": 10}))
                     fresh = parse_day(*parts)
                     self._cache = (now, fresh)
                     self._retry_at = 0.0
-                    await self._log_workouts(fresh)
+                    self._new.extend(await self._log_workouts(fresh))
                     return fresh, False
                 except (httpx.HTTPError, ValueError, WhoopUnavailable) as exc:
                     log.warning("whoop fetch failed: %s", exc)
@@ -273,22 +311,28 @@ class Whoop(Skill):
                 return self._cache[1], True
             raise WhoopUnavailable("no Whoop numbers right now")
 
-    async def _log_workouts(self, day: Day) -> None:
-        """Into the workouts table, once each (its source id). Never costs the numbers."""
+    async def _log_workouts(self, day: Day) -> list[dict]:
+        """Into the workouts table, once each (its source id), with a rescore's new strain.
+        The ones new to the table. Never costs the numbers."""
         if not day.workouts or not hasattr(self.ctx.store, "add_workout"):
-            return
+            return []
         from sloane.skills.workouts import _kind
 
         zone_ = self.ctx.now().tzinfo
+        new = []
         try:
             for w in day.workouts:
                 sport = w["sport"].replace("-", " ").replace("_", " ").lower()
-                await self.ctx.store.add_workout(
-                    kind=_kind(sport) or sport or "workout", minutes=w["minutes"], distance_m=w["meters"],
-                    done_on=w["start"].astimezone(zone_).date(), logged_at=self.ctx.now(),
-                    source="whoop", source_id=w["id"])
+                kind = _kind(sport) or sport or "workout"
+                on = w["start"].astimezone(zone_).date()
+                row = await self.ctx.store.add_workout(
+                    kind=kind, minutes=w["minutes"], distance_m=w["meters"], done_on=on, logged_at=self.ctx.now(),
+                    source="whoop", source_id=w["id"], strain=w["strain"], heart_rate=w["heart"])
+                if row is not None:
+                    new.append({**w, "kind": kind, "on": on})
         except Exception:  # noqa: BLE001 - the workouts table may be missing; the numbers still count
             log.exception("whoop: couldn't log its workouts")
+        return new
 
     # -- words -----------------------------------------------------------------------------------
 
@@ -296,8 +340,10 @@ class Whoop(Skill):
         bits, lines = [], []
         if d.recovery is not None:
             bits.append(f"Recovery is {d.recovery}%, {zone(d.recovery)}")
-            extra = [f"HRV {round(d.hrv)} ms" if d.hrv is not None else "",
-                     f"resting HR {round(d.rhr)}" if d.rhr is not None else ""]
+            extra = [f"HRV {round(d.hrv)} ms" + (f" (avg {round(d.hrv_avg)})" if d.hrv_avg else "")
+                     if d.hrv is not None else "",
+                     f"resting HR {round(d.rhr)}" + (f" (avg {round(d.rhr_avg)})" if d.rhr_avg else "")
+                     if d.rhr is not None else ""]
             lines.append(f"- Recovery: {d.recovery}% ({zone(d.recovery)})" + "".join(f", {e}" for e in extra if e))
         if d.sleep_minutes is not None:
             bits.append(f"you slept {said_hm(d.sleep_minutes)}"
@@ -339,9 +385,9 @@ class Whoop(Skill):
         if d.recovery is not None:
             parts.append(f"recovery {d.recovery}% ({zone(d.recovery)})")
         if d.hrv is not None:
-            parts.append(f"HRV {round(d.hrv)} ms")
+            parts.append(f"HRV {round(d.hrv)} ms" + (f" (his average {round(d.hrv_avg)})" if d.hrv_avg else ""))
         if d.rhr is not None:
-            parts.append(f"resting HR {round(d.rhr)}")
+            parts.append(f"resting HR {round(d.rhr)}" + (f" (his average {round(d.rhr_avg)})" if d.rhr_avg else ""))
         if d.sleep_minutes is not None:
             parts.append(f"last night's sleep {hm(d.sleep_minutes)}"
                          + (f" ({d.sleep_performance}% of need)" if d.sleep_performance is not None else ""))
@@ -358,7 +404,30 @@ class Whoop(Skill):
         return {"title": "Whoop", "lines": [line.removeprefix("- ") for line in lines], "old": old,
                 "recovery": d.recovery, "zone": zone(d.recovery), "hrv": None if d.hrv is None else round(d.hrv),
                 "rhr": None if d.rhr is None else round(d.rhr), "sleep_minutes": d.sleep_minutes,
-                "sleep_performance": d.sleep_performance, "strain": None if d.strain is None else round(d.strain, 1)}
+                "sleep_performance": d.sleep_performance, "strain": None if d.strain is None else round(d.strain, 1),
+                "strain_max": STRAIN_MAX, "sleep_need_minutes": d.sleep_need_minutes,
+                "hrv_avg": None if d.hrv_avg is None else round(d.hrv_avg, 1),
+                "rhr_avg": None if d.rhr_avg is None else round(d.rhr_avg, 1), "avg_days": d.avg_days}
+
+    async def nudges(self) -> list[Nudge]:
+        """The heartbeat's quarter hour: fetch (so his workouts arrive with the page closed), and
+        tell him once about a workout Whoop logged today."""
+        try:
+            await self.day()
+        except WhoopUnavailable:
+            return []
+        today = self.ctx.today()
+        told, self._new = [w for w in self._new if w["on"] == today], []
+        out = []
+        for w in told:
+            bits = [f"{w['minutes']} min"]
+            if w["strain"] is not None:
+                bits.append(f"strain {w['strain']:.1f}")
+            if w["heart"]:
+                bits.append(f"avg HR {w['heart']}")
+            out.append(Nudge(f"whoop:workout:{w['id']}",
+                             f"🏃 Whoop logged your {w['kind']}: {', '.join(bits)}. It's in your workouts."))
+        return out
 
 
 def build(ctx: SkillContext) -> Skill | None:

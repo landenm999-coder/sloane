@@ -1349,6 +1349,24 @@ function renderLater(data) {
       el("span", { class: "sub", text: ["promise", c.when].filter(Boolean).join(" · ") }))));
   }
   $("#later-wrap").hidden = !list.children.length;
+  renderPeek(data);
+}
+
+// With room left under today, tomorrow's first things, so the column is never half empty. As many
+// as fit without making it scroll; none when today fills it.
+function renderPeek(data) {
+  const wrap = $("#peek-wrap");
+  const list = $("#peek");
+  list.replaceChildren();
+  const items = tomorrowShown ? [] : (data.agenda?.tomorrow?.items || []).slice(0, 8);
+  for (const i of items) {
+    list.append(el("li", { class: `peek-r ${i.kind}` }, el("span", { class: "h", text: i.all_day ? "All day" : short(i.start) }),
+      el("span", { class: "t", text: jobLabel(i) + (i.kind === "shift" && i.end != null ? ` until ${short(i.end)}` : "") })));
+  }
+  wrap.hidden = !list.children.length;
+  const col = $("#agenda-body");
+  while (list.children.length && col.scrollHeight > col.clientHeight + 1) list.lastElementChild.remove();
+  if (!list.children.length) wrap.hidden = true;
 }
 
 function setDay(tomorrow) {
@@ -1368,15 +1386,22 @@ $("#day-tomorrow").addEventListener("click", () => setDay(true));
 
 const PANEL_NAMES = {
   weather: "Weather", whoop: "Whoop", workouts: "Workouts", markets: "Markets", inbox: "Inbox", habits: "Habits",
-  news: "News", focus: "Focus", money: "Money", countdowns: "Countdowns", lists: "Lists", birthdays: "Birthdays",
+  news: "News", focus: "Focus", money: "Money", portfolio: "Portfolio", countdowns: "Countdowns", lists: "Lists", birthdays: "Birthdays",
   clients: "Clients", school: "School", workshop: "Workshop", learned: "Learned today", grades: "Grades",
   week: "This week", colleges: "College", cards: "Flashcards", deca: "DECA practice", engine: "Engine",
   work: "Up next at work", plan: "Tonight's plan", memory: "Loose ends",
 };
 // Widgets that come from the page's own data, not a skill: shown whatever skills are loaded.
 const CORE_PANELS = new Set(["inbox", "school", "learned", "grades", "week", "engine", "work"]);
-// Two columns wide: the ones that are rows of words.
-const WIDE = new Set(["inbox", "news", "habits"]);
+// Two columns wide: the ones that are rows of words, and the ones with a chart beside their numbers.
+const WIDE = new Set(["inbox", "news", "habits", "markets", "whoop"]);
+// Skills whose panel other widgets draw (the bank's: Money and Portfolio), never a widget of their own.
+const FEEDS = new Set(["bank"]);
+function spanOf(id) {
+  if (WIDE.has(id)) return 2;
+  if (id === "money" && panelOf("bank")?.cash_cents !== undefined) return 2;
+  return 1;
+}
 
 const SVG = "http://www.w3.org/2000/svg";
 const ICONS = {
@@ -1389,6 +1414,7 @@ const ICONS = {
   habits: '<circle cx="12" cy="12" r="8"/><path d="M8.5 12.2l2.4 2.3 4.6-4.8"/>',
   focus: '<circle cx="12" cy="13" r="7"/><path d="M12 9.5V13l2.5 1.5M9.5 3.5h5"/>',
   money: '<rect x="3.5" y="6.5" width="17" height="11" rx="2"/><circle cx="12" cy="12" r="2.2"/>',
+  portfolio: '<path d="M12 3.5a8.5 8.5 0 1 0 8.5 8.5H12z"/><path d="M14.5 2.8v6.7h6.7a6.8 6.8 0 0 0-6.7-6.7z"/>',
   lists: '<path d="M10 7h9.5M10 12h9.5M10 17h9.5"/><path d="M4.5 7l1 1 2-2M4.5 12l1 1 2-2M4.5 17l1 1 2-2"/>',
   countdowns: '<path d="M7 3.5h10M7 20.5h10M8 3.5c0 5 8 5 8 8.5s-8 3.5-8 8.5M16 3.5c0 5-8 5-8 8.5s8 3.5 8 8.5"/>',
   birthdays: '<rect x="4" y="10.5" width="16" height="9.5" rx="2"/><path d="M4 14.5c2.7 1.4 5.3 1.4 8 0s5.3-1.4 8 0M12 10.5V7.5"/><path d="M12 3.8c.9 1 .9 2 0 2.7-.9-.7-.9-1.7 0-2.7z"/>',
@@ -1570,19 +1596,89 @@ function careful(node, command, question) {
   return node;
 }
 
-function ring(fraction, size, cls, text) {
-  const r = size / 2 - 5, C = 2 * Math.PI * r;
-  const svg = document.createElementNS(SVG, "svg");
-  svg.setAttribute("width", size); svg.setAttribute("height", size); svg.setAttribute("viewBox", `0 0 ${size} ${size}`);
-  svg.setAttribute("aria-hidden", "true");
-  const circle = (klass, extra = {}) => {
-    const c = document.createElementNS(SVG, "circle");
-    for (const [k, v] of Object.entries({ class: klass, cx: size / 2, cy: size / 2, r, fill: "none", "stroke-width": 6, ...extra })) c.setAttribute(k, v);
-    return c;
+// -- the pieces widgets are drawn with ----------------------------------------------------------
+
+function svgEl(tag, attrs = {}) {
+  const node = document.createElementNS(SVG, tag);
+  for (const [k, v] of Object.entries(attrs)) if (v != null) node.setAttribute(k, v);
+  return node;
+}
+
+// A ring: how far along something is. It sizes itself to the space it's given (CSS), so a
+// bigger widget gets a bigger ring, and says its number in the middle.
+function ring(fraction, cls, text, { label = "", sub = "" } = {}) {
+  const C = 2 * Math.PI * 42;
+  const svg = svgEl("svg", { viewBox: "0 0 100 100", "aria-hidden": "true" });
+  svg.append(svgEl("circle", { class: "track", cx: 50, cy: 50, r: 42, fill: "none", "stroke-width": 8 }),
+    svgEl("circle", { class: `done ${cls}`, cx: 50, cy: 50, r: 42, fill: "none", "stroke-width": 8, "stroke-linecap": "round",
+      "stroke-dasharray": C.toFixed(1), "stroke-dashoffset": (C * (1 - Math.max(0, Math.min(1, fraction)))).toFixed(1),
+      transform: "rotate(-90 50 50)" }));
+  return el("div", { class: "ring" }, el("div", { class: "ring-art" }, svg, el("b", { class: text.length > 4 ? "long" : "", text })),
+    label ? el("span", { class: "ring-l", text: label }) : null, sub ? el("span", { class: "ring-s", text: sub }) : null);
+}
+
+// A change, said with an arrow as well as its colour.
+function change(pct, text = null) {
+  if (pct == null || Number.isNaN(pct)) return el("span", { class: "chg" });
+  const up = pct >= 0;
+  return el("span", { class: `chg ${up ? "up" : "down"}` }, `${up ? "▲" : "▼"} ${text ?? `${Math.abs(pct).toFixed(2)}%`}`);
+}
+
+function money$(cents, { sign = false, whole = null } = {}) {
+  const n = Math.abs(cents) / 100;
+  const round = whole ?? (Math.abs(cents) % 100 === 0 || n >= 10000);
+  const body = `$${n.toLocaleString("en-US", { minimumFractionDigits: round ? 0 : 2, maximumFractionDigits: round ? 0 : 2 })}`;
+  return cents < 0 ? `−${body}` : `${sign ? "+" : ""}${body}`;
+}
+
+// A line over time, its area shaded, with a dashed line where it started (yesterday's close) and
+// a crosshair that reads out the value under the pointer.
+let charts = 0;
+function areaChart(values, { base = null, up = true, say = (v) => String(v), when = null } = {}) {
+  const wrap = el("div", { class: `chart ${up ? "up" : "down"}` });
+  if (!values || values.length < 2) return wrap;
+  const all = base != null ? [...values, base] : values;
+  let lo = Math.min(...all), hi = Math.max(...all);
+  const pad = (hi - lo) * 0.1 || Math.abs(hi) * 0.002 || 1;
+  lo -= pad; hi += pad;
+  const W = 100, H = 50, id = `area-${++charts}`;
+  const x = (i) => (i / (values.length - 1)) * W;
+  const y = (v) => H - ((v - lo) / (hi - lo)) * H;
+  const line = values.map((v, i) => `${x(i).toFixed(2)},${y(v).toFixed(2)}`).join(" ");
+  const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: "none", "aria-hidden": "true" });
+  const grad = svgEl("linearGradient", { id, x1: 0, x2: 0, y1: 0, y2: 1 });
+  grad.append(svgEl("stop", { offset: "0", "stop-color": "currentColor", "stop-opacity": "0.28" }),
+    svgEl("stop", { offset: "1", "stop-color": "currentColor", "stop-opacity": "0" }));
+  const defs = svgEl("defs");
+  defs.append(grad);
+  svg.append(defs, svgEl("path", { d: `M0,${H} L${line.replaceAll(" ", " L")} L${W},${H} Z`, fill: `url(#${id})` }));
+  if (base != null) svg.append(svgEl("line", { class: "base", x1: 0, x2: W, y1: y(base).toFixed(2), y2: y(base).toFixed(2) }));
+  svg.append(svgEl("polyline", { class: "stroke", points: line }));
+  const last = values[values.length - 1];
+  const hair = el("i", { class: "hair", hidden: true });
+  const tip = el("span", { class: "tip", hidden: true });
+  wrap.append(svg, el("i", { class: "dot", style: `left:100%;top:${((y(last) / H) * 100).toFixed(1)}%` }), hair, tip);
+  const move = (event) => {
+    const box = wrap.getBoundingClientRect();
+    const i = Math.max(0, Math.min(values.length - 1, Math.round(((event.clientX - box.left) / box.width) * (values.length - 1))));
+    const left = (x(i) / W) * 100;
+    hair.hidden = tip.hidden = false;
+    hair.style.left = `${left}%`;
+    tip.textContent = when ? `${when(i)} · ${say(values[i])}` : say(values[i]);
+    tip.style.left = `${Math.max(12, Math.min(88, left))}%`;
   };
-  svg.append(circle("track"), circle(`done ${cls}`, { "stroke-linecap": "round", "stroke-dasharray": C.toFixed(1),
-    "stroke-dashoffset": (C * (1 - Math.max(0, Math.min(1, fraction)))).toFixed(1), transform: `rotate(-90 ${size / 2} ${size / 2})` }));
-  return el("div", { class: "ring" }, svg, el("b", { class: text.length > 4 ? "long" : "", text }));
+  wrap.addEventListener("pointermove", move);
+  wrap.addEventListener("pointerleave", () => { hair.hidden = tip.hidden = true; });
+  return wrap;
+}
+
+// Magnitudes side by side: a label, a bar in one colour, the amount.
+function barList(rows, cls = "") {
+  const most = Math.max(1, ...rows.map((r) => r.value));
+  return el("ul", { class: `bl fit ${cls}` }, ...rows.map((r) => el("li", { class: "li", title: `${r.label}: ${r.said}` },
+    el("span", { class: "bl-l", text: r.label }),
+    el("span", { class: "bl-t", "aria-hidden": "true" }, el("i", { style: `width:${Math.max(2, (r.value / most) * 100).toFixed(1)}%` })),
+    el("span", { class: "bl-v", text: r.said }))));
 }
 
 // -- each widget -------------------------------------------------------------------------------
@@ -1590,30 +1686,46 @@ function ring(fraction, size, cls, text) {
 function weatherW() {
   const p = panelOf("weather");
   if (!p || p.temp == null) return null;
-  const hours = (p.hours || []).filter((h) => h.temp != null).slice(0, 8);
+  const hours = (p.hours || []).filter((h) => h.temp != null).slice(0, 12);
+  const cap = (s) => (s || "").replace(/^./, (c) => c.toUpperCase());
   const range = p.high != null && p.low != null ? `H ${Math.round(p.high)}°  L ${Math.round(p.low)}°` : "";
-  const top = el("div", { class: "ring-row" }, el("div", { class: "num", text: `${Math.round(p.temp)}°` }),
-    el("div", {}, el("div", { class: "num-md", text: (p.sky || "").replace(/^./, (c) => c.toUpperCase()) }),
+  const top = el("div", { class: "wx-top" }, el("div", { class: "num big", text: `${Math.round(p.temp)}°` }),
+    el("div", { class: "grow" }, el("div", { class: "num-md one", text: cap(p.sky) }),
       el("div", { class: "sub", text: [p.feels != null ? `Feels ${Math.round(p.feels)}°` : "", range].filter(Boolean).join(" · ") })));
+  const facts = el("div", { class: "wx-facts" },
+    p.chance != null ? el("span", {}, el("b", { text: `${p.chance}%` }), "Rain") : null,
+    p.humidity != null ? el("span", {}, el("b", { text: `${p.humidity}%` }), "Humidity") : null,
+    p.wind != null ? el("span", {}, el("b", { text: `${p.wind}` }), p.wind_unit || "mph") : null,
+    p.sunset ? el("span", {}, el("b", { text: p.sunset.replace(/ [AP]M$/, "") }), "Sunset") : null);
   const box = widget("weather", { actions: [asking("Ask about the weather", "What's the weather doing this week?")] }, top);
+  const body = box.querySelector(".card-body");
   if (hours.length) {
     const temps = hours.map((h) => h.temp);
     const lo = Math.min(...temps), hi = Math.max(...temps);
     let pm;
-    const bars = el("div", { class: "wx", "aria-hidden": "true" });
-    const labels = el("div", { class: "wx-l", "aria-hidden": "true" });
+    const cols = el("div", { class: "wx", role: "img", "aria-label": `Next hours: ${hours.map((h) => `${short(minuteOf(h.at))} ${Math.round(h.temp)}°`).join(", ")}` });
     for (const h of hours) {
-      bars.append(el("i", { class: h.chance >= 50 ? "wet" : "", style: `height:${hi === lo ? 60 : 30 + ((h.temp - lo) / (hi - lo)) * 70}%` }));
       const [label, isPm] = hourLabel(h.at, pm);
       pm = isPm;
-      labels.append(el("span", { text: label }));
+      cols.append(el("span", { title: `${short(minuteOf(h.at))}: ${Math.round(h.temp)}°, ${h.sky || ""}${h.chance ? `, ${h.chance}% rain` : ""}` },
+        el("b", { text: `${Math.round(h.temp)}°` }),
+        el("i", { class: h.chance >= 50 ? "wet" : "", style: `height:${hi === lo ? 55 : 22 + ((h.temp - lo) / (hi - lo)) * 78}%` }),
+        el("small", { text: label })));
     }
-    const said = hours.map((h) => `${short(minuteOf(h.at))} ${Math.round(h.temp)}°`).join(", ");
-    box.querySelector(".card-body").append(bars, labels, el("span", { class: "sr", text: `Next hours: ${said}` }));
+    body.append(cols);
+  }
+  if (facts.children.length) body.append(facts);
+  const days = (p.days || []).slice(0, 4);
+  if (days.length) {
+    body.append(el("div", { class: "wx-days" }, ...days.map((d) => el("span", { title: `${d.day}: ${cap(d.sky)}, ${d.chance}% rain` },
+      el("small", { text: d.day }), el("b", { text: `${Math.round(d.high)}°` }), el("small", { class: "lo", text: `${Math.round(d.low)}°` }),
+      d.chance >= 30 ? el("small", { class: "wet", text: `${d.chance}%` }) : null))));
   }
   return box;
 }
 
+// Whoop, as Whoop draws it: three rings (sleep, recovery, strain), then HRV and resting heart
+// rate against his own average: right of the mark is above it, left below, green the good way.
 function whoopW() {
   const p = panelOf("whoop");
   if (!p || (p.recovery == null && p.sleep_minutes == null && p.strain == null)) {
@@ -1622,32 +1734,56 @@ function whoopW() {
       el("p", { text: "Whoop isn't answering right now. She'll try again on the next refresh." })));
   }
   const zone = { green: "good", yellow: "hot", red: "bad" }[p.zone] || "";
-  const stats = el("div", { class: "stat" });
-  if (p.sleep_minutes != null) stats.append(el("span", {}, el("b", { text: hm(p.sleep_minutes) }), `Sleep${p.sleep_performance != null ? ` · ${p.sleep_performance}%` : ""}`));
-  if (p.strain != null) stats.append(el("span", {}, el("b", { text: p.strain.toFixed(1) }), "Strain"));
-  return widget("whoop", { meta: p.old ? "Earlier" : p.zone ? p.zone[0].toUpperCase() + p.zone.slice(1) : "", metaCls: zone,
-    actions: [asking("Ask how you slept", "How did I sleep, and how recovered am I?")] },
-  el("div", { class: "ring-row" }, ring(p.recovery == null ? 0 : p.recovery / 100, 72, p.zone || "",
-    p.recovery == null ? "—" : `${p.recovery}%`), stats),
-  el("div", { class: "sub", text: [p.hrv != null ? `HRV ${p.hrv} ms` : "", p.rhr != null ? `Resting HR ${p.rhr}` : ""].filter(Boolean).join(" · ") }));
+  const rings = el("div", { class: "rings3" },
+    ring(p.sleep_performance == null ? 0 : p.sleep_performance / 100, "sleep", p.sleep_performance == null ? "—" : `${p.sleep_performance}%`,
+      { label: "Sleep", sub: p.sleep_minutes != null ? `${hm(p.sleep_minutes)}${p.sleep_need_minutes ? ` of ${hm(p.sleep_need_minutes)}` : ""}` : "" }),
+    ring(p.recovery == null ? 0 : p.recovery / 100, p.zone || "", p.recovery == null ? "—" : `${p.recovery}%`,
+      { label: "Recovery", sub: p.zone ? p.zone.replace(/^./, (c) => c.toUpperCase()) : "Not scored" }),
+    ring(p.strain == null ? 0 : p.strain / (p.strain_max || 21), "strain", p.strain == null ? "—" : p.strain.toFixed(1),
+      { label: "Strain", sub: `of ${p.strain_max || 21}` }));
+  const vs = (name, value, avg, unit, higherIsBetter) => {
+    if (value == null) return null;
+    const row = el("div", { class: "vs" }, el("span", { class: "vs-l" }, el("b", { text: name }), el("span", { text: `${value} ${unit}` })));
+    if (avg == null) {
+      row.append(el("span", { class: "vs-t" }), el("span", { class: "vs-d muted", text: "No average yet" }));
+      return row;
+    }
+    const pct = ((value - avg) / avg) * 100;
+    const good = higherIsBetter ? pct >= 0 : pct <= 0;
+    const width = Math.min(50, (Math.abs(pct) / 30) * 50);
+    const bar = el("span", { class: "vs-t", role: "img", "aria-label": `${name} ${value} ${unit}, ${Math.abs(pct).toFixed(0)}% ${pct >= 0 ? "above" : "below"} your ${Math.round(avg)} average` },
+      el("i", { class: good ? "good" : "hot", style: `${pct >= 0 ? "left" : "right"}:50%;width:${width.toFixed(1)}%` }), el("em"));
+    row.append(bar, el("span", { class: `vs-d ${good ? "good" : "hot"}`, title: `Your average over ${p.avg_days} days: ${avg} ${unit}` },
+      `${pct >= 0 ? "▲" : "▼"} ${Math.abs(pct).toFixed(0)}%`, el("small", { text: ` vs ${Math.round(avg)}` })));
+    return row;
+  };
+  const bars = el("div", { class: "vs-rows" }, vs("HRV", p.hrv, p.hrv_avg, "ms", true), vs("Resting HR", p.rhr, p.rhr_avg, "bpm", false));
+  return widget("whoop", { meta: p.old ? "Earlier" : "", metaCls: zone,
+    actions: [asking("Ask how you slept", "How did I sleep, and how recovered am I?")] }, rings, bars.children.length ? bars : null);
 }
 
 function workoutsW() {
   const p = panelOf("workouts");
   if (!p) return null;
   const most = Math.max(30, ...(p.days || []).map((d) => d.minutes || (d.count ? 30 : 0)));
-  const bars = el("div", { class: "bars7", "aria-hidden": "true" });
+  const bars = el("div", { class: "bars7", role: "img", "aria-label": (p.days || []).map((d) => `${d.day} ${d.count ? `${d.minutes} min` : "none"}`).join(", ") });
   for (const d of p.days || []) {
     const minutes = d.minutes || (d.count ? 30 : 0);
-    bars.append(el("span", { class: d.today ? "today" : "" },
-      el("i", { class: d.count ? "y" : "", style: `height:${d.count ? Math.max(20, (minutes / most) * 100).toFixed(0) : 6}%` }), d.day[0]));
+    bars.append(el("span", { class: d.today ? "today" : "", title: `${d.day}: ${d.count ? `${(d.kinds || []).join(", ")}${d.minutes ? `, ${d.minutes} min` : ""}` : "rest"}` },
+      el("i", { class: d.count ? "y" : "", style: `height:${d.count ? Math.max(18, (minutes / most) * 100).toFixed(0) : 5}%` }), d.day[0]));
   }
-  const said = `${p.count} workout${p.count === 1 ? "" : "s"} this week${p.goal ? ` of ${p.goal}` : ""}`;
-  return widget("workouts", { meta: p.distance || "", actions: [adding("Log a workout", FORMS.workout)] },
-    el("div", { class: "num", "aria-label": said }, String(p.count), el("small", { text: p.goal ? `of ${p.goal} this week` : "this week" })),
-    bars,
-    p.last ? el("div", { class: "sub", text: `Last: ${p.last.text}, ${p.last.when.toLowerCase()}` }) : null);
+  const goal = p.goal || 0;
+  const hero = el("div", { class: "hero-row" },
+    ring(goal ? p.count / goal : Math.min(1, p.count / 4), p.count >= goal && goal ? "good" : "", goal ? `${p.count}/${goal}` : String(p.count)),
+    el("div", { class: "hero-text" }, el("div", { class: "num-md", text: `${p.count} workout${p.count === 1 ? "" : "s"}` }),
+      el("div", { class: "sub", text: [p.minutes ? hm(p.minutes) : "", p.distance || "", p.strain != null ? `strain ${p.strain}` : ""].filter(Boolean).join(" · ") || "this week" })));
+  const last = p.last;
+  const lastLine = last ? el("div", { class: "last-w" }, last.source === "whoop" ? el("span", { class: "pill now", text: "Whoop" }) : null,
+    el("span", { class: "one", text: `${last.text}, ${last.when.toLowerCase()}${last.strain != null ? ` · strain ${last.strain}` : ""}${last.heart_rate ? ` · ${last.heart_rate} bpm` : ""}` })) : null;
+  return widget("workouts", { meta: p.whoop ? (p.from_whoop ? `${p.from_whoop} from Whoop` : "Whoop synced") : "",
+    actions: [adding("Log a workout", FORMS.workout)] }, el("div", { class: "centered" }, hero, bars, lastLine));
 }
+
 
 function spark(values, up) {
   if (!values || values.length < 2) return null;
@@ -1663,25 +1799,52 @@ function spark(values, up) {
   return svg;
 }
 
+// Markets: the market at a glance across the top, a chart of the one he picked, his watchlist.
+let marketShown = recall("sloane.market", "");
+const TICKER_SHORT = { "^GSPC": "S&P 500", "^IXIC": "Nasdaq", "^DJI": "Dow", "^RUT": "Russell", "^VIX": "VIX", "^TNX": "10Y yield",
+  "GC=F": "Gold", "CL=F": "Oil", "BTC-USD": "Bitcoin", "ETH-USD": "Ether" };
 function marketsW() {
   const p = panelOf("markets");
   if (!p) return null;
   const quotes = p.quotes || [];
-  const list = el("ul", { class: "fit mk" });
-  for (const q of quotes.slice(0, 10)) {
+  const overview = p.overview || [];
+  const every = [...quotes, ...overview];
+  const pick = every.find((q) => q.symbol === marketShown) || quotes[0] || overview[0];
+  const choose = (symbol) => { marketShown = symbol; remember("sloane.market", symbol); renderPanels(); };
+  const strip = el("div", { class: "mk-strip", role: "list", "aria-label": "The market" }, ...overview.map((q) => {
     const up = (q.change ?? 0) >= 0;
-    const change = q.change == null ? "" : `${up ? "+" : "−"}${Math.abs(q.change).toFixed(2)}%`;
+    return el("button", { type: "button", class: "mk-chip", role: "listitem", "aria-pressed": String(pick && q.symbol === pick.symbol),
+      title: `${q.name}: ${q.price}${q.change != null ? `, ${up ? "up" : "down"} ${Math.abs(q.change).toFixed(2)}%` : ""}`,
+      "aria-label": `${q.name} ${q.price}${q.change != null ? `, ${up ? "up" : "down"} ${Math.abs(q.change).toFixed(2)} percent` : ""}`,
+      onclick: () => choose(q.symbol) }, el("span", { class: "n", text: TICKER_SHORT[q.symbol] || q.name }), change(q.change));
+  }));
+  let chart = el("div", { class: "mk-chart" });
+  if (pick) {
+    const up = (pick.change ?? 0) >= 0;
+    const fmt = (v) => (pick.symbol === "^TNX" ? `${v.toFixed(2)}%` : v >= 1000 ? v.toLocaleString("en-US", { maximumFractionDigits: 0 })
+      : v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: v < 1 ? 4 : 2 }));
+    chart = el("div", { class: "mk-chart" },
+      el("div", { class: "mk-head" }, el("span", { class: "mk-name", text: pick.name }), el("span", { class: "mk-price", text: pick.price }), change(pick.change)),
+      areaChart(pick.spark, { base: pick.previous, up, say: fmt }),
+      el("div", { class: "mk-foot" }, el("span", { text: "Today" }), pick.previous != null ? el("span", { text: `Prev close ${fmt(pick.previous)}` }) : null));
+  }
+  const list = el("ul", { class: "fit mk" });
+  for (const q of quotes) {
+    const up = (q.change ?? 0) >= 0;
     const name = q.name === q.symbol ? q.symbol : q.name;
     const drop = p.mine ? careful(tool("x", `Stop watching ${name}`, null, "icon-btn sm hover"), `/unwatch ${q.symbol}`,
       `Press again to stop watching ${name}`) : null;
-    list.append(item({ one: name, two: name === q.symbol ? "" : q.symbol, label: `${name}: ${q.price}${change ? `, ${change} today` : ""}`,
-      val: el("span", { class: "val-row" }, spark(q.spark, up),
-        el("span", { class: "val" }, el("span", { text: q.price }), el("small", { class: `chg ${up ? "up" : "down"}`, text: change }))),
-      tail: drop }));
+    const row = item({ one: TICKER_SHORT[q.symbol] || q.symbol.replace(/-USD$/, "").replace(/^\^/, ""), cls: pick && q.symbol === pick.symbol ? "on" : "",
+      label: `${name}: ${q.price}${q.change != null ? `, ${up ? "up" : "down"} ${Math.abs(q.change).toFixed(2)}% today` : ""}`,
+      val: el("span", { class: "val-row" }, spark(q.spark, up), el("span", { class: "val mk-val" }, el("span", { text: q.price }), change(q.change))),
+      tail: drop });
+    row.addEventListener("click", (event) => { if (!event.target.closest("button")) choose(q.symbol); });
+    list.append(row);
   }
-  if (!quotes.length) list.append(el("li", { class: "sub", text: (p.lines || [])[0] || "No prices right now." }));
-  return widget("markets", { meta: p.old ? "Delayed" : p.mine ? "" : "Indexes", actions: [
-    adding("Watch a ticker", FORMS.watch), asking("Ask about the market", "How's the market doing today?")] }, list);
+  if (!quotes.length && !overview.length) list.append(el("li", { class: "sub", text: (p.lines || [])[0] || "No prices right now." }));
+  return widget("markets", { meta: p.old ? "Delayed" : "", actions: [
+    adding("Watch a ticker", FORMS.watch), asking("Ask about the market", "How's the market doing today?")] },
+  overview.length ? strip : null, el("div", { class: "mk-main" }, chart, quotes.length ? list : null));
 }
 
 function inboxW() {
@@ -1747,48 +1910,104 @@ function habitsW() {
   return widget("habits", { meta: "Last 14 days", actions: [adding("Track a habit", FORMS.habit)] }, list);
 }
 
+// Focus: what's worth a block (his work due soonest), one press to start it; while it runs, the
+// time left, and her messages held till it's done.
 function focusW() {
   const loaded = new Set(latest?.system?.skills || []);
   if (!loaded.has("focus")) return null;
-  const p = panelOf("focus") || { today_minutes: 0, goal_minutes: 0, running: null };
+  const p = panelOf("focus") || { today_minutes: 0, goal_minutes: 0, running: null, suggest: [], week: [] };
   const running = p.running;
-  let fraction, big, lines;
   if (running) {
     const total = Math.max(1, Date.parse(running.ends_at) - Date.parse(running.started_at));
     const left = Math.max(0, Date.parse(running.ends_at) - Date.now());
-    fraction = left / total;
-    big = `${Math.ceil(left / 60000)}m`;
-    lines = [el("div", { class: "num-md", text: running.what, title: running.what }), el("div", { class: "sub", text: `left · ${hm(p.today_minutes)} today` })];
-  } else {
-    fraction = p.goal_minutes ? Math.min(1, p.today_minutes / p.goal_minutes) : 0;
-    big = hm(p.today_minutes || 0);
-    lines = [el("div", { class: "num-md", text: p.today_minutes ? "Focused" : "Not yet today" }),
-      el("div", { class: "sub", text: p.goal_minutes ? `Goal ${hm(p.goal_minutes)}` : "Start a block" })];
+    const until = new Date(running.ends_at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: clockState.tz });
+    return widget("focus", { meta: "Running", metaCls: "good" }, el("div", { class: "centered" },
+      ring(left / total, "", `${Math.ceil(left / 60000)}m`),
+      el("div", { class: "hero-text c" }, el("div", { class: "num-md one", text: running.what, title: running.what }),
+        el("div", { class: "sub", text: `Until ${until} · holding her messages` })),
+      el("div", { class: "acts" }, button("Stop", () => run("/focus stop"), "btn sm danger"))));
   }
-  const acts = running
-    ? [button("Stop", () => run("/focus stop"), "btn sm danger")]
-    : [button("25 min", () => run("/focus 25 deep work"), "btn sm"), button("50 min", () => run("/focus 50 deep work"), "btn sm")];
-  return widget("focus", { meta: running ? "Running" : "", metaCls: running ? "good" : "",
-    actions: running ? [] : [adding("Focus on something, for as long as you choose", FORMS.focus)] },
-    el("div", { class: "ring-row" }, ring(fraction, 64, "", big), el("div", { class: "grow" }, ...lines)),
-    el("div", { class: "card-foot acts" }, ...acts));
+  const goal = p.goal_minutes || 0;
+  const hero = el("div", { class: "hero-row" }, ring(goal ? Math.min(1, p.today_minutes / goal) : 0, "", hm(p.today_minutes || 0)),
+    el("div", { class: "hero-text" }, el("div", { class: "num-md", text: p.today_minutes ? "Focused today" : "No focus yet" }),
+      el("div", { class: "sub", text: [goal ? `Goal ${hm(goal)}` : "", p.week_minutes ? `${hm(p.week_minutes)} this week` : ""].filter(Boolean).join(" · ") || "Start a block" })));
+  const next = (p.suggest || []).map((s) => el("button", { type: "button", class: "sug",
+    title: `Focus 25 minutes on ${s.what}`, onclick: () => run(`/focus 25 ${s.what}`) },
+  icon("open", "ico sm"), el("span", { class: "grow" }, el("span", { class: "one", text: s.what }),
+    el("span", { class: "two", text: [s.course, `due ${s.due}`, s.minutes ? `${hm(s.minutes)} in` : ""].filter(Boolean).join(" · ") }))));
+  return widget("focus", { actions: [adding("Focus on something, for as long as you choose", FORMS.focus)] },
+    el("div", { class: "centered" }, hero,
+      next.length ? el("div", { class: "sugs fit" }, ...next) : null,
+      el("div", { class: "acts" }, button("25 min", () => run("/focus 25 deep work"), "btn sm"),
+        button("50 min", () => run("/focus 50 deep work"), "btn sm"))));
 }
 
 function moneyW() {
   const p = panelOf("money");
-  if (!p || p.spent_cents == null) return null;
-  const dollars = (cents) => `$${(cents / 100).toLocaleString("en-US", { maximumFractionDigits: cents % 100 ? 2 : 0, minimumFractionDigits: cents % 100 ? 2 : 0 })}`;
-  const share = p.budget_cents ? p.spent_cents / p.budget_cents : 0;
+  const b = panelOf("bank");
+  const bank = b && !b.waiting && b.cash_cents !== undefined ? b : null;
+  if (!bank && (!p || p.spent_cents == null)) return null;
+  const spent = p?.spent_cents ?? bank?.spent_week_cents ?? 0;
+  const budget = p?.budget_cents || 0;
+  const share = budget ? spent / budget : 0;
+  const acts = [adding("Log cash spending", FORMS.spent)];
+  if (bank) acts.push(tool("refresh", "Ask the bank now", () => run("/bank sync")));
+  const spentBox = el("div", { class: "stat-b" }, el("small", { text: "Spent this week" }),
+    el("div", { class: "num", text: money$(spent, { whole: spent >= 100000 }) },
+      el("small", { text: budget ? `of ${money$(budget)}` : "" })),
+    budget
+      ? el("div", { class: "meter", role: "img", "aria-label": `${Math.round(share * 100)}% of the week's budget` },
+        el("i", { class: share >= 1 ? "over" : share >= 0.85 ? "hot" : "", style: `width:${Math.min(100, share * 100).toFixed(0)}%` }))
+      : el("button", { type: "button", class: "link", text: "Set a weekly budget", onclick: (e) => openForm(e.currentTarget.closest(".card"), FORMS.budget) }));
+  const top = el("div", { class: "money-top" }, spentBox);
+  if (bank && bank.cash_cents != null) {
+    const over = budget && spent > budget;
+    top.append(el("div", { class: "stat-b" }, el("small", { text: !budget ? "Checking & savings" : over ? "Over this week" : "Left this week" }),
+      el("div", { class: `num ${over ? "bad" : ""}`, text: budget ? money$(Math.abs(budget - spent), { whole: Math.abs(budget - spent) >= 10000 }) : money$(bank.cash_cents, { whole: true }) }),
+      el("div", { class: "sub", text: [budget ? `${money$(bank.cash_cents, { whole: true })} in the bank` : "",
+        bank.owed_cents > 0 ? `card owes ${money$(bank.owed_cents, { whole: true })}` : ""].filter(Boolean).join(" · ") })));
+  } else if (p?.earned_cents != null) {
+    top.append(el("div", { class: "stat-b" }, el("small", { text: "Earned (est.)" }), el("div", { class: "num", text: money$(p.earned_cents, { whole: true }) })));
+  }
+  let middle = null;
+  if (bank && (bank.categories || []).length) {
+    middle = barList(bank.categories.slice(0, 4).map((c) => ({ label: c.name.replace(/^./, (x) => x.toUpperCase()), value: c.cents,
+      said: money$(c.cents, { whole: true }) })), "cats");
+  }
   const list = el("ul", { class: "fit" });
-  for (const r of p.recent || []) list.append(item({ one: r.what, val: valueOf(dollars(r.cents), r.day) }));
-  return widget("money", { meta: p.earned_cents != null ? `Earned ~${dollars(p.earned_cents)}` : "",
-    actions: [adding("Log spending", FORMS.spent)] },
-  el("div", { class: "num" }, dollars(p.spent_cents), el("small", { text: p.budget_cents ? `of ${dollars(p.budget_cents)} this week` : "this week" })),
-  p.budget_cents
-    ? el("div", { class: "meter", role: "img", "aria-label": `${Math.round(share * 100)}% of the week's budget` },
-      el("i", { class: share >= 1 ? "over" : share >= 0.85 ? "hot" : "", style: `width:${Math.min(100, share * 100).toFixed(0)}%` }))
-    : el("button", { type: "button", class: "link", text: "Set a weekly budget", onclick: (e) => openForm(e.currentTarget.closest(".card"), FORMS.budget) }),
-  list);
+  const rows = bank ? (bank.recent || []).map((r) => ({ what: r.what, cents: -r.cents, day: r.day, pending: r.pending }))
+    : (p?.recent || []).map((r) => ({ what: r.what, cents: r.cents, day: r.day }));
+  for (const r of rows) {
+    list.append(item({ one: r.what, two: r.pending ? "Pending" : "", val: valueOf(r.cents < 0 ? `+${money$(-r.cents)}` : money$(r.cents), r.day),
+      cls: r.cents < 0 ? "in" : "" }));
+  }
+  if (!rows.length) list.append(el("li", { class: "sub", text: "Nothing spent yet this week." }));
+  return widget("money", { meta: bank ? (bank.stale ? `Synced ${bank.synced}` : bank.error ? "Bank not answering" : "") : p?.earned_cents != null ? "" : "",
+    metaCls: bank?.error ? "bad" : "", actions: acts }, top, el("div", { class: "money-main" }, middle, list));
+}
+
+// His investments, from the bank sync, priced with today's delayed quotes.
+function portfolioW() {
+  const b = panelOf("bank");
+  const p = b?.portfolio;
+  if (!p) return null;
+  const up = (p.change_cents ?? 0) >= 0;
+  const history = (b.invest_history || []).map((h) => h.cents);
+  const head = el("div", { class: "pf-head" }, el("div", { class: "num big", text: money$(p.value_cents, { whole: p.value_cents >= 1000000 }) }),
+    p.change_cents != null ? el("div", {}, change(p.change_pct, `${money$(Math.abs(p.change_cents))} (${Math.abs(p.change_pct).toFixed(2)}%)`), el("small", { class: "muted", text: " today" })) : null);
+  const chart = history.length >= 2
+    ? areaChart(history, { up: history[history.length - 1] >= history[0], say: (v) => money$(v, { whole: true }),
+      when: (i) => new Date(`${b.invest_history[i].on}T12:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" }) })
+    : null;
+  const list = el("ul", { class: "fit" });
+  for (const h of p.holdings || []) {
+    list.append(item({ one: h.symbol || h.name, two: h.symbol ? h.name : "", label: `${h.name}: ${money$(h.value_cents ?? 0)}`,
+      val: el("span", { class: "val" }, el("span", { text: money$(h.value_cents ?? 0, { whole: (h.value_cents ?? 0) >= 100000 }) }),
+        h.change_pct != null ? change(h.change_pct) : el("small", { text: `${Math.round((h.weight || 0) * 100)}%` })) }));
+  }
+  const gain = p.gain_cents != null ? `${p.gain_cents >= 0 ? "+" : ""}${money$(p.gain_cents, { whole: true })} all time` : "";
+  return widget("portfolio", { meta: gain, metaCls: p.gain_cents != null ? (p.gain_cents >= 0 ? "good" : "bad") : "",
+    actions: [asking("Ask about your portfolio", "How's my portfolio doing?")] }, head, chart, list);
 }
 
 let listShown = "";
@@ -1834,13 +2053,20 @@ function countdownsW() {
 function birthdaysW() {
   const items = panelOf("birthdays")?.items || [];
   if (!items.length) return null;
+  const next = items[0];
+  const hero = items.length <= 3 ? el("div", { class: "centered feature" },
+    el("div", {}, el("div", { class: "num big", text: next.days === 0 ? "Today" : String(next.days) }),
+      el("div", { class: "sub", text: next.days === 0 ? "" : `day${next.days === 1 ? "" : "s"} until` })),
+    el("div", {}, el("div", { class: "num-md one", text: `${next.name}'s birthday`, title: `${next.name}'s birthday` }),
+      el("div", { class: "sub", text: next.date }))) : null;
   const list = el("ul", { class: "fit" });
-  for (const b of items) {
+  for (const b of hero ? items.slice(1) : items) {
     list.append(item({ one: b.name, two: b.date, val: el("span", { class: `pill ${b.days <= 1 ? "now" : ""}`,
       text: b.days === 0 ? "Today" : b.days === 1 ? "Tomorrow" : `In ${b.days} days` }) }));
   }
   return widget("birthdays", { actions: [adding("Add a birthday", FORMS.birthday),
-    asking("Ask for gift ideas", `Give me gift ideas for ${items[0].name}'s birthday`)] }, list);
+    asking("Ask for gift ideas", `Give me gift ideas for ${items[0].name}'s birthday`)] }, hero, list.children.length ? list : null,
+  hero && items.length === 1 ? el("div", { class: "acts center" }, button("Gift ideas", () => askHer(`Give me gift ideas for ${next.name}'s birthday`), "btn sm")) : null);
 }
 
 function clientsW() {
@@ -1855,7 +2081,7 @@ function clientsW() {
         worth ? el("small", { text: worth }) : null) }));
   }
   return widget("clients", { actions: [adding("Add a client", FORMS.client)] },
-    p.pipeline_cents ? el("div", { class: "sub", text: `$${Math.round(p.pipeline_cents / 100).toLocaleString("en-US")} in the pipeline` }) : null, list);
+    p.pipeline_cents ? el("div", { class: "num" }, `$${Math.round(p.pipeline_cents / 100).toLocaleString("en-US")}`, el("small", { text: "in the pipeline" })) : null, list);
 }
 
 // School, in one widget: what's due soon (tick one handed in), what's overdue, the grades.
@@ -1915,10 +2141,13 @@ function workshopW() {
   const others = (shop?.items || []).filter((i) => ["idea", "planned", "queued"].includes(i.status) && i.id !== now.item.id).length;
   return widget("workshop", { actions: [
     adding("Ask her to build something", FORMS.idea), tool("open", "Open the workshop", () => show("workshop"))] },
-  el("div", { class: "ring-row" }, el("div", { class: "num-md grow one", text: now.item.title, title: now.item.title }),
-    el("span", { class: `pill ${now.active ? "hot" : ""}`, text: now.word })), segs, labels,
-  el("div", { class: "sub", text: others ? `${others} more waiting in the workshop` : "Nothing else queued" }),
-  now.item.status === "ready" ? el("div", { class: "card-foot" }, button("Review", () => show("workshop"), "btn sm primary")) : null);
+  el("div", { class: "spread" },
+    el("div", { class: "ring-row" }, el("div", { class: "num-md grow one", text: now.item.title, title: now.item.title }),
+      el("span", { class: `pill ${now.active ? "hot" : ""}`, text: now.word })),
+    el("div", {}, segs, labels),
+    el("div", { class: "sub", text: others ? `${others} more waiting in the workshop` : "Nothing else queued" }),
+    el("div", { class: "acts" }, now.item.status === "ready" ? button("Review", () => show("workshop"), "btn sm primary")
+      : button("Open the workshop", () => show("workshop"), "btn sm"))));
 }
 
 function learnedW() {
@@ -2018,7 +2247,10 @@ const EMPTY = {
   markets: { text: "The stocks and coins you follow, with today's move.", form: FORMS.watch, cta: "Watch a ticker" },
   news: { text: "The top headlines, and the topics you follow.", form: FORMS.follow, cta: "Follow a topic" },
   habits: { text: "The things you mean to do every day. Tick them off here and keep the streak.", form: FORMS.habit, cta: "Track a habit" },
-  money: { text: "What you spend each week, against a budget if you set one.", form: FORMS.spent, cta: "Log spending" },
+  money: { text: "What you spend each week, against a budget if you set one. Connect your bank and it fills in on its own.",
+    note: "Your bank and card, read-only: DEPLOY.md, section 7k.", form: FORMS.spent, cta: "Log spending" },
+  portfolio: { text: "Your Fidelity accounts: what they're worth, today's move, and each holding.",
+    note: "Connect it read-only through SimpleFIN: DEPLOY.md, section 7k.", ask: ["How do I connect it?", "How do I connect my bank and Fidelity to you?"] },
   countdowns: { text: "Days to go until the things you're waiting for.", form: FORMS.countdown, cta: "Add a countdown" },
   lists: { text: "Groceries, packing, to-dos: any list you name. Check things off here.", form: listForm("grocery"), cta: "Start a list" },
   birthdays: { text: "Birthdays coming up, so none sneak past.", form: FORMS.birthday, cta: "Add a birthday" },
@@ -2030,25 +2262,27 @@ const EMPTY = {
 function emptyWidget(id) {
   const loaded = new Set(latest?.system?.skills || []);
   const spec = EMPTY[id];
-  if (!spec || !(loaded.has(id) || CORE_PANELS.has(id) || id === "whoop")) return null;
+  if (!spec || !(loaded.has(id) || CORE_PANELS.has(id) || id === "whoop" || id === "portfolio")) return null;
   const acts = [];
   if (spec.form) acts.push(button(spec.cta, (e) => openForm(e.currentTarget.closest(".card"), spec.form), "btn sm primary"));
   if (spec.ask) acts.push(button(spec.ask[0], () => askHer(spec.ask[1]), "btn sm"));
-  return widget(id, {}, el("div", { class: "w-empty" }, el("p", { text: spec.text }),
+  const box = widget(id, {}, el("div", { class: "w-empty" }, el("p", { text: spec.text }),
     spec.note ? el("p", { class: "note", text: spec.note }) : null, acts.length ? el("div", { class: "acts" }, ...acts) : null));
+  box.classList.add("w-blank");
+  return box;
 }
 
 const BUILT = {
   weather: weatherW, whoop: whoopW, workouts: workoutsW, markets: marketsW, inbox: inboxW, habits: habitsW,
-  news: newsW, focus: focusW, money: moneyW, lists: listsW, countdowns: countdownsW, birthdays: birthdaysW,
+  news: newsW, focus: focusW, money: moneyW, portfolio: portfolioW, lists: listsW, countdowns: countdownsW, birthdays: birthdaysW,
   clients: clientsW, school: schoolW, workshop: workshopW, learned: learnedW, grades: gradesW, week: weekW,
   colleges: collegesW, engine: engineW, work: workW,
 };
 
 // Every widget there could be, in order: the ones the page draws, then every other skill's.
 function panelIds() {
-  const ids = Object.keys(latest?.prefs?.defaults || BUILT);
-  for (const p of latest?.panels || []) if (!ids.includes(p.skill)) ids.push(p.skill);
+  const ids = Object.keys(latest?.prefs?.defaults || BUILT).filter((id) => !FEEDS.has(id));
+  for (const p of latest?.panels || []) if (!ids.includes(p.skill) && !FEEDS.has(p.skill)) ids.push(p.skill);
   return ids;
 }
 
@@ -2073,12 +2307,16 @@ function renderPanels() {
   const box = $("#panels");
   const out = [];
   if (wide.matches) {
-    // Every widget that's on: filled, or saying how to fill it.
+    // Every widget that's on: the ones with something in them first, then the ones saying how to
+    // fill them, so the first page is his real numbers.
+    const empty = [];
     for (const id of panelIds()) {
       if (!panelOn(id)) continue;
-      const node = buildPanel(id) || emptyWidget(id);
-      if (node) { node.dataset.id = id; out.push(node); }
+      const filled = buildPanel(id);
+      const node = filled || emptyWidget(id);
+      if (node) { node.dataset.id = id; (filled ? out : empty).push(node); }
     }
+    out.push(...empty);
   } else {
     // The phone's three, as he chose them; with nothing in one yet, the next widget that has something.
     const chosen = latest?.prefs?.phone || ["whoop", "markets", "habits"];
@@ -2143,6 +2381,7 @@ function paginate(spans, cols, rows) {
 }
 
 function layoutPanels() {
+  if (latest && document.body.dataset.view === "today") renderPeek(latest);
   const grid = $("#panels");
   const cards = [...grid.children];
   const pager = $("#pager");
@@ -2154,13 +2393,14 @@ function layoutPanels() {
   const W = grid.clientWidth, H = board.clientHeight;
   if (!W || !H) return;
   const cols = Math.max(1, Math.min(MAX_COLS, Math.floor((W + GAP) / (MIN_W + GAP))));
-  const spans = cards.map((c) => Math.min(cols, WIDE.has(c.dataset.id) ? 2 : 1));
+  const spans = cards.map((c) => Math.min(cols, c.classList.contains("w-blank") ? 1 : spanOf(c.dataset.id)));
   const rowsIn = (h) => Math.max(1, Math.min(MAX_ROWS, Math.floor((h + GAP) / (MIN_H + GAP))));
   let pages = paginate(spans, cols, rowsIn(H));
   if (pages.length > 1) pages = paginate(spans, cols, rowsIn(H - 38));
   page = Math.min(page, pages.length - 1);
   const shown = pages[page];
-  const rows = pages.length > 1 ? rowsIn(H - 38) : shown.rows;
+  // A page's rows share the height, so a last page with fewer rows has taller widgets, not a hole.
+  const rows = shown.rows;
   grid.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
   grid.style.gridTemplateRows = `repeat(${rows}, minmax(0, 1fr))`;
   const at = new Map(shown.items.map((it) => [it.i, it]));

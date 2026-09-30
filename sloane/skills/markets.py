@@ -6,7 +6,9 @@
 
 Delayed quotes from Yahoo's chart API (stocks, funds, indexes, crypto; no key),
 with CoinGecko for crypto when Yahoo won't answer. With nothing on his list she
-watches the broad market: the S&P 500, the Nasdaq and Bitcoin.
+watches the broad market: the S&P 500, the Nasdaq and Bitcoin. The control room
+also shows the market at a glance (OVERVIEW: the big indexes, the VIX, the
+10-year yield, gold, oil, Bitcoin and Ether), each with its day's line.
 
 Prices are structured numbers from an API, so they may go in FACTS, but only
 from the cache: FACTS never waits on a quote. A quote is fetched at most every
@@ -40,6 +42,9 @@ RETRY_AFTER_SECONDS = 5 * 60
 TIMEOUT_SECONDS = 5.0
 MAX_WATCHED = 12
 DEFAULTS = ("^GSPC", "^IXIC", "BTC-USD")
+# Most telling first: a narrow widget shows the first few.
+OVERVIEW = ("^GSPC", "^IXIC", "^DJI", "BTC-USD", "^TNX", "^VIX", "GC=F", "CL=F", "^RUT", "ETH-USD")
+SPARK_POINTS = 96   # a day of five-minute closes, and then some
 AGENT = "Mozilla/5.0 (X11; Linux aarch64) Sloane/1.0"
 
 ALIASES = {
@@ -49,12 +54,15 @@ ALIASES = {
     "s&p": "^GSPC", "s&p 500": "^GSPC", "the s&p": "^GSPC", "the s&p 500": "^GSPC", "sp500": "^GSPC", "spx": "^GSPC",
     "nasdaq": "^IXIC", "the nasdaq": "^IXIC", "dow": "^DJI", "the dow": "^DJI", "dow jones": "^DJI",
     "russell": "^RUT", "vix": "^VIX", "gold": "GC=F", "oil": "CL=F", "crude": "CL=F",
+    "10 year": "^TNX", "10-year": "^TNX", "the 10 year": "^TNX", "the 10-year": "^TNX", "treasuries": "^TNX",
+    "tnx": "^TNX",
     "apple": "AAPL", "tesla": "TSLA", "nvidia": "NVDA", "microsoft": "MSFT", "amazon": "AMZN", "google": "GOOGL",
     "alphabet": "GOOGL", "meta": "META", "facebook": "META", "netflix": "NFLX", "amd": "AMD", "disney": "DIS",
     "nike": "NKE", "costco": "COST", "walmart": "WMT", "spotify": "SPOT", "coinbase": "COIN", "palantir": "PLTR",
 }
 NAMES = {
     "^GSPC": "S&P 500", "^IXIC": "Nasdaq", "^DJI": "Dow", "^RUT": "Russell 2000", "^VIX": "VIX",
+    "^TNX": "10-yr yield",
     "BTC-USD": "Bitcoin", "ETH-USD": "Ether", "SOL-USD": "Solana", "DOGE-USD": "Dogecoin", "XRP-USD": "XRP",
     "ADA-USD": "Cardano", "LTC-USD": "Litecoin", "GC=F": "Gold", "CL=F": "Oil",
     "AAPL": "Apple", "TSLA": "Tesla", "NVDA": "Nvidia", "MSFT": "Microsoft", "AMZN": "Amazon", "GOOGL": "Google",
@@ -65,6 +73,7 @@ NAMES = {
 COINS = {"BTC-USD": "bitcoin", "ETH-USD": "ethereum", "SOL-USD": "solana", "DOGE-USD": "dogecoin",
          "XRP-USD": "ripple", "ADA-USD": "cardano", "LTC-USD": "litecoin"}
 INDEXES = frozenset({"^GSPC", "^IXIC", "^DJI", "^RUT", "^VIX"})
+YIELDS = frozenset({"^TNX"})   # a percentage, not a price
 
 _SYMBOL = re.compile(r"^[A-Z0-9^][A-Z0-9.=^-]{0,14}$")
 _MARKET = re.compile(
@@ -144,8 +153,12 @@ def money(value: float, currency: str = "USD") -> str:
 
 
 def level(q: Quote) -> str:
-    """How a price is said: an index is points, everything else money."""
-    return f"{q.price:,.0f}" if q.symbol in INDEXES and q.price >= 1000 else money(q.price, q.currency)
+    """How a price is said: an index is points, a yield a percentage, everything else money."""
+    if q.symbol in YIELDS:
+        return f"{q.price:.2f}%"
+    if q.symbol in INDEXES:
+        return f"{q.price:,.0f}" if q.price >= 1000 else f"{q.price:.2f}"
+    return money(q.price, q.currency)
 
 
 def pct(change: float | None) -> str:
@@ -185,7 +198,7 @@ def parse_chart(body: dict, symbol: str) -> Quote:
         previous=float(previous) if isinstance(previous, (int, float)) and previous else None,
         currency=str(meta.get("currency") or "USD")[:4],
         at=datetime.fromtimestamp(at, timezone.utc) if isinstance(at, (int, float)) else None,
-        spark=tuple(float(c) for c in closes if isinstance(c, (int, float)))[-40:],
+        spark=tuple(float(c) for c in closes if isinstance(c, (int, float)))[-SPARK_POINTS:],
     )
 
 
@@ -207,7 +220,7 @@ class Markets(Skill):
     async def _chart(self, client: httpx.AsyncClient, symbol: str) -> Quote:
         base = self.ctx.config.markets_api_base.rstrip("/")
         response = await client.get(f"{base}/v8/finance/chart/{urlquote(symbol, safe='')}",
-                                    params={"range": "1d", "interval": "15m"}, headers={"User-Agent": AGENT})
+                                    params={"range": "1d", "interval": "5m"}, headers={"User-Agent": AGENT})
         if response.status_code == 404:
             raise UnknownSymbol(symbol)
         if response.status_code != 200:
@@ -282,6 +295,11 @@ class Markets(Skill):
             log.warning("markets: no fresh quote for %s", ", ".join(failed))
         else:
             self._retry_at = 0.0
+
+    def cached(self, symbols: list[str], max_age: float = FACTS_FRESH_SECONDS) -> dict[str, Quote]:
+        """The quotes already in hand and recent, without asking anyone."""
+        now = clock.monotonic()
+        return {s: self._cache[s][1] for s in symbols if s in self._cache and now - self._cache[s][0] < max_age}
 
     async def check(self, symbol: str) -> bool | None:
         """True: a real symbol. False: Yahoo doesn't know it. None: couldn't ask right now."""
@@ -381,8 +399,8 @@ class Markets(Skill):
     async def facts(self) -> list[str]:
         """Only what's cached and recent: FACTS never waits on a quote."""
         symbols, _ = await self._symbols()
-        now = clock.monotonic()
-        fresh = [self._cache[s][1] for s in symbols if s in self._cache and now - self._cache[s][0] < FACTS_FRESH_SECONDS]
+        hits = self.cached(symbols)
+        fresh = [hits[s] for s in symbols if s in hits]
         if not fresh:
             return []
         return ["- MARKETS (delayed quotes): " + "; ".join(f"{name(q.symbol)} {level(q)} {pct(q.change)}".rstrip()
@@ -391,15 +409,22 @@ class Markets(Skill):
     async def panel(self) -> dict | None:
         symbols, mine = await self._symbols()
         try:
-            got, old = await self.quotes(symbols)
+            got, old = await self.quotes(list(dict.fromkeys([*symbols, *OVERVIEW])))
         except MarketsUnavailable:
-            return {"title": "Markets", "lines": ["Can't reach the markets right now."], "quotes": [], "mine": mine,
-                    "down": True}
+            return {"title": "Markets", "lines": ["Can't reach the markets right now."], "quotes": [], "overview": [],
+                    "mine": mine, "down": True}
+        by = {q.symbol: q for q in got}
+
+        def shown(q: Quote) -> dict:
+            return {"symbol": q.symbol, "name": name(q.symbol), "price": level(q), "value": q.price,
+                    "previous": q.previous, "change": q.change, "spark": list(q.spark)}
+
+        quotes = [by[s] for s in symbols if s in by]
         return {
             "title": "Markets", "mine": mine, "old": old,
-            "lines": [f"{name(q.symbol)} {level(q)} {pct(q.change)}".rstrip() for q in got],
-            "quotes": [{"symbol": q.symbol, "name": name(q.symbol), "price": level(q), "change": q.change,
-                        "spark": list(q.spark)} for q in got],
+            "lines": [f"{name(q.symbol)} {level(q)} {pct(q.change)}".rstrip() for q in quotes],
+            "quotes": [shown(q) for q in quotes],
+            "overview": [shown(by[s]) for s in OVERVIEW if s in by],
         }
 
 

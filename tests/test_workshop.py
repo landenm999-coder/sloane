@@ -152,6 +152,12 @@ found = find_secrets(f"x = '{TOKEN}'", secrets)
 check("a credential in the diff is caught", bool(found), True)
 check("without echoing it", any(TOKEN in f for f in found), False)
 check("the database password alone is caught", bool(find_secrets("pw = 's3cretpassword'", secrets)), True)
+banked = secret_values(isolated(simplefin_access_url="https://sfuser:bankpassword99@bridge.example/simplefin",
+                                whoop_refresh_token="whoop-refresh-token-1234"))
+check("the bank's access URL, its password alone, and Whoop's token are caught",
+      [bool(find_secrets(x, banked)) for x in ("u = 'https://sfuser:bankpassword99@bridge.example/simplefin'",
+                                               "pw = 'bankpassword99'", "t = 'whoop-refresh-token-1234'")],
+      [True, True, True])
 check("shapes are caught too", bool(find_secrets("key = 'sk-ant-" + "a" * 30 + "'", [])), True)
 check("ordinary code isn't", find_secrets("def hello():\n    return 'hi'\n", secrets), [])
 check("names", (slug("A skill that tracks my workouts!"), title_from("please add a skill that tracks my workouts\nmore")),

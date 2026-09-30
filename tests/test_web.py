@@ -135,8 +135,14 @@ check("'waiting on you' is what needs him; overdue work is counted in the School
 header = re.search(r"function renderHeader\(data\) \{(.*?)\n\}", js, re.S)
 check("the header counts nothing from school", header is not None and "overdue" not in header.group(1)
       and "due_week" not in header.group(1), True)
-check("every widget that's on shows, filled or saying how to fill it", ("buildPanel(id) || emptyWidget(id)" in js,
+check("every widget that's on shows, filled or saying how to fill it", ("filled || emptyWidget(id)" in js,
                                                                            "DESK_PANELS" in js), (True, False))
+# "I don't want a bunch of empty space sitting around": the filled widgets come first, the ones saying
+# how to fill them after; every widget is a size container its contents grow into; a page's rows share
+# its height (a short last page has taller widgets, not a hole).
+check("filled widgets first, then empty ones", "(filled ? out : empty).push(node)" in js and "out.push(...empty)" in js, True)
+check("widgets grow what's in them with the card", ".w { container: w / size; }" in css, True)
+check("a short last page fills the height", "const rows = shown.rows;" in js, True)
 # "The page should not scroll on the home, one full page dashboard": the home view never scrolls; the
 # widgets fill the room there is, in pages when there are more, and each list shows the rows that fit.
 home = re.search(r"\.view\.today \{([^}]*)\}", css)

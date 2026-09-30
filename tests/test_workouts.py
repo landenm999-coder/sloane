@@ -121,6 +121,18 @@ async def integration() -> None:
         check("and undo never takes back Whoop's", await cmd("undo"), "There's nothing you logged today to take back.")
         rows = await store.workouts_since(date(2026, 10, 5) - timedelta(days=0))
         check("it counts this week", len(rows), 1)
+        rescored = await store.add_workout(kind="run", minutes=41, distance_m=6100, done_on=date(2026, 10, 5),
+                                           logged_at=now["at"], source="whoop", source_id="w-1", strain=12.3,
+                                           heart_rate=152)
+        row = (await store.workouts_since(date(2026, 10, 5)))[0]
+        check("Whoop rescores it: the numbers catch up, still one workout, still not new",
+              (rescored, row["minutes"], float(row["strain"]), row["heart_rate"],
+               len(await store.workouts_since(date(2026, 10, 5)))), (None, 41, 12.3, 152, 1))
+        panel = await skill.panel()
+        check("the panel says where it came from, its strain, and the latest three, newest first",
+              (panel["from_whoop"], panel["strain"], panel["last"]["source"], panel["last"]["strain"],
+               panel["last"]["heart_rate"], [r["text"] for r in panel["recent"]]),
+              (1, 12.3, "whoop", 12.3, 152, ["run 3.8 mi · 41 min", "pickleball 1h", "workout 30 min"]))
 
 
 if os.environ.get("DATABASE_URL"):

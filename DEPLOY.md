@@ -214,24 +214,23 @@ Approve. Anything from a school address (`SCHOOL_EMAIL_DOMAINS`, default
    **In production**. *This matters:* in Testing mode Google kills the token
    every 7 days. You do not need to submit for verification — it's only you.
 5. **Credentials → Create credentials → OAuth client ID** → Application type
-   **Desktop app** → Create. Copy the client ID and secret into `.env`:
+   **Desktop app** → Create. Leave that page open: the next step asks for its
+   **Client ID** and **Client secret**.
 
-   ```
-   GMAIL_CLIENT_ID=...
-   GMAIL_CLIENT_SECRET=...
-   ```
-
-6. On the box, **outside Docker** (it writes `.env` for you):
+6. On the box, **outside Docker** (SSH in first; it writes `.env` for you):
 
    ```bash
    cd /opt/sloane && python3 scripts/gmail_auth.py
    ```
 
-   Open the link it prints, pick your account, click *Advanced → Go to Sloane*
-   past the unverified-app warning, allow both permissions. The browser then
-   lands on a `localhost` page that **won't load — that's expected**. Copy that
-   whole address, paste it into the script, done. The token goes into `.env`,
-   never onto the screen.
+   It asks for the Client ID, then the Client secret (hidden as you paste; the
+   secret never goes in a chat or on the screen), and saves both to `.env`.
+   Open the link it prints **in an incognito window** (on your PC is fine), pick
+   your account, click *Advanced → Go to Sloane* past the unverified-app
+   warning, allow both permissions. The browser then lands on a `localhost`
+   page that **won't load — that's expected**. Copy that whole address, paste
+   it into the script, done. The token goes into `.env`, never onto the screen.
+   Keep that address to yourself: it carries a one-time code.
 
 7. `sudo systemctl restart sloane`, then `doctor.py` — the `gmail` line should
    say PASS. `/inbox` on Telegram runs a triage right away.
@@ -319,11 +318,16 @@ everything she runs. The bare address, `/`, opens it too.
   on the day (what's next, emails waiting on a reply, your recovery), the clock and
   the weather. On the left, the agenda: your calendar, shifts, reminders and a
   focus session in order, with a line at now, a Tomorrow toggle, and **Add a
-  reminder**. The rest is widgets, filling the room there is: weather, Whoop,
-  workouts, markets, your inbox, habits, news, focus, money, countdowns, lists,
-  birthdays, clients, one small **School** widget, the workshop, and what she
-  learned today. When there are more than fit, they go on pages (the dots at
-  the bottom). Every widget does something: tick a habit (again to untick), check
+  reminder** (with tomorrow's first things under it when there's room). The rest
+  is widgets, filling the room there is, the ones with something in them first:
+  weather, Whoop (sleep, recovery and strain rings; HRV and resting heart rate
+  against your average), workouts, markets (the market at a glance, a chart of
+  the one you pick, your watchlist), your inbox, habits, news, focus (your work
+  due soonest, one press to start a block; she holds her messages while it runs),
+  money and portfolio (with your bank, 7k), countdowns, lists, birthdays,
+  clients, one small **School** widget, the workshop, and what she learned today.
+  Each grows what's in it with its box. When there are more than fit, they go on
+  pages (the dots at the bottom). Every widget does something: tick a habit (again to untick), check
   off a list item, start or stop a focus block, log a workout or spending, add a
   ticker, topic, countdown, birthday, client or reminder with its **+**, open an
   email in Gmail or a headline, mark school work handed in (press twice), or ask
@@ -472,6 +476,41 @@ Whoop replaces the refresh token every time it's used, so she keeps the
 current one on her volume (`/var/lib/sloane/models/whoop.json`), never in the
 database or a backup. If she ever says Whoop refused her, run step 3 again and
 restart.
+
+## 7k. Optional: your bank, card and Fidelity (about 10 minutes, once; ~$15 a year)
+
+With this the Money widget shows what your checking and cards really spent
+this week against your budget, what's left and in the bank, by category, and
+the latest transactions; the Portfolio widget shows your Fidelity accounts at
+today's quotes (worth, today's move, each holding); and you can ask "how much
+money do I have?", "how much did I spend this month?" or "how's my portfolio?".
+It's **read-only**: SimpleFIN can't move money, and neither can she.
+
+1. Go to **beta-bridge.simplefin.org**, make an account (about $15 a year,
+   or $1.50 a month), and connect your bank, your card and **Fidelity**
+   (search each by name; you sign in on their own pages, not SimpleFIN's).
+   If Fidelity doesn't show up in its search, check again later or skip it:
+   the bank and card work on their own.
+2. In SimpleFIN: **My Account → New connection → Create setup token**. Copy it.
+3. On the box, outside Docker:
+
+   ```bash
+   cd /opt/sloane && python3 scripts/simplefin_auth.py
+   ```
+
+   Paste the setup token when it asks (it doesn't show as you paste). It trades
+   the token for your access URL once and saves it to `.env` as
+   `SIMPLEFIN_ACCESS_URL`. That URL is a password: it opens every account you
+   connected. It never goes on the screen, in a chat, a log or a backup.
+4. `sudo systemctl restart sloane`, then say `/bank sync` (or wait: she syncs
+   every three hours from 6 AM to 9 PM). The widgets fill in.
+
+Once the bank is connected, log only **cash** by hand ("spent 12 on lunch"):
+card and debit spending comes in on its own. She sorts transactions into
+categories by rule; transfers between your accounts and card payments aren't
+spending. `BANK_LOW_BALANCE` (default 50) is the checking-and-savings level
+she tells you about, once a day; 0 turns it off. If she ever says SimpleFIN
+refused her, make a new setup token and run step 3 again.
 
 ## 8. Run her
 
@@ -629,4 +668,6 @@ weekends, never in class or on a shift) and says the one thing worth saying,
 if there is one; most runs send nothing. `THINK=false` turns it off. `TELEGRAM_CHAT_ID` must be set or the briefs run and
 record but have nobody to send to; `/jobs` will show that plainly. The inbox
 job runs only once Gmail is set up (7c); until then `/jobs` lists it as
-deferred with the reason `gmail is not configured`.
+deferred with the reason `gmail is not configured`. The bank sync
+(`bank_sync`, 6:10 AM to 9:10 PM every three hours) is silent and runs only
+once the bank is connected (7k).
