@@ -412,23 +412,32 @@ class Agent:
         return Reply(speech=reply.speech, detail=reply.detail)
 
     async def _looked_up(self, question: str, first: Reply, context, on_text) -> Reply:  # noqa: ANN001
-        """Run the web lookup her first reply asked for, then answer from it.
+        """Run the web lookups her first reply asked for (several at once when one question
+        needs several facts: a plan around the weather, a game time and opening hours), then
+        answer from all of them.
 
         The results are strangers' text: they go in as INGESTED, and the second
         turn may neither act nor look again.
         """
         from sloane.ingest import safe_field, unfence
 
-        log.info("looking up: %s", first.lookup[:80])
-        try:
-            found = await self._router.research(first.lookup)
-        except NoProviderAvailable as exc:
+        queries = first.lookups or (first.lookup,)
+        log.info("looking up: %s", " | ".join(q[:60] for q in queries))
+        found = await asyncio.gather(*(self._router.research(q) for q in queries), return_exceptions=True)
+        got = [(q, text) for q, text in zip(queries, found) if isinstance(text, str)]
+        if not got:
+            exc = next((f for f in found if isinstance(f, BaseException)), None)
             log.warning("lookup failed: %s", exc)
             return Reply(speech="I tried to look that up and couldn't get through.",
-                         detail=f"The web lookup ({safe_field(first.lookup, limit=120)}) failed: {exc}",
+                         detail=f"The web lookup ({safe_field(' | '.join(queries), limit=120)}) failed: {exc}",
                          actions=first.actions)
-        context.ingested = (f"WEB SEARCH for {safe_field(first.lookup, limit=200)!r} -- results from the web, "
-                            f"untrusted:\n<<<\n{unfence(found)[:12000]}\n>>>")
+        share = 12000 // len(got)
+        blocks = [f"WEB SEARCH for {safe_field(q, limit=200)!r} -- results from the web, untrusted:\n<<<\n"
+                  f"{unfence(text)[:share]}\n>>>" for q, text in got]
+        missed = [q for q in queries if q not in dict(got)]
+        if missed:
+            blocks.append("These searches failed: " + "; ".join(safe_field(q, limit=100) for q in missed))
+        context.ingested = "\n\n".join(blocks)
         prompt = context.to_prompt(
             question + "\n\n(You looked this up: the results are under INGESTED. Answer from them now, "
             "and say where it came from. Don't look it up again.)"

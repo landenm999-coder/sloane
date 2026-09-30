@@ -18,6 +18,7 @@ from dataclasses import dataclass
 MAX_SPEECH_SENTENCES = 2
 # Commands one reply may carry. More than this is not a request, it's a script.
 MAX_ACTIONS = 5
+MAX_LOOKUPS = 3  # web searches one reply may ask for, run together
 
 _FENCE = re.compile(r"```(?:json|JSON)?\s*(.+?)```", re.DOTALL)
 _FIRST_OBJECT = re.compile(r"\{.*\}", re.DOTALL)
@@ -62,6 +63,9 @@ class Reply:
     # A web search she needs before she can answer ("look"). The agent runs it
     # and asks again with the results as INGESTED; never shown to him as-is.
     lookup: str = ""
+    # All of them, when one question needs several facts ("look" as a list, at
+    # most MAX_LOOKUPS): run together, answered from at once. `lookup` is the first.
+    lookups: tuple[str, ...] = ()
     # Built from outside text (email, web results): remembered as untrusted,
     # and never shown back to her as plain CONVERSATION.
     tainted: bool = False
@@ -128,9 +132,11 @@ def _from_mapping(data: dict) -> Reply | None:
         a.strip() for a in raw_actions if isinstance(a, str) and a.strip()
     )[:MAX_ACTIONS] if isinstance(raw_actions, (list, tuple)) else ()
     look = lowered.get("look") or lowered.get("lookup") or ""
-    lookup = " ".join(look.split())[:200] if isinstance(look, str) else ""
+    looks = [look] if isinstance(look, str) else list(look) if isinstance(look, (list, tuple)) else []
+    lookups = tuple(dict.fromkeys(" ".join(q.split())[:200] for q in looks if isinstance(q, str) and q.strip()))
+    lookups = lookups[:MAX_LOOKUPS]
     return Reply(speech=clean_speech(speech_text), detail=detail_text.strip(), actions=actions,
-                 lookup=lookup)
+                 lookup=lookups[0] if lookups else "", lookups=lookups)
 
 
 def _try_json(blob: str) -> Reply | None:

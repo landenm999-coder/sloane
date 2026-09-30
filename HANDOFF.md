@@ -451,7 +451,13 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
     question logged `kind='room'` untrusted; eight seconds to follow up without her name; off after 30
     quiet minutes. Tested with a fake transcriber (`test_room.py`) and in Chromium with a fake microphone;
     not yet with the real model on the box (this sandbox can't reach Hugging Face).
-  - Next: Phase 3 (MCP tools he approves, new connectors, multi-step requests). `sloane/redact.py`, `skills/bank.py` and `scripts/simplefin_auth.py` belong on
+  - Phase 3, so far: *several lookups at once* (Microsoft's task planning, lean: "look" may be a list of up
+    to three, `contract.MAX_LOOKUPS`; run together, each fenced, a failed one named) and *his plug-in tools*
+    (MCP, from both OpenJarvis and isair: `MCP_CONFIG` + `MCP_TOOLS`, read-only, lookups and research only,
+    `--strict-mcp-config` so nothing else loads; doctor's `mcp` line). Acting MCP tools would need an
+    approval step (Agency) she doesn't have for them yet: not built.
+  - Left in Phase 3: new connectors (Google Tasks, Spotify, Strava, Notion). Each needs an app and a login
+    of his; asked him which he actually uses before building any. `sloane/redact.py`, `skills/bank.py` and `scripts/simplefin_auth.py` belong on
     `deploy/protected.txt` (her safety and credentials); that file is Landen's to change.
 
 - **The dashboard, filled; the bank and Fidelity; Whoop's rings** (this branch's PR). Landen, 2026-09-29: fill

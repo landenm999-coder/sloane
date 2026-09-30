@@ -227,6 +227,14 @@ class Settings(BaseSettings):
     whoop_token_file: str = ""
     whoop_api_base: str = "https://api.prod.whoop.com"
 
+    # Plug-in tools (MCP) for her lookups and research, never her replies or the
+    # workshop: the servers in MCP_CONFIG (a JSON file on the box in Claude Code's
+    # .mcp.json shape; it may hold the servers' keys, so chmod 600), and only the
+    # tools MCP_TOOLS names (mcp__<server>__<tool>, comma-separated). Nothing asks
+    # him before one runs, so list read-only tools only. Blank = none.
+    mcp_config: str = ""
+    mcp_tools: str = ""
+
     # Room mode (sloane/room.py): the control room listens and she joins in when she
     # hears her name, with the last ROOM_WINDOW_SECONDS as context (kept in memory
     # only). Transcribed on the box by faster-whisper's ROOM_STT_MODEL (downloaded

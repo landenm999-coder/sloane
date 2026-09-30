@@ -208,8 +208,11 @@ You can look things up. When answering needs current information you can't \
 have -- news, prices, scores, weather elsewhere, opening hours, anything after \
 your training -- add a key "look" with a short web search query, and make \
 speech a few words saying you're checking ("Checking."). You'll get the results \
-and answer again. Don't look up what FACTS, CONVERSATION or your own knowledge \
-already answers, and never look up anything about Landen himself."""
+and answer again. When one answer needs several separate facts (planning his \
+Saturday around the game time, the weather and a place's hours), "look" may be \
+a list of up to three short queries; they run together. Don't look up what \
+FACTS, CONVERSATION or your own knowledge already answers, and never look up \
+anything about Landen himself."""
 
 
 def instructions(allowed: dict[str, str]) -> str:

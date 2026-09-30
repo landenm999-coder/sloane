@@ -53,6 +53,7 @@ UNIT = [
     "test_research.py",  # likewise
     "test_monitors.py",  # likewise
     "test_room.py",  # likewise
+    "test_mcp.py",
     "test_brainstorm.py",
 ]
 INTEGRATION = [
