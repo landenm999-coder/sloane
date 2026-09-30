@@ -494,7 +494,8 @@ async def heartbeat(ctx: JobContext, now: datetime | None = None) -> JobResult:
     The skills' nudges, and the core's one: a planted calendar entry, told once.
     Each nudge key is said once, however many ticks offer it; a nudge that could
     not be delivered is offered again on the next tick. Several new nudges in
-    one tick go out as one message, never a burst.
+    one tick go out as one message, never a burst. While a skill holds them (he's
+    in a focus block) they're asked for but not said: the next tick after says them.
     """
     if ctx.say is None:
         return JobResult("heartbeat", ran=False, reason="no chat to deliver to")
@@ -514,6 +515,9 @@ async def heartbeat(ctx: JobContext, now: datetime | None = None) -> JobResult:
     await remember("prune nudges", ctx.store.prune_nudges())
     if not offered:
         return JobResult("heartbeat", ran=True, reason="nothing to say")
+    held = await ctx.skills.holding() if ctx.skills is not None else None
+    if held:
+        return JobResult("heartbeat", ran=True, sent=False, reason=f"{len(offered)} held: {held}")
     fresh = set(await ctx.store.claim_nudges(list(offered)))
     new = [(key, text) for key, text in offered.items() if key in fresh]
     if not new:
@@ -526,6 +530,15 @@ async def heartbeat(ctx: JobContext, now: datetime | None = None) -> JobResult:
         return JobResult("heartbeat", ran=True, sent=False, reason=f"not delivered, will retry: {exc}")
     return JobResult("heartbeat", ran=True, sent=True,
                      reason=f"said {len(new)}: " + ", ".join(key for key, _ in new))
+
+
+async def bank_sync(ctx: JobContext, now: datetime | None = None) -> JobResult:
+    """Every three hours in waking hours, silent: his accounts from SimpleFIN (skills/bank.py)."""
+    bank = ctx.skills.get("bank") if ctx.skills is not None else None
+    if bank is None:
+        return JobResult("bank_sync", ran=False, reason="no bank connected")
+    ok, what = await bank.sync()
+    return JobResult("bank_sync", ran=ok, sent=False, reason=what)
 
 
 async def learn(ctx: JobContext, now: datetime | None = None) -> JobResult:
@@ -565,4 +578,5 @@ HANDLERS: dict[str, Callable[..., Awaitable[JobResult]]] = {
     "backup": backup,
     "heartbeat": heartbeat,
     "learn": learn,
+    "bank_sync": bank_sync,
 }

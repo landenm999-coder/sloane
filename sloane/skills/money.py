@@ -10,6 +10,10 @@ Earnings are an estimate, and say so: the hours of his shifts that have ended
 this week times PAY_RATE. The shifts are generated from the fixed 3-7 rule, so
 a shift he called out of still counts until it is cancelled.
 
+With his bank connected (skills/bank.py) the week's spending is what his checking
+and cards spent plus what he logs by hand, which is then his cash; the budget,
+its nudges and FACTS all count both.
+
 This tracks and nothing else. Moving money is a hard line; no code here can.
 """
 
@@ -75,9 +79,14 @@ class Money(Skill):
         raw = await self.ctx.store.get_skill_setting(self.name, "weekly_budget_cents")
         return int(raw) if raw and raw.isdigit() else None
 
+    async def _bank_cents(self, start: date, end: date) -> int:
+        """What his bank and cards spent on these days (0 with no bank connected)."""
+        spent = getattr(self.ctx.store, "bank_spent_between", None)
+        return await spent(start, end) if spent is not None else 0
+
     async def _week_cents(self) -> int:
         start, end = self._week()
-        return sum(r["cents"] for r in await self.ctx.store.expenses_between(start, end))
+        return sum(r["cents"] for r in await self.ctx.store.expenses_between(start, end)) + await self._bank_cents(start, end)
 
     async def _earned(self) -> tuple[float, int] | None:
         """(hours, cents) from this week's shifts that have ended, or None without a pay rate."""
@@ -124,13 +133,16 @@ class Money(Skill):
         month = await self.ctx.store.expenses_between(today.replace(day=1), today)
         budget = await self._budget()
         earned = await self._earned()
-        week_total = sum(r["cents"] for r in week)
+        banked = await self._bank_cents(start, end)
+        week_total = sum(r["cents"] for r in week) + banked
         by_cat: dict[str, int] = {}
         for r in week:
             by_cat[r["category"]] = by_cat.get(r["category"], 0) + r["cents"]
         lines = [f"This week: {dollars(week_total)}" + (f" of {dollars(budget)}" if budget else "")]
+        if banked:
+            lines.append(f"  • bank and cards: {dollars(banked)}")
         lines += [f"  • {c}: {dollars(v)}" for c, v in sorted(by_cat.items(), key=lambda kv: -kv[1])]
-        lines.append(f"This month: {dollars(sum(r['cents'] for r in month))}")
+        lines.append(f"This month: {dollars(sum(r['cents'] for r in month) + await self._bank_cents(today.replace(day=1), today))}")
         if earned is not None:
             lines.append(f"Earned this week (est.): {dollars(earned[1])} from {earned[0]:g} shift hours")
         if week:
@@ -196,7 +208,9 @@ class Money(Skill):
     async def panel(self) -> dict | None:
         start, end = self._week()
         rows = await self.ctx.store.expenses_between(start, end)
-        week = sum(r["cents"] for r in rows)
+        logged = sum(r["cents"] for r in rows)
+        banked = await self._bank_cents(start, end)
+        week = logged + banked
         budget = await self._budget()
         earned = await self._earned()
         if not week and not budget and earned is None:
@@ -206,6 +220,7 @@ class Money(Skill):
             lines.append(f"Earned (est.): {dollars(earned[1])}")
         # The control room draws the week against the budget, and the latest few.
         return {"title": "Money", "lines": lines, "spent_cents": week, "budget_cents": budget,
+                "logged_cents": logged, "bank_cents": banked,
                 "earned_cents": earned[1] if earned is not None else None,
                 "recent": [{"what": r["what"], "cents": r["cents"], "day": f"{r['spent_on']:%a}"}
                            for r in reversed(rows[-4:])]}

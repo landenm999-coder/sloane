@@ -37,7 +37,7 @@ rules a skill keeps) is the docstring of `sloane/skills/__init__.py`. A skill's 
 Its tests are `tests/test_<name>.py`, listed in `tests/run.py`. `SKILLS_DISABLED` switches one off.
 A skill's tables never reference a core table (`test_invariants` checks), its user data goes in
 `Store.BACKUP_TABLES` (parents before children) and doctor's `EXPECTED_TABLES`, and its FACTS lines render
-after the school rows. Twenty-one skills exist; read one (`lists.py` is the smallest) before writing the next.
+after the school rows. Twenty-two skills exist; read one (`lists.py` is the smallest) before writing the next.
 Dates from his words go through `sloane/dates.py`, times through `sloane/reminders.py`. Never a model.
 
 ## Working

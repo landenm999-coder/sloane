@@ -45,6 +45,7 @@ STALE_OK_SECONDS = 3 * 3600
 # not every reply for an afternoon.
 RETRY_AFTER_SECONDS = 5 * 60
 TIMEOUT_SECONDS = 6.0
+FORECAST_DAYS = 5
 # A chance at or above this is "likely".
 LIKELY = 60
 
@@ -116,6 +117,8 @@ class Day:
     low: float | None
     chance: int
     code: int
+    sunrise: datetime | None = None
+    sunset: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -126,6 +129,7 @@ class Forecast:
     wind: float | None
     days: tuple[Day, ...]
     hours: tuple[Hour, ...]
+    humidity: int | None = None
 
     def day(self, on: date) -> Day | None:
         return next((d for d in self.days if d.on == on), None)
@@ -137,6 +141,14 @@ def _num(values: list, i: int) -> float | None:
     except (IndexError, TypeError):
         return None
     return float(value) if isinstance(value, (int, float)) else None
+
+
+def _moment(values: Any, i: int, zone: ZoneInfo) -> datetime | None:
+    """Open-Meteo's local "2026-09-24T06:52" into a time in his zone. None if it isn't one."""
+    try:
+        return datetime.fromisoformat(str(values[i])).replace(tzinfo=zone)
+    except (IndexError, TypeError, ValueError):
+        return None
 
 
 def parse_forecast(body: dict, tz: str) -> Forecast:
@@ -153,7 +165,8 @@ def parse_forecast(body: dict, tz: str) -> Forecast:
             continue
         days.append(Day(on, _num(daily.get("temperature_2m_max"), i), _num(daily.get("temperature_2m_min"), i),
                         int(_num(daily.get("precipitation_probability_max"), i) or 0),
-                        int(_num(daily.get("weather_code"), i) or 0)))
+                        int(_num(daily.get("weather_code"), i) or 0),
+                        _moment(daily.get("sunrise"), i, zone), _moment(daily.get("sunset"), i, zone)))
     hours = []
     for i, raw in enumerate(hourly.get("time") or []):
         try:
@@ -165,6 +178,7 @@ def parse_forecast(body: dict, tz: str) -> Forecast:
                           int(_num(hourly.get("weather_code"), i) or 0)))
     if not days and current.get("temperature_2m") is None:
         raise WeatherUnavailable("the forecast came back empty")
+    humidity = _num([current.get("relative_humidity_2m")], 0)
     return Forecast(
         temp=_num([current.get("temperature_2m")], 0),
         feels=_num([current.get("apparent_temperature")], 0),
@@ -172,12 +186,18 @@ def parse_forecast(body: dict, tz: str) -> Forecast:
         wind=_num([current.get("wind_speed_10m")], 0),
         days=tuple(days),
         hours=tuple(hours),
+        humidity=None if humidity is None else round(humidity),
     )
 
 
 def _clock(at: datetime) -> str:
     hour = at.hour % 12 or 12
     return f"{hour} {'AM' if at.hour < 12 else 'PM'}"
+
+
+def _clock_min(at: datetime) -> str:
+    """"6:52 AM"."""
+    return f"{at.hour % 12 or 12}:{at.minute:02d} {'AM' if at.hour < 12 else 'PM'}"
 
 
 class Weather(Skill):
@@ -226,13 +246,13 @@ class Weather(Skill):
         lat, lon = self.location
         params = {
             "latitude": f"{lat:.4f}", "longitude": f"{lon:.4f}",
-            "current": "temperature_2m,apparent_temperature,weather_code,wind_speed_10m",
+            "current": "temperature_2m,apparent_temperature,weather_code,wind_speed_10m,relative_humidity_2m",
             "hourly": "temperature_2m,precipitation_probability,weather_code",
-            "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max",
+            "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset",
             "temperature_unit": "celsius" if self.celsius else "fahrenheit",
             "wind_speed_unit": "kmh" if self.celsius else "mph",
             "timezone": self.ctx.config.timezone,
-            "forecast_days": 3,
+            "forecast_days": FORECAST_DAYS,
         }
         try:
             async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
@@ -365,14 +385,20 @@ class Weather(Skill):
             if d is not None:
                 lines.append(f"{label}: {self.t(d.high)} / {self.t(d.low)}, {describe(d.code)}"
                              + (f", {d.chance}%" if d.chance else ""))
-        # The next eight hours from this one, for the control room's curve.
+        # The next twelve hours from this one, for the control room's curve, and the days after today.
         hour = self.ctx.now().replace(minute=0, second=0, microsecond=0)
-        hours = [{"at": h.at.isoformat(), "temp": h.temp, "chance": h.chance}
-                 for h in f.hours if h.at >= hour and h.temp is not None][:8]
+        hours = [{"at": h.at.isoformat(), "temp": h.temp, "chance": h.chance, "sky": describe(h.code)}
+                 for h in f.hours if h.at >= hour and h.temp is not None][:12]
         day = f.day(today)
+        ahead = [{"day": f"{d.on:%a}", "on": d.on.isoformat(), "high": d.high, "low": d.low, "chance": d.chance,
+                  "sky": describe(d.code)} for d in f.days if d.on > today][:FORECAST_DAYS - 1]
         return {"title": "Weather", "lines": lines, "temp": f.temp, "code": f.code,
                 "sky": describe(f.code), "unit": self.deg, "hours": hours, "feels": f.feels,
-                "high": day.high if day is not None else None, "low": day.low if day is not None else None}
+                "high": day.high if day is not None else None, "low": day.low if day is not None else None,
+                "chance": day.chance if day is not None else None, "days": ahead, "humidity": f.humidity,
+                "wind": None if f.wind is None else round(f.wind), "wind_unit": "km/h" if self.celsius else "mph",
+                "sunrise": _clock_min(day.sunrise) if day is not None and day.sunrise else None,
+                "sunset": _clock_min(day.sunset) if day is not None and day.sunset else None}
 
     async def nudges(self) -> list[Nudge]:
         now = self.ctx.now()

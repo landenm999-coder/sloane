@@ -50,12 +50,14 @@ def forecast() -> dict:
     return {
         "timezone": "America/Denver",
         "current": {"time": "2026-09-24T09:00", "temperature_2m": 58.4, "apparent_temperature": 55.2,
-                    "weather_code": 2, "wind_speed_10m": 7.4},
+                    "weather_code": 2, "wind_speed_10m": 7.4, "relative_humidity_2m": 31},
         "hourly": {"time": times, "temperature_2m": temps, "precipitation_probability": chances,
                    "weather_code": codes},
         "daily": {"time": ["2026-09-24", "2026-09-25", "2026-09-26"], "weather_code": [63, 73, 0],
                   "temperature_2m_max": [71.2, 48.0, 66.0], "temperature_2m_min": [44.6, 29.1, 40.0],
-                  "precipitation_probability_max": [70, 80, 0]},
+                  "precipitation_probability_max": [70, 80, 0],
+                  "sunrise": ["2026-09-24T06:52", "2026-09-25T06:53", "2026-09-26T06:54"],
+                  "sunset": ["2026-09-24T18:49", "2026-09-25T18:47", "2026-09-26T18:46"]},
     }
 
 
@@ -115,9 +117,18 @@ async def main() -> None:
     await skill.facts()
     panel = await skill.panel()
     check("cached: one fetch for three reads", len(Stub.calls), 1)
-    check("the control room's curve: the next eight hours", [(h["at"][11:16], h["temp"], h["chance"]) for h in panel["hours"]],
+    check("the control room's curve: the next twelve hours", [(h["at"][11:16], h["temp"], h["chance"]) for h in panel["hours"]],
           [("09:00", 54, 0), ("10:00", 55, 0), ("11:00", 56, 0), ("12:00", 57, 0), ("13:00", 58, 0),
-           ("14:00", 59, 0), ("15:00", 60, 0), ("16:00", 59, 70)])
+           ("14:00", 59, 0), ("15:00", 60, 0), ("16:00", 59, 70), ("17:00", 58, 70), ("18:00", 57, 0),
+           ("19:00", 56, 0), ("20:00", 55, 0)])
+    check("the days after today", [(d["day"], d["high"], d["low"], d["chance"], d["sky"]) for d in panel["days"]],
+          [("Fri", 48.0, 29.1, 80, "snow"), ("Sat", 66.0, 40.0, 0, "clear")])
+    check("today's rain chance, humidity, wind and the sun",
+          (panel["chance"], panel["humidity"], panel["wind"], panel["wind_unit"], panel["sunrise"], panel["sunset"]),
+          (70, 31, 7, "mph", "6:52 AM", "6:49 PM"))
+    check("asks for the humidity and the sun, five days out",
+          ("relative_humidity_2m" in sent["current"], "sunrise,sunset" in sent["daily"], sent["forecast_days"]),
+          (True, True, "5"))
     check("and the sky in words", (panel["temp"], panel["sky"], panel["unit"]), (58.4, "partly cloudy", "°F"))
 
     check("what's the weather", (await reg.route("What's the weather?")).speech,

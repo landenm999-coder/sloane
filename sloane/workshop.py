@@ -216,14 +216,16 @@ def secret_values(config) -> list[str]:  # noqa: ANN001
     values = []
     for name in ("telegram_bot_token", "database_url", "groq_api_key", "anthropic_api_key", "canvas_token",
                  "canvas_feed_url", "calendar_ics_url", "capture_token", "dashboard_token", "gmail_client_secret",
-                 "gmail_refresh_token", "github_token", "local_api_key"):
+                 "gmail_refresh_token", "github_token", "local_api_key", "whoop_client_secret", "whoop_refresh_token",
+                 "simplefin_access_url"):
         value = str(getattr(config, name, "") or "")
         if len(value) >= 8:
             values.append(value)
-    url = str(getattr(config, "database_url", "") or "")
-    password = re.search(r"://[^:/@]+:([^@]+)@", url)
-    if password and len(password.group(1)) >= 6:
-        values.append(password.group(1))
+    for name in ("database_url", "simplefin_access_url"):
+        url = str(getattr(config, name, "") or "")
+        password = re.search(r"://[^:/@]+:([^@]+)@", url)
+        if password and len(password.group(1)) >= 6:
+            values.append(password.group(1))
     return values
 
 

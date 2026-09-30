@@ -227,6 +227,13 @@ class Settings(BaseSettings):
     whoop_token_file: str = ""
     whoop_api_base: str = "https://api.prod.whoop.com"
 
+    # Bank (skills/bank.py): his accounts, read-only, through SimpleFIN Bridge.
+    # scripts/simplefin_auth.py claims the access URL from his setup token and
+    # writes it here. It carries the credentials: a password. Blank = no bank.
+    simplefin_access_url: str = ""
+    # Checking and savings below this many dollars: she says so once a day. 0 = never.
+    bank_low_balance: float = 50.0
+
     # Study plan (skills/plan.py): when his own time starts and ends, "HH:MM".
     # School days start after school; the shift and its commute are carved out.
     plan_school_day_start: str = "15:00"

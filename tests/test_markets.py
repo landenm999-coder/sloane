@@ -35,7 +35,7 @@ def check(label: str, got, want) -> None:
 
 
 PRICES = {"^GSPC": (5712.3, 5688.1), "^IXIC": (18190.0, 18300.0), "BTC-USD": (64210.0, 65000.0),
-          "AAPL": (227.52, 225.0), "NVDA": (121.4, 121.4)}
+          "AAPL": (227.52, 225.0), "NVDA": (121.4, 121.4), "^TNX": (4.12, 4.08)}
 
 
 def chart(symbol: str) -> dict:
@@ -50,6 +50,7 @@ def chart(symbol: str) -> dict:
 
 class Yahoo(BaseHTTPRequestHandler):
     asked: list[str] = []
+    interval = ""
     down = False
     agents: list[str] = []
 
@@ -57,6 +58,7 @@ class Yahoo(BaseHTTPRequestHandler):
         path = urlparse(self.path)
         symbol = unquote(path.path.rsplit("/", 1)[-1])
         Yahoo.asked.append(symbol)
+        Yahoo.interval = parse_qs(path.query).get("interval", [""])[0]
         Yahoo.agents.append(self.headers.get("User-Agent", ""))
         if Yahoo.down:
             self.reply(503, {})
@@ -173,6 +175,13 @@ async def main() -> None:
     panel = await skill.panel()
     check("the panel: his list, with its line", (panel["mine"], [q["symbol"] for q in panel["quotes"]],
                                                  len(panel["quotes"][0]["spark"])), (True, ["AAPL"], 3))
+    check("and the market at a glance, in its order (what Yahoo knows of it)",
+          [(q["symbol"], q["name"], q["price"]) for q in panel["overview"]],
+          [("^GSPC", "S&P 500", "5,712"), ("^IXIC", "Nasdaq", "18,190"), ("BTC-USD", "Bitcoin", "$64,210"),
+           ("^TNX", "10-yr yield", "4.12%")])
+    check("with what the chart draws against", (panel["quotes"][0]["value"], panel["quotes"][0]["previous"]),
+          (227.52, 225.0))
+    check("five-minute closes for the day's line", Yahoo.interval, "5m")
 
     # -- outages ----------------------------------------------------------------------------------
     store.symbols = ["AAPL", "BTC-USD"]

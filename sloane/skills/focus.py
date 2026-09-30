@@ -9,6 +9,14 @@ reminders job (held through quiet hours, retried if Telegram is down) and
 shows in /reminders. Stopping early cancels it. One session runs at a time;
 starting another ends the one before. The day's total is a FACTS line, so the
 wrap brief can say "you put in 90 minutes on the essay today".
+
+While a session runs she holds her unprompted messages (the heartbeat's
+nudges: a budget, a birthday, a workout Whoop logged); they go out at the
+first heartbeat after it ends. Reminders he set still arrive on time.
+
+The control room's panel suggests what to focus on (his open work due in the
+next week, soonest first, with the time he's already put in on each) and
+draws the week's minutes against his daily goal.
 """
 
 from __future__ import annotations
@@ -16,11 +24,14 @@ from __future__ import annotations
 import re
 from datetime import datetime, timedelta
 
+from sloane import dates
 from sloane.ingest import safe_field
 from sloane.skills import Answer, Skill, SkillContext
 
 DEFAULT_MINUTES = 25
 MAX_MINUTES = 240
+SUGGEST_DAYS = 7
+SUGGESTED = 3
 
 # Longest unit first, and a word boundary: "25 math" keeps its m.
 _START = re.compile(
@@ -131,20 +142,52 @@ class Focus(Skill):
             line += f"; running now: {safe_field(running['what'], limit=40)} until {_clock(running['ends_at'].astimezone(now.tzinfo))}"
         return [line]
 
+    async def hold(self) -> str | None:
+        """While he focuses, her unprompted messages wait."""
+        running = await self.ctx.store.running_focus(self.ctx.now())
+        return None if running is None else f"he's focusing until {_clock(running['ends_at'].astimezone(self.ctx.now().tzinfo))}"
+
+    async def _suggestions(self, spent: dict[str, int]) -> list[dict]:
+        """His open work due in the next week, soonest first: what a block is most worth."""
+        today = self.ctx.today()
+        out = []
+        for a in await self.ctx.store.assignments_due(today, today + timedelta(days=SUGGEST_DAYS)):
+            what = safe_field(a["title"] or "", limit=80)
+            if not what or any(s["what"] == what for s in out):
+                continue
+            due = a["due_at"].astimezone(self.ctx.now().tzinfo)
+            when = dates.spoken(due.date(), today)
+            if not a.get("all_day") and not (due.hour == 23 and due.minute == 59):
+                when += f" {_clock(due)}"
+            out.append({"what": what, "course": safe_field(a.get("course") or "", limit=40),
+                        "due": when, "minutes": spent.get(what, 0)})
+            if len(out) >= SUGGESTED:
+                break
+        return out
+
     async def panel(self) -> dict | None:
         now = self.ctx.now()
-        today, _ = await self._tally(self._midnight())
+        midnight = self._midnight()
+        monday = midnight - timedelta(days=midnight.weekday())
+        week = [0] * 7
+        spent: dict[str, int] = {}
+        for row in await self.ctx.store.focus_since(monday):
+            minutes = self._spent(row, now)
+            week[row["started_at"].astimezone(now.tzinfo).weekday()] += minutes
+            spent[row["what"]] = spent.get(row["what"], 0) + minutes
+        today = week[now.weekday()]
         running = await self.ctx.store.running_focus(now)
-        if not today and running is None:
-            return None
         lines = [f"{_minutes(today)} today"]
         if running is not None:
             lines.insert(0, f"Now: {running['what']} until {_clock(running['ends_at'].astimezone(now.tzinfo))}")
         return {"title": "Focus", "lines": lines, "today_minutes": today,
                 "goal_minutes": self.ctx.config.focus_goal_minutes,
+                "week": [{"day": f"{monday + timedelta(days=i):%a}", "minutes": m, "today": i == now.weekday()}
+                         for i, m in enumerate(week)],
+                "week_minutes": sum(week), "suggest": await self._suggestions(spent),
                 "running": None if running is None else {
                     "what": running["what"], "started_at": running["started_at"].astimezone(now.tzinfo).isoformat(),
-                    "ends_at": running["ends_at"].astimezone(now.tzinfo).isoformat()}}
+                    "ends_at": running["ends_at"].astimezone(now.tzinfo).isoformat(), "holding": True}}
 
 
 def build(ctx: SkillContext) -> Skill:

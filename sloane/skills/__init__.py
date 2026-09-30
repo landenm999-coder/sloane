@@ -20,6 +20,8 @@ A skill may offer any of these:
                minutes...: sloane/webui/app.js `BUILT`) and every other from its
                lines, so lines are always enough
     nudges     things worth saying unprompted right now (the heartbeat job asks)
+    hold       a reason to hold those nudges right now (he's in a focus block);
+               the heartbeat still asks for them, and says them once none holds
 
 Rules every skill keeps, because the core invariants apply here too:
 
@@ -184,6 +186,10 @@ class Skill:
         """Things worth saying now. Called every heartbeat; keep it cheap."""
         return []
 
+    async def hold(self) -> str | None:
+        """Why her unprompted messages should wait right now, or None. Called every heartbeat."""
+        return None
+
     # -- helpers ---------------------------------------------------------------
 
     async def begin_session(self, state: dict) -> None:
@@ -343,6 +349,16 @@ class Registry:
             elif result is not None:
                 out[skill.name] = result
         return out
+
+    async def holding(self) -> str | None:
+        """The first skill's reason to hold the heartbeat's nudges, or None. A failing one holds nothing."""
+        settled = await asyncio.gather(*(s.hold() for s in self.skills), return_exceptions=True)
+        for skill, result in zip(self.skills, settled):
+            if isinstance(result, BaseException):
+                log.warning("skill %s hold failed: %s", skill.name, result)
+            elif result:
+                return str(result)
+        return None
 
     async def nudges(self) -> list[Nudge]:
         settled = await asyncio.gather(*(s.nudges() for s in self.skills), return_exceptions=True)

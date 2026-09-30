@@ -47,6 +47,8 @@ UNIT = [
     "test_markets.py",  # likewise
     "test_news.py",
     "test_whoop.py",
+    "test_bank.py",  # its integration half runs when DATABASE_URL is set
+    "test_gmail_auth.py",
     "test_brainstorm.py",
 ]
 INTEGRATION = [

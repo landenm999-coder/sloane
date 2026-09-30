@@ -1,4 +1,4 @@
-"""The heartbeat: skill nudges said once, retried on failure, held in quiet hours;
+"""The heartbeat: skill nudges said once, retried on failure, held in quiet hours and focus blocks;
 and a planted calendar entry told to him once.
 
 DESTRUCTIVE: truncates nudges_said and events.
@@ -47,6 +47,16 @@ class Offers(Skill):
         return list(self.offering)
 
 
+class Holds(Skill):
+    """Holds the heartbeat while `why` is set (the focus skill, in a block)."""
+
+    name = "holds"
+    why: str | None = None
+
+    async def hold(self):
+        return self.why
+
+
 class Broken(Skill):
     name = "broken"
 
@@ -60,7 +70,8 @@ async def integration() -> None:
         await store._exec("truncate nudges_said")
         skill_ctx = SkillContext(store=store, config=cfg)
         offers = Offers(skill_ctx)
-        registry = Registry([Broken(skill_ctx), offers], skill_ctx)
+        holds = Holds(skill_ctx)
+        registry = Registry([Broken(skill_ctx), offers, holds], skill_ctx)
         said: list[str] = []
         failing = False
 
@@ -101,10 +112,21 @@ async def integration() -> None:
         await heartbeat(ctx, NOON)
         check("so the next tick says it", said, ["Snow tomorrow."])
 
+        said.clear()
+        offers.offering = [Nudge("budget:80", "$20 left this week.")]
+        holds.why = "he's focusing until 4:25 PM"
+        held = await heartbeat(ctx, NOON)
+        check("in a focus block: held, not said, not spent",
+              (held.ran, held.sent, held.reason, said), (True, False, "1 held: he's focusing until 4:25 PM", []))
+        holds.why = None
+        await heartbeat(ctx, NOON)
+        check("the block over: the next tick says it", said, ["$20 left this week."])
+        offers.offering = [Nudge("snow:2026-09-25", "Snow tomorrow.")]
+
         # Pruning forgets only keys that have stopped being offered.
         await store._exec("update nudges_said set offered_at = now() - interval '40 days'")
         await store._exec("update nudges_said set offered_at = now() where key = 'snow:2026-09-25'")
-        check("stale keys are pruned", await store.prune_nudges(30), 3)
+        check("stale keys are pruned", await store.prune_nudges(30), 4)
         said.clear()
         await heartbeat(ctx, NOON)
         check("a key still being offered survives the prune and stays said", said, [])

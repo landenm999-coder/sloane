@@ -40,7 +40,7 @@ async def integration() -> None:
     config = isolated(database_url=os.environ["DATABASE_URL"], timezone="America/Denver", pay_rate=15.0)
     now = {"at": datetime(2026, 9, 24, 20, 0, tzinfo=DEN)}  # Thursday evening
     async with Store(config) as store:
-        await store._exec("truncate expenses, skill_settings, shifts cascade")
+        await store._exec("truncate expenses, skill_settings, shifts, bank_accounts cascade")
         for day in (21, 22, 23, 24, 25):  # Mon-Fri 3-7
             await store.add_shift(datetime(2026, 9, day, 15, tzinfo=DEN), datetime(2026, 9, day, 19, tzinfo=DEN))
         ctx = SkillContext(store=store, config=config, clock=lambda: now["at"])

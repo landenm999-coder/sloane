@@ -392,6 +392,7 @@ flight" until this redesign:
 | Supabase API lockdown (PR #12) | `sql/999_lock_public.sql`, sorted last and re-applied by every install and upgrade: row-level security on every table in `public` (no policies) and all grants revoked from Supabase's `anon`/`authenticated` roles, so the project's auto REST API sees nothing and the security advisor has nothing to email about. She connects as the tables' owner, which RLS doesn't restrict (verified with a non-superuser owner and Supabase-style default grants). Doctor's `api lockdown` line checks it | `sql/999_lock_public.sql`, `scripts/doctor.py` |
 | Planted entries (PR #12) | `ingest.planted()` (narrow: an override phrase *addressed to her*, or an unmistakable marker); the heartbeat tells him once per calendar entry in the next 14 days (`planted:event:<id>`, skills or none); the entry's FACTS line is marked so she neither obeys it nor repeats the warning. Before this she flagged the eval's planted invite in almost every answer | `ingest.py`, `jobs/briefs.py` `planted_nudges`, `memory/tiers.py`; tests in `test_tiers`, `test_heartbeat` |
 | Life skills (PR #20) | workouts (sql/033: by rule, weekly goal, Whoop's too), markets (sql/034 watchlist; Yahoo chart API, CoinGecko fallback; FACTS from cache), news (Google News RSS; tainted answers, never FACTS), Whoop (API v2, rotating refresh token on the volume) | `skills/{workouts,markets,news,whoop}.py`, `scripts/whoop_auth.py`, `tests/test_{workouts,markets,news,whoop}.py` |
+| The bank (this branch) | his bank, card and Fidelity through SimpleFIN Bridge, read-only: accounts, transactions (categories by rule, descriptions untrusted), holdings priced with delayed quotes, daily balances (sql/036); the silent `bank_sync` job; Money counts it with his cash; Portfolio widget; FACTS numbers only | `skills/bank.py`, `scripts/simplefin_auth.py`, `tests/test_bank.py` |
 | DECA (PR #12) | `/roleplay [area]`: a model-written scenario (event, role, judge, situation, five PIs), then a session where the judge stays in character (typed or voice), two follow-up questions after "I'm done", and a score on the DECA form (PIs 0–14, four 21st Century Skills 0–6, overall 0–6) **totalled in code**; `roleplays` table (sql/027), FACTS line with recent scores + "work on", TV panel, an evening nudge when a DECA countdown is ≤14 days out and no practice in 3 days; `/roleplay` on the actions allowlist. Live-checked against the real CLI: a presentation that missed the brief was pushed back on in character and scored 19/100 with specific notes | `sloane/skills/deca.py`, `sql/027`, `tests/test_deca.py` |
 | Slow skills (PR #12) | a command or skill still working after 0.6 s shows "typing…" (a role-play's judge, `/cards make`); instant ones never flash it. The actions instructions now also say recording what he reports isn't initiative, and that only the "do" list does anything (she once said "marking that off" with no command) | `telegram.py` `SLOW_SKILL_SECONDS`, `actions.instructions`; `test_live` |
 | JSON repair (PR #12) | `contract.loads_lenient`/`closed`: the CLI sometimes drops an object's final `}` (1 in 3 scenario calls, live). Unrepaired, a reply came out as raw JSON (read aloud, actions lost). Every model-JSON parser now uses it: `contract.parse`, inbox triage, learn, `/cards make`, deca | `contract.py`; regression checks in test_contract, test_cards, test_learn, test_mail, test_deca |
@@ -425,6 +426,48 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
 ---
 
 ## In flight
+
+- **The dashboard, filled; the bank and Fidelity; Whoop's rings** (this branch's PR). Landen, 2026-09-29: fill
+  every box ("I don't want a bunch of empty space sitting around"); Whoop as three circles (sleep, recovery,
+  strain) with HRV and resting heart rate as bars against his averages; workouts really from Whoop, centered;
+  markets with a coloured chart and more important tickers; focus that does something, centered; the inbox
+  connected; money connected to his bank (spending, what's left) and his Fidelity portfolio. Built:
+  - *Filling*: every widget is a size container (`.w { container: w / size }`), so rings, big numbers and
+    charts grow with the card, charts and lists take the height left, list rows grow to 52px, empty widgets go
+    after the filled ones, a short last page stretches its rows, and under today's agenda tomorrow's first
+    things fill the column (`renderPeek`, as many as fit without scrolling). Whoop and Markets are two wide;
+    Money too once the bank is on.
+  - *Whoop*: `/recovery` now reads 25, so HRV and resting HR are measured against his average over the
+    recoveries before today (at least three); sleep need (baseline + debt + strain − naps); workouts carry
+    strain and average heart rate (`sql/035`: two columns; a rescore updates them). The heartbeat now pulls
+    Whoop (its `nudges`), so workouts arrive with the page closed, and a workout Whoop logged today is told
+    once. The widget: three rings, then two diverging bars around his average (green the good way: HRV up,
+    resting HR down).
+  - *Weather*: humidity, wind, sunrise/sunset and five days; the widget draws the next hours as tall as the
+    card, the facts, and the days ahead when there's room.
+  - *Markets*: `OVERVIEW` (S&P, Nasdaq, Dow, Bitcoin, 10-year yield, VIX, gold, oil, Russell, Ether) rides in the
+    panel, five-minute closes for the day's line; the widget has the market as tiles, an area chart of the one
+    he picks (green or red from yesterday's close, a dashed line at it, a crosshair tooltip), and his list.
+  - *Focus*: the panel suggests his open work due in the next week (one press: 25 minutes on it) and the week's
+    minutes; while a block runs, the heartbeat holds her nudges (`Skill.hold`, `Registry.holding`), and the
+    next tick after says them. Reminders still arrive.
+  - *The bank* (`skills/bank.py`, `sql/036`, `scripts/simplefin_auth.py`, DEPLOY 7k): SimpleFIN Bridge, read-only
+    (no way to move money): accounts (kind guessed: cash, credit, investment, loan), transactions (categories by
+    rule; transfers and card payments aren't spending; descriptions untrusted, through `safe_field`, never in
+    FACTS), holdings (priced with the markets skill's quotes for today's move), a daily balance history. The
+    `bank_sync` job every three hours 6 AM to 9 PM, `/bank sync` at most every half hour (SimpleFIN allows 24 a
+    day). The access URL is a password: httpx gets its credentials as auth, only the host is logged, and the
+    workshop's guard now treats it (and Whoop's secret and token) as a credential. Money counts the bank's
+    spending with what he logs by hand (his cash) against the budget; a Portfolio widget.
+  - *Gmail*: `gmail_auth.py` asks for the client ID and (hidden) secret when `.env` lacks them and saves them,
+    and says to use an incognito window. Connecting it is still his to do (below).
+  - Verified: every suite (new: `test_bank.py`, `test_gmail_auth.py`; more checks in whoop, weather, markets,
+    focus, heartbeat, workouts, workshop and web), pyflakes clean but the two known hits; in Chromium against
+    the seeded demo (now with a stub SimpleFIN) at 1920, 1440 (chat open and closed), 1280, 1024 and 390, every
+    widget button clicked (the suggested focus block, a ticker tile and row picking the chart, the crosshair,
+    the bank sync), no console errors, no page scroll.
+  - Worth knowing: Fidelity through SimpleFIN goes through MX; if it won't connect there, the bank and card still
+    work. A few SimpleFIN brokerages send cost basis per share; `bank.basis` reads whichever fits the value.
 
 - **Whoop past Cloudflare** (landenm999-coder/sloane#27, merged; live on the box). Connecting his Whoop on 2026-09-29, the
   token exchange in `scripts/whoop_auth.py` came back 403 "error code: 1010": Cloudflare, in front of Whoop,
@@ -507,7 +550,7 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
 
 ## Only Landen can do (the whole list; see DEPLOY.md)
 
-Done: the Oracle box, the installer, the workshop's GitHub token, the control room, the British voice.
+Done: the Oracle box, the installer, the workshop's GitHub token, the control room, the British voice, Whoop.
 
 0. After each merge to `main`, upgrade the box: in PowerShell,
    `ssh -i "C:\Users\lande\Downloads\ssh-key-2026-09-27.key" ubuntu@<the box's IP>`, then
@@ -516,13 +559,15 @@ Done: the Oracle box, the installer, the workshop's GitHub token, the control ro
 1. Optional tidy-up on his PC: the second install in WSL is switched off but still holds a copy of `.env`
    (his credentials). `wsl --unregister Ubuntu-24.04` deletes it, and `wsl --unregister Ubuntu` the empty
    Ubuntu made by accident. Neither holds anything she needs; her memory is in Supabase.
-2. Optional Gmail (DEPLOY §7c): a Google Cloud Desktop OAuth client, **published In production** (Testing tokens
-   die after 7 days), then `python3 scripts/gmail_auth.py` on the box.
+2. Gmail (DEPLOY §7c), what fills the Inbox widget: a Google Cloud Desktop OAuth client, **published In
+   production** (Testing tokens die after 7 days), then `python3 scripts/gmail_auth.py` on the box (it asks for
+   the client ID and secret itself), restart.
 3. Capture on the phone: Tailscale on the phone, `CAPTURE_TOKEN` + `CORS_ORIGINS` on the box, then
    Capture → Settings → Sloane (DEPLOY §7d).
-4. Optional Whoop (DEPLOY §7j): an app at developer.whoop.com (redirect `http://localhost:8765`), its id and
-   secret in `.env`, `python3 scripts/whoop_auth.py` on the box, restart. Gmail (2) is what fills the
-   control room's Inbox panel.
+4. Whoop is connected (2026-09-29). If she ever says Whoop refused her: DEPLOY §7j step 3, then restart.
+5. Optional bank, card and Fidelity (DEPLOY §7k): a SimpleFIN Bridge account (~$15 a year) with them connected,
+   a setup token, `python3 scripts/simplefin_auth.py` on the box, restart, `/bank sync`. It fills Money and
+   Portfolio.
 
 Security rules he follows: never paste tokens or credentials into chat. Credentials live only in `.env`
 (gitignored, chmod 600). The ICS URL, the Canvas token and the GitHub token are passwords.

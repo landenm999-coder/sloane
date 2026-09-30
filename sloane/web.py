@@ -80,7 +80,7 @@ FONTS = frozenset({"onest-400.woff2", "onest-500.woff2", "onest-600.woff2"})
 # each one a command he could type, handled the same way. Nothing that reaches outside (no /sync,
 # /brief, /inbox), and nothing about her permissions (/trust, /revoke).
 BUTTONS = frozenset({"did", "habit", "list", "focus", "watch", "unwatch", "workout", "spent", "budget",
-                     "countdown", "birthday", "client", "news", "done", "remind", "remember"})
+                     "countdown", "birthday", "client", "news", "done", "remind", "remember", "bank"})
 MAX_BUTTON = 300
 _BUTTON = re.compile(r"^/([a-z]+)(?:\s|$)", re.I)
 # What a browser's recorder makes (Chrome and Firefox: WebM or Ogg; Safari: MP4),
@@ -536,10 +536,10 @@ _THREAD = re.compile(r"^[0-9a-f]{8,32}$")
 # grid is never bare. Any skill not named here comes after these, on, drawn from its lines.
 PANELS: dict[str, bool] = {
     "weather": True, "whoop": True, "workouts": True, "markets": True, "inbox": True, "habits": True,
-    "news": True, "focus": True, "money": True, "countdowns": True, "lists": True, "birthdays": True,
+    "news": True, "focus": True, "money": True, "portfolio": True, "countdowns": True, "lists": True, "birthdays": True,
     "clients": True, "school": True, "workshop": True, "learned": True,
     "grades": False, "week": False, "colleges": False, "cards": False, "deca": False, "engine": False,
-    "work": False, "plan": False, "memory": False,
+    "work": False, "plan": False, "memory": False, "bank": False,
 }
 PHONE_PANELS = ("whoop", "markets", "habits")
 PHONE_COUNT = 3
@@ -602,7 +602,7 @@ JOB_NAMES = {
     "post_shift": "The post-shift check-in", "wrap": "The night wrap", "reflection": "Reflection",
     "reminders": "Reminders", "heartbeat": "The heartbeat", "inbox": "Inbox triage", "learn": "Nightly learning",
     "backup": "The backup", "watchdog": "The watchdog", "weekly_review": "The weekly review", "think": "Thinking",
-    "workshop": "The workshop night shift",
+    "workshop": "The workshop night shift", "bank_sync": "The bank sync",
 }
 # Workshop statuses the orb looks at.
 MOVING = ("ready", "building", "deploying", "accepted", "idea", "planned")

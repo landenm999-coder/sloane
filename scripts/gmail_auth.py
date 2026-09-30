@@ -6,8 +6,9 @@ Docker, so it can write .env as the user who owns it.
     cd /opt/sloane
     python3 scripts/gmail_auth.py
 
-It reads GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET from .env, prints a Google
-link, and asks you to paste back the address your browser lands on afterwards.
+It reads GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET from .env (and asks for them,
+the secret hidden as you paste, if they aren't there yet, then saves them), prints
+a Google link, and asks you to paste back the address your browser lands on afterwards.
 That page will fail to load ("localhost refused to connect") -- that is
 expected: the code Google hands back is in the address itself, and nothing
 needs to be listening for it.
@@ -21,6 +22,7 @@ delete -- there is no scope here that could.
 from __future__ import annotations
 
 import base64
+import getpass
 import hashlib
 import json
 import os
@@ -76,13 +78,31 @@ def pkce() -> tuple[str, str]:
     return verifier, challenge.decode().rstrip("=")
 
 
-def main() -> int:
-    env_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(".env")
+def ask_client(env_path: Path, client_id: str, client_secret: str) -> tuple[str, str]:
+    """The OAuth client from Google Cloud (Credentials → your Desktop client), asked for here when
+    .env doesn't have it yet, and saved there. The secret is read hidden: never on the screen."""
+    if not client_id:
+        print("\nFrom console.cloud.google.com → APIs & Services → Credentials → your Desktop OAuth client:")
+        client_id = input("Client ID (ends in .apps.googleusercontent.com): ").strip()
+        if client_id:
+            write_env(env_path, "GMAIL_CLIENT_ID", client_id)
+    if not client_secret:
+        client_secret = getpass.getpass("Client secret (hidden as you paste): ").strip()
+        if client_secret:
+            write_env(env_path, "GMAIL_CLIENT_SECRET", client_secret)
+    return client_id, client_secret
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = sys.argv[1:] if argv is None else argv
+    env_path = Path(args[0]) if args else Path(".env")
     env = read_env(env_path)
     client_id = env.get("GMAIL_CLIENT_ID") or os.environ.get("GMAIL_CLIENT_ID", "")
     client_secret = env.get("GMAIL_CLIENT_SECRET") or os.environ.get("GMAIL_CLIENT_SECRET", "")
-    if not client_id or not client_secret:
-        print(f"Put GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET in {env_path} first (DEPLOY.md → Gmail).")
+    client_id, client_secret = ask_client(env_path, client_id, client_secret)
+    if not client_id.endswith(".apps.googleusercontent.com") or not client_secret:
+        print("That isn't a Google OAuth client (the ID ends in .apps.googleusercontent.com). "
+              "Check DEPLOY.md section 7c, steps 1-5.")
         return 1
 
     verifier, challenge = pkce()
@@ -100,7 +120,8 @@ def main() -> int:
         "code_challenge_method": "S256",
     })
 
-    print("\n1. Open this link in a browser signed in to the Gmail account Sloane should read:\n")
+    print("\n1. Open this link (on your PC is fine), in an incognito window, and sign in to the Gmail\n"
+          "   account Sloane should read:\n")
     print(link)
     print(
         "\n2. Choose the account. If Google says the app isn't verified, click "

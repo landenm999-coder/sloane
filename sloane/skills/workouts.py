@@ -332,10 +332,20 @@ class Workouts(Skill):
         lines = [f"This week: {len(week)}" + (f" of {goal}" if goal else "")]
         if newest:
             lines.append(f"Last: {described(newest, self.miles)} ({dates.spoken(newest['done_on'], today)})")
+        strains = [float(r["strain"]) for r in week if r.get("strain") is not None]
+
+        def shown(r: dict) -> dict:
+            return {"text": described(r, self.miles), "kind": r["kind"], "when": dates.spoken(r["done_on"], today),
+                    "source": r.get("source") or "him",
+                    "strain": None if r.get("strain") is None else float(r["strain"]), "heart_rate": r.get("heart_rate")}
+
         return {"title": "Workouts", "lines": lines, "count": len(week), "goal": goal, "days": days, "weeks": weeks,
                 "minutes": sum(r["minutes"] or 0 for r in week), "distance": distance(meters, self.miles) or None,
-                "last": {"text": described(newest, self.miles), "when": dates.spoken(newest["done_on"], today)}
-                if newest else None}
+                "strain": round(sum(strains), 1) if strains else None,
+                "whoop": bool(self.ctx.config.whoop_refresh_token),
+                "from_whoop": sum(1 for r in week if r.get("source") == "whoop"),
+                "recent": [shown(r) for r in reversed(rows[-3:])],
+                "last": shown(newest) if newest else None}
 
 
 def build(ctx: SkillContext) -> Skill:

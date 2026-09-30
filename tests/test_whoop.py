@@ -41,20 +41,26 @@ def check(label: str, got, want) -> None:
         FAILURES.append(f"{label}\n     got: {got!r}\n    want: {want!r}")
 
 
+# Newest first: today's, then the days before it that make his average (HRV 50, resting HR 55).
 RECOVERY = {"records": [{"cycle_id": 1, "score_state": "SCORED", "score": {
-    "recovery_score": 64, "resting_heart_rate": 52, "hrv_rmssd_milli": 58.3}}]}
+    "recovery_score": 64, "resting_heart_rate": 52, "hrv_rmssd_milli": 58.3}}] + [
+    {"cycle_id": 1 - n, "score_state": "SCORED", "score": {
+        "recovery_score": 50, "resting_heart_rate": 55 + (1 if n % 2 else -1), "hrv_rmssd_milli": 50 + (5 if n % 2 else -5)}}
+    for n in range(1, 11)] + [{"cycle_id": -20, "score_state": "PENDING_SCORE"}]}
 CYCLE = {"records": [{"id": 1, "start": "2026-09-29T11:00:00Z", "end": None, "score_state": "SCORED",
                       "score": {"strain": 8.43}}]}
 SLEEP = {"records": [
     {"id": "nap-1", "nap": True, "score_state": "SCORED", "score": {"stage_summary": {"total_in_bed_time_milli": 1}}},
     {"id": "night-1", "nap": False, "score_state": "SCORED", "score": {
         "sleep_performance_percentage": 91, "stage_summary": {
-            "total_in_bed_time_milli": 8 * 3600000, "total_awake_time_milli": 30 * 60000}}}]}
+            "total_in_bed_time_milli": 8 * 3600000, "total_awake_time_milli": 30 * 60000},
+        "sleep_needed": {"baseline_milli": 7 * 3600000 + 45 * 60000, "need_from_sleep_debt_milli": 20 * 60000,
+                         "need_from_recent_strain_milli": 5 * 60000, "need_from_recent_nap_milli": -10 * 60000}}}]}
 WORKOUTS = {"records": [
     {"id": "w-run", "sport_name": "running", "start": "2026-09-29T00:30:00Z", "end": "2026-09-29T01:10:00Z",
-     "score_state": "SCORED", "score": {"strain": 11.2, "distance_meter": 6437.4}},
+     "score_state": "SCORED", "score": {"strain": 11.24, "distance_meter": 6437.4, "average_heart_rate": 151.4}},
     {"id": "w-lift", "sport_name": "weightlifting", "start": "2026-09-29T14:00:00Z", "end": "2026-09-29T14:45:00Z",
-     "score_state": "SCORED", "score": {"strain": 7.0}},
+     "score_state": "SCORED", "score": {"strain": 7.0, "average_heart_rate": 9000}},
 ]}
 
 
@@ -62,6 +68,7 @@ class Stub(BaseHTTPRequestHandler):
     current = "refresh-secret-0000"   # the only refresh token Whoop will take
     issued = 0
     api_calls: list[str] = []
+    queries: list[str] = []
     refreshes: list[str] = []
     retire_next = False               # the next API call answers 401 once
     refuse = False
@@ -104,6 +111,7 @@ class Stub(BaseHTTPRequestHandler):
             return
         path = urlparse(self.path).path
         Stub.api_calls.append(path)
+        Stub.queries.append(self.path)
         if self.headers.get("Authorization") != f"Bearer access-secret-{Stub.issued:04d}" or Stub.retire_next:
             Stub.retire_next = False
             return self.reply(401, {})
@@ -126,8 +134,11 @@ class Stub(BaseHTTPRequestHandler):
 class FakeStore:
     def __init__(self):
         self.workouts: dict = {}
+        self.numbers: dict = {}
 
-    async def add_workout(self, *, kind, minutes, distance_m, done_on, logged_at, source="him", source_id=None):
+    async def add_workout(self, *, kind, minutes, distance_m, done_on, logged_at, source="him", source_id=None,
+                          strain=None, heart_rate=None):
+        self.numbers[(source, source_id)] = (strain, heart_rate)
         if (source, source_id) in self.workouts:
             return None
         self.workouts[(source, source_id)] = (kind, minutes, round(distance_m) if distance_m else None, done_on)
@@ -144,6 +155,11 @@ check("a nap isn't last night", day.sleep_minutes, 450)
 check("zones", [zone(x) for x in (90, 67, 66, 34, 33, None)], ["green", "green", "yellow", "yellow", "red", ""])
 unscored = parse_day({"records": [{"score_state": "PENDING_SCORE"}]}, CYCLE, {"records": []}, {"records": []})
 check("not scored yet: None, not zero", (unscored.recovery, unscored.sleep_minutes, unscored.strain), (None, None, 8.43))
+check("his average: the scored days before today, not today", (day.hrv_avg, day.rhr_avg, day.avg_days), (50.0, 55.0, 10))
+check("no average from two days", parse_day({"records": RECOVERY["records"][:3]}, CYCLE, SLEEP, WORKOUTS).hrv_avg, None)
+check("last night's need: baseline, debt and strain, less the nap", day.sleep_need_minutes, 7 * 60 + 60)
+check("a workout's strain and heart rate; a heart rate no one has is dropped",
+      [(w["strain"], w["heart"]) for w in day.workouts], [(11.2, 151), (7.0, None)])
 check("off without its three settings", build(SkillContext(store=None, config=isolated())), None)
 
 
@@ -197,7 +213,7 @@ async def main() -> None:
     check("said", answer.speech,
           "Recovery is 64%, yellow, and you slept 7 hours 30 minutes, 91% of what you needed. Strain so far is 8.4.")
     check("listed", answer.detail.splitlines(),
-          ["- Recovery: 64% (yellow), HRV 58 ms, resting HR 52", "- Sleep: 7h 30m, performance 91%",
+          ["- Recovery: 64% (yellow), HRV 58 ms (avg 50), resting HR 52 (avg 55)", "- Sleep: 7h 30m, performance 91%",
            "- Strain so far today: 8.4"])
     saved = folder / "whoop.json"
     check("the new refresh token is saved at once, 600",
@@ -208,11 +224,18 @@ async def main() -> None:
     await reg.command("whoop", "")
     check("within 15 minutes: the cache", len(Stub.api_calls), calls)
     check("FACTS, from the cache", await skill.facts(),
-          ["- WHOOP today: recovery 64% (yellow), HRV 58 ms, resting HR 52, last night's sleep 7h 30m "
+          ["- WHOOP today: recovery 64% (yellow), HRV 58 ms (his average 50), resting HR 52 (his average 55), "
+           "last night's sleep 7h 30m "
            "(91% of need), strain so far 8.4"])
     check("his workouts, into the workouts table, in his day",
           sorted(store.workouts.values()), sorted([("run", 40, 6437, datetime(2026, 9, 28).date()),
                                                    ("lift", 45, None, datetime(2026, 9, 29).date())]))
+    check("with Whoop's strain and heart rate", store.numbers[("whoop", "w-run")], (11.2, 151))
+    told = await skill.nudges()
+    check("the heartbeat tells him once about today's workout (not last night's, logged before today)",
+          [(n.key, n.text) for n in told],
+          [("whoop:workout:w-lift", "🏃 Whoop logged your lift: 45 min, strain 7.0. It's in your workouts.")])
+    check("and not again", await skill.nudges(), [])
 
     # -- a restart: the token on the volume, not the used-up one in .env -----------------------------
     now[0] += 16 * 60
@@ -221,6 +244,10 @@ async def main() -> None:
     check("after a restart, the saved token works (the .env one is spent)",
           (panel["recovery"], Stub.refreshes[-1]), (64, "refresh-secret-0001"))
     check("the panel", (panel["zone"], panel["hrv"], panel["sleep_minutes"], panel["strain"]), ("yellow", 58, 450, 8.4))
+    check("the panel's averages, need and scale",
+          (panel["hrv_avg"], panel["rhr_avg"], panel["avg_days"], panel["sleep_need_minutes"], panel["strain_max"]),
+          (50.0, 55.0, 10, 480, 21.0))
+    check("his average comes from Whoop's last 25 recoveries", "limit=25" in " ".join(Stub.queries), True)
     check("workouts once, however often it syncs", len(store.workouts), 2)
 
     # -- an access token Whoop retired early: one fresh one, then on ---------------------------------
