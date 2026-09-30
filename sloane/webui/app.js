@@ -216,7 +216,8 @@ function currentOrb() {
     return { state: forced, label, detail, step: step ?? null };
   }
   if (doing.listening) {
-    return { state: "listening", label: "Listening", detail: call.on ? "On a call. Just talk" : "Recording your voice note" };
+    return { state: "listening", label: "Listening", detail: call.room ? "Room mode: say her name to ask"
+      : call.on ? "On a call. Just talk" : "Recording your voice note" };
   }
   if (doing.speaking) return { state: "speaking", label: "Speaking", detail: call.on ? "Tap the orb to cut in" : "Saying her reply" };
   if (doing.asking) return { state: "thinking", label: "Thinking", detail: "Working on your message" };
@@ -413,11 +414,11 @@ const readAloud = $("#read-aloud");
 
 function scrollDown() { thread.scrollTop = thread.scrollHeight; }
 
-function hisMessage(text, { when = "", forwarded = false, spoken = false, pending = false } = {}) {
+function hisMessage(text, { when = "", forwarded = false, spoken = false, pending = false, room = false } = {}) {
   const item = el("li", { class: `msg him${pending ? " pending" : ""}` },
     when ? el("span", { class: "when", text: when }) : null,
     el("span", { class: "body", text }),
-    spoken ? el("span", { class: "tag", text: "voice" }) : null,
+    room ? el("span", { class: "tag", text: "in the room" }) : spoken ? el("span", { class: "tag", text: "voice" }) : null,
     forwarded ? el("span", { class: "tag", text: "forwarded" }) : null);
   thread.append(item);
   scrollDown();
@@ -887,6 +888,7 @@ document.addEventListener("keydown", (event) => {
 // her off, Esc or End to hang up.
 
 const callButton = $("#call");
+const roomButton = $("#room");
 const callbar = $("#callbar");
 const FRAME_MS = 40;         // how often the level is read
 const START_MS = 160;        // this long above the line: he's talking
@@ -895,7 +897,9 @@ const MIN_TALK_MS = 300;     // less than this is a cough, not a sentence
 const MAX_TURN_MS = 45000;   // one turn at most
 const RECYCLE_MS = 8000;     // this long without a word: start the recording over (it stays small)
 const IDLE_HANGUP_MS = 4 * 60 * 1000;
-const call = { on: false, phase: "off", stream: null, context: null, analyser: null, samples: null, timer: 0,
+const ROOM_IDLE_MS = 30 * 60 * 1000;  // room mode ends after this long with nobody talking
+const FOLLOW_MS = 8000;               // after she answers in the room, this long to follow up without her name
+const call = { on: false, room: false, hotUntil: 0, answered: false, phase: "off", stream: null, context: null, analyser: null, samples: null, timer: 0,
   recorder: null, chunks: [], since: 0, floor: 0.006, voiced: 0, quiet: 0, talked: 0, heardAt: 0,
   pending: false, calmSince: 0, lastWords: 0, hear: null };
 
@@ -905,10 +909,14 @@ function callPhase(phase) {
   const shown = phase === "waiting" ? (doing.speaking ? "speaking" : "thinking") : phase;
   if (callbar.dataset.phase === shown) return;
   callbar.dataset.phase = shown;
-  const [words, hint] = {
+  const [words, hint] = (call.room ? {
+    listening: ["Room mode", Date.now() < call.hotUntil ? "go ahead, she's listening" : "say “Sloane” to ask her"],
+    hearing: ["Hearing the room", call.lastHeard ? `“${call.lastHeard}”` : ""],
+    thinking: ["Thinking", ""], speaking: ["Speaking", "tap the orb to cut in"], off: ["", ""],
+  } : {
     listening: ["Listening", "just talk"], hearing: ["Hearing you", "pause when you're done"],
     thinking: ["Thinking", ""], speaking: ["Speaking", "tap the orb to cut in"], off: ["", ""],
-  }[shown];
+  })[shown];
   $("#call-state").textContent = words;
   $("#call-hint").textContent = hint;
   paintOrb();
@@ -953,11 +961,34 @@ function sendTurn() {
     const blob = new Blob(call.chunks, { type: kind });
     if (!call.on || talked < MIN_TALK_MS || blob.size < 800) { call.pending = false; return; }
     call.lastWords = Date.now();
+    if (call.room) { roomTurn(blob, kind); return; }
     const mine = hisMessage("Listening back…", { spoken: true, pending: true });
     exchange(() => api("/api/voice", { method: "POST", headers: { "X-Sloane": "1", "Content-Type": kind }, body: blob }), mine)
       .finally(() => { call.pending = false; });
   };
   recorder.stop();
+}
+
+// Room mode: every stretch is heard (kept on the box for two minutes, never stored); only one
+// with her name in it, or a follow-up just after she answered, is asked.
+async function roomTurn(blob, kind) {
+  let data = {};
+  try {
+    const response = await api("/api/room/hear", { method: "POST", headers: { "X-Sloane": "1", "Content-Type": kind }, body: blob });
+    data = await response.json().catch(() => ({}));
+    if (!response.ok) { if (data.error) toast(data.error, true); endCall(); return; }
+  } catch {
+    call.pending = false;
+    return;
+  }
+  const heard = (data.heard || "").trim();
+  if (heard) call.lastHeard = heard.length > 70 ? `…${heard.slice(-68)}` : heard;
+  const asked = heard && (data.wake || Date.now() < call.hotUntil);
+  if (!asked || !call.on) { call.pending = false; return; }
+  call.hotUntil = 0;
+  const mine = hisMessage(heard, { room: true });
+  exchange(() => api("/api/room/ask", { method: "POST", headers: HEAD, body: JSON.stringify({ text: heard }) }), mine)
+    .finally(() => { call.pending = false; call.answered = true; });
 }
 
 function level() {
@@ -983,7 +1014,10 @@ function callFrame() {
   if (call.phase === "waiting") {
     // A breath after she stops, so the tail of her voice isn't taken for his.
     call.calmSince ||= Date.now();
-    if (Date.now() - call.calmSince >= 300) listen();
+    if (Date.now() - call.calmSince >= 300) {
+      if (call.room && call.answered) { call.answered = false; call.hotUntil = Date.now() + FOLLOW_MS; }
+      listen();
+    }
     return;
   }
   const now = Date.now();
@@ -998,7 +1032,12 @@ function callFrame() {
       // The room's own noise, followed slowly: a fan is not a voice.
       call.floor = heard < call.floor ? call.floor * 0.9 + heard * 0.1 : call.floor * 0.98 + heard * 0.02;
       if (now - call.since > RECYCLE_MS) record();
-      if (now - Math.max(call.lastWords, call.startedAt) > IDLE_HANGUP_MS) { endCall(); toast("Hung up after a few quiet minutes."); }
+      if (now - Math.max(call.lastWords, call.startedAt) > (call.room ? ROOM_IDLE_MS : IDLE_HANGUP_MS)) {
+        const room = call.room;
+        endCall();
+        toast(room ? "Room mode is off: nobody's talked for half an hour." : "Hung up after a few quiet minutes.");
+      }
+      if (call.room && call.hotUntil && now > call.hotUntil) { call.hotUntil = 0; callPhase("hearing"); callPhase("listening"); }
     }
   } else if (call.phase === "hearing") {
     if (heard > line * 0.7) { call.quiet = 0; call.talked += FRAME_MS; } else call.quiet += FRAME_MS;
@@ -1010,7 +1049,7 @@ function quieted() {
   if (call.on) callFrame();
 }
 
-async function startCall() {
+async function startCall(room = false) {
   if (call.on) return;
   if (recording) stopRecording(true);
   let stream;
@@ -1027,8 +1066,8 @@ async function startCall() {
     const analyser = context.createAnalyser();
     analyser.fftSize = 1024;
     context.createMediaStreamSource(stream).connect(analyser);
-    Object.assign(call, { on: true, stream, context, analyser, samples: new Float32Array(analyser.fftSize),
-      floor: 0.006, startedAt: Date.now(), lastWords: 0, pending: false });
+    Object.assign(call, { on: true, room, stream, context, analyser, samples: new Float32Array(analyser.fftSize),
+      floor: 0.006, startedAt: Date.now(), lastWords: 0, pending: false, hotUntil: 0, answered: false, lastHeard: "" });
   } catch {
     stream.getTracks().forEach((track) => track.stop());
     toast("This browser can't listen hands-free. Use the mic button instead.");
@@ -1037,11 +1076,14 @@ async function startCall() {
   hush();
   if (!wide.matches) show("talk");
   else if (!SOLO && chatMode !== "open") setChat("open");
-  callButton.setAttribute("aria-pressed", "true");
-  callButton.querySelector("span").textContent = "End";
+  const pressed = room ? roomButton : callButton;
+  pressed.setAttribute("aria-pressed", "true");
+  pressed.querySelector("span").textContent = room ? "Leave" : "End";
+  (room ? callButton : roomButton).disabled = true;
   document.body.classList.add("calling");
+  document.body.classList.toggle("room-mode", room);
   callbar.hidden = false;
-  input.placeholder = "On a call. Or type";
+  input.placeholder = room ? "Room mode. Or type" : "On a call. Or type";
   call.timer = setInterval(callFrame, FRAME_MS);
   listen();
 }
@@ -1055,9 +1097,14 @@ function endCall() {
   call.stream.getTracks().forEach((track) => track.stop());
   call.context.close().catch(() => {});
   if (readAloud.getAttribute("aria-pressed") !== "true") hush();
+  if (call.room) api("/api/room/clear", { method: "POST", headers: HEAD, body: "{}" }).catch(() => {});
+  call.room = false;
   callButton.setAttribute("aria-pressed", "false");
   callButton.querySelector("span").textContent = "Talk";
-  document.body.classList.remove("calling");
+  roomButton.setAttribute("aria-pressed", "false");
+  roomButton.querySelector("span").textContent = "Room";
+  callButton.disabled = roomButton.disabled = false;
+  document.body.classList.remove("calling", "room-mode");
   callbar.hidden = true;
   input.placeholder = "Message Sloane";
   callPhase("off");
@@ -1070,6 +1117,7 @@ function cutIn() {
 }
 
 callButton.addEventListener("click", () => (call.on ? endCall() : startCall()));
+roomButton.addEventListener("click", () => (call.on ? endCall() : startCall(true)));
 $("#call-end").addEventListener("click", endCall);
 $(".chat-head .js-orb").addEventListener("click", cutIn);
 $("#orb-talk").addEventListener("click", () => {
@@ -2824,6 +2872,7 @@ async function refresh() {
     renderEngine(data);
     mic.hidden = !(data.talk?.hears && canRecord());
     callButton.hidden = mic.hidden;
+    roomButton.hidden = mic.hidden;
     $("#orb-talk").disabled = mic.hidden;
   } catch (error) {
     if (error.message === "signed out") return;

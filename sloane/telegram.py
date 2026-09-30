@@ -1284,6 +1284,23 @@ class Bot:
             return
         await out.send(reply, as_voice=voice)
 
+    async def respond_room(self, chat_id: int, said: str, context: str, out: Outlet) -> None:
+        """Room mode: someone near the control room said her name (sloane/room.py). The voice
+        may not be his and the room is other people's words, so she only talks: no commands,
+        no skill rules, no actions or lookups (the context is INGESTED), and nothing of it is
+        remembered as his. The question was logged untrusted by the caller."""
+        said = redact(said)
+        live = out.live()
+        await live.start_typing()
+        try:
+            reply = await self._agent.answer(said, channel="room", on_text=live.update, can_act=False,
+                                             ingested=context, persist=False, quick=True)
+        finally:
+            live.stop_typing()
+        if await live.finish(reply):
+            return
+        await out.send(reply)
+
     async def poll_forever(self) -> None:
         """Long-poll until stopped. Network trouble backs off, it does not exit."""
         if not self._token:

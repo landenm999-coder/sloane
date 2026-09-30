@@ -327,7 +327,11 @@ everything she runs. The bare address, `/`, opens it too.
   money and portfolio (with your bank, 7k), countdowns, lists, birthdays,
   clients, one small **School** widget, the workshop, and what she learned today.
   Each grows what's in it with its box. When there are more than fit, they go on
-  pages (the dots at the bottom). Every widget does something: tick a habit (again to untick), check
+  pages (the dots at the bottom). **Room**, next to Talk, is room mode: she listens
+  and joins in only when she hears "Sloane" in a sentence, using the last two
+  minutes as context, and answers out loud. It's transcribed on the box (the first
+  time downloads a small speech model, about 150 MB), kept in memory for two
+  minutes only, and she can only talk in it, never act. **Leave** ends it. Every widget does something: tick a habit (again to untick), check
   off a list item, start or stop a focus block, log a workout or spending, add a
   ticker, topic, countdown, birthday, client or reminder with its **+**, open an
   email in Gmail or a headline, mark school work handed in (press twice), or ask

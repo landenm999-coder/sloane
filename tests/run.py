@@ -52,6 +52,7 @@ UNIT = [
     "test_redact.py",  # its integration half runs when DATABASE_URL is set
     "test_research.py",  # likewise
     "test_monitors.py",  # likewise
+    "test_room.py",  # likewise
     "test_brainstorm.py",
 ]
 INTEGRATION = [

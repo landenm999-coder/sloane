@@ -89,6 +89,9 @@ _BUTTON = re.compile(r"^/([a-z]+)(?:\s|$)", re.I)
 AUDIO = {"audio/webm": "webm", "audio/ogg": "ogg", "audio/mp4": "m4a", "audio/x-m4a": "m4a", "audio/aac": "m4a",
          "audio/mpeg": "mp3", "audio/wav": "wav"}
 MAX_AUDIO = 8 * 1024 * 1024
+# What Whisper "hears" in a quiet room: not words anyone said.
+ROOM_NOISE = frozenset({"", "you", "thank you", "thanks", "thanks for watching", "thank you for watching", "bye",
+                        "okay", "um", "uh", "hmm", "so"})
 # What the page asks her to say at once: a sentence or two of her speech.
 MAX_SPOKEN = 600
 
@@ -896,6 +899,88 @@ def install(app: FastAPI, state: dict, store, config) -> None:  # noqa: ANN001, 
         # Spoken: he's waiting to hear her, so her fast lane may answer.
         return converse(bot, text, heard=True, quick=True)
 
+    # -- room mode (sloane/room.py): she joins in when she hears her name ------------------------
+
+    from sloane.room import Ears, Room
+
+    room = Room(window_seconds=config.room_window_seconds, wake_words=config.room_wake_words)
+    ears = Ears(config.room_stt_model, config.embed_cache_dir)
+    state["room"] = room
+
+    @app.post("/api/room/hear")
+    async def api_room_hear(request: Request) -> Response:
+        """A stretch of speech from near the control room, while room mode is on: its words,
+        kept in memory for ROOM_WINDOW_SECONDS (never stored, never logged), and `wake` when
+        her name is in it. Transcribed on the box when it can be; the audio is never kept."""
+        stop = refuse(request, change=True)
+        if stop is not None:
+            return stop
+        bot = state.get("responder")
+        if bot is None:
+            return JSONResponse({"error": "she isn't ready yet"}, status_code=503)
+        if not ears.ready and not getattr(bot, "hears", False):
+            return JSONResponse({"error": "room mode needs a transcriber: faster-whisper on the box, or GROQ_API_KEY"},
+                                status_code=400)
+        kind = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
+        if kind not in AUDIO:
+            return JSONResponse({"error": "that isn't audio I can read"}, status_code=415)
+        audio = bytearray()
+        async for chunk in request.stream():
+            audio += chunk
+            if len(audio) > MAX_AUDIO:
+                return JSONResponse({"error": "too long"}, status_code=413)
+        if not audio:
+            return JSONResponse({"heard": "", "wake": False})
+        by = "box" if ears.ready else "voice"
+        try:
+            text = await ears.transcribe(bytes(audio)) if ears.ready else await bot.transcribe(bytes(audio),
+                                                                                             f"room.{AUDIO[kind]}")
+        except Exception as exc:  # noqa: BLE001 - a stretch lost is a stretch lost, never a stuck page
+            log.warning("room mode: not transcribed (%s): %s", by, type(exc).__name__)
+            if by == "box" and getattr(bot, "hears", False):
+                try:
+                    text, by = await bot.transcribe(bytes(audio), f"room.{AUDIO[kind]}"), "voice"
+                except Exception:  # noqa: BLE001
+                    return JSONResponse({"heard": "", "wake": False, "error": "couldn't make that out"})
+            else:
+                return JSONResponse({"heard": "", "wake": False, "error": "couldn't make that out"})
+        text = " ".join((text or "").split())
+        if not text or text.lower().strip(" .!?") in ROOM_NOISE:
+            return JSONResponse({"heard": "", "wake": False, "by": by})
+        wall = datetime.now(ZoneInfo(config.timezone))
+        wake = room.hear(text, wall=f"{wall.hour % 12 or 12}:{wall.minute:02d} {'AM' if wall.hour < 12 else 'PM'}")
+        return JSONResponse({"heard": room.lines()[-1]["text"], "wake": wake, "by": by, "lines": room.lines()[-6:]})
+
+    @app.post("/api/room/ask")
+    async def api_room_ask(request: Request) -> Response:
+        """The stretch that said her name: answered with the room as context, talking only."""
+        stop = refuse(request, change=True)
+        if stop is not None:
+            return stop
+        try:
+            text = " ".join(str((await request.json()).get("text") or "").split())
+        except (ValueError, AttributeError):
+            text = ""
+        if not text:
+            return JSONResponse({"error": "say something"}, status_code=400)
+        bot = state.get("responder")
+        if bot is None:
+            return JSONResponse({"error": "she isn't ready yet"}, status_code=503)
+        text = text[:MAX_MESSAGE]
+        # Logged untrusted: whoever said her name may not be him.
+        await store.log_message(chat_id=owner(), direction="in", kind="room", body=f"(in the room) {text}",
+                                trusted=False)
+        return converse(bot, text, room=room.context(text))
+
+    @app.post("/api/room/clear")
+    async def api_room_clear(request: Request) -> Response:
+        """Room mode is off: what it heard is forgotten."""
+        stop = refuse(request, change=True)
+        if stop is not None:
+            return stop
+        room.clear()
+        return JSONResponse({"ok": True})
+
     @app.post("/api/speak")
     async def api_speak(request: Request) -> Response:
         """Her voice for a sentence the page shows (Piper or Groq, as on Telegram): WAV.
@@ -926,15 +1011,20 @@ def install(app: FastAPI, state: dict, store, config) -> None:  # noqa: ANN001, 
             return JSONResponse({"error": "her voice is unavailable"}, status_code=503)
         return Response(audio.wav, media_type="audio/wav", headers={"Cache-Control": "no-store"})
 
-    def converse(bot, text: str, *, heard: bool = False, quick: bool = False) -> StreamingResponse:  # noqa: ANN001
-        """Her answer to one message of his (already logged), streamed to the page as NDJSON."""
+    def converse(bot, text: str, *, heard: bool = False, quick: bool = False,  # noqa: ANN001
+                 room: str | None = None) -> StreamingResponse:
+        """Her answer to one message of his (already logged), streamed to the page as NDJSON.
+        `room`: said in room mode, with this context (Bot.respond_room: she only talks)."""
         outlet = WebOutlet(store, owner())
         if heard:
             outlet.emit({"t": "heard", "text": text})
 
         async def run() -> None:
             try:
-                await bot.respond(owner(), text, outlet, channel="dashboard", quick=quick)
+                if room is not None:
+                    await bot.respond_room(owner(), text, room, outlet)
+                else:
+                    await bot.respond(owner(), text, outlet, channel="dashboard", quick=quick)
             except Exception as exc:  # noqa: BLE001 - said on the page, never a hung spinner
                 log.exception("dashboard message failed")
                 outlet.emit({"t": "error", "text": f"That hit an error: {type(exc).__name__}."})
