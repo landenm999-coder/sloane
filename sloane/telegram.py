@@ -35,6 +35,7 @@ from sloane.agency import Agency, callback_data, parse_callback
 from sloane.skills import Answer, Registry
 from sloane.tgformat import formatted, to_html
 from sloane.voice import Voice
+from sloane.redact import redact, removed
 
 log = logging.getLogger(__name__)
 
@@ -455,10 +456,11 @@ class Bot:
             return False
         return True
 
-    async def say(self, text: str) -> None:
-        """A plain line to Landen's chat. Nothing if there is no owner."""
+    async def say(self, text: str, *, tainted: bool = False) -> None:
+        """A plain line to Landen's chat. Nothing if there is no owner. `tainted`: built from
+        outside text (a research report), so it's logged untrusted (invariant 9)."""
         if self._owner:
-            await self.send(self._owner, Reply(speech=text, detail=""))
+            await self.send(self._owner, Reply(speech=text, detail="", tainted=tainted))
 
     async def ask(self, proposal: dict) -> int | None:
         """Show a proposal with Approve / Edit / Deny. Returns the message id."""
@@ -1214,6 +1216,13 @@ class Bot:
         out loud in the control room; her fast lane may answer (Agent.answer).
         """
         kind = channel or ("voice" if voice else "text")
+        # A password, card number or key he sent never reaches a model (the log has it scrubbed too).
+        clean = redact(body)
+        if clean != body:
+            gone = removed(body, clean)
+            await out.send(Reply(speech=f"I left {' and '.join(gone) or 'a secret'} out of that. I don't keep those.",
+                                 detail=""))
+            body = clean
         # While a proposal is being edited, his next plain message is the
         # replacement, not a question. /cancel keeps the original.
         if self.agency is not None and body and not body.startswith("/"):
@@ -1274,6 +1283,23 @@ class Bot:
         if not voice and await live.finish(reply):
             return
         await out.send(reply, as_voice=voice)
+
+    async def respond_room(self, chat_id: int, said: str, context: str, out: Outlet) -> None:
+        """Room mode: someone near the control room said her name (sloane/room.py). The voice
+        may not be his and the room is other people's words, so she only talks: no commands,
+        no skill rules, no actions or lookups (the context is INGESTED), and nothing of it is
+        remembered as his. The question was logged untrusted by the caller."""
+        said = redact(said)
+        live = out.live()
+        await live.start_typing()
+        try:
+            reply = await self._agent.answer(said, channel="room", on_text=live.update, can_act=False,
+                                             ingested=context, persist=False, quick=True)
+        finally:
+            live.stop_typing()
+        if await live.finish(reply):
+            return
+        await out.send(reply)
 
     async def poll_forever(self) -> None:
         """Long-poll until stopped. Network trouble backs off, it does not exit."""

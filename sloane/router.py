@@ -142,6 +142,19 @@ class Router:
         await self._record(Usage(provider=name), "lookup", ok=True, error=None, degraded_from=None)
         return text
 
+    async def deep_research(self, question: str, *, timeout: int) -> str:
+        """A research run (skills/research.py) on the main lane's first provider: minutes of
+        searching and reading, then a report with its sources. Raises NoProviderAvailable."""
+        name = self._config.main_provider
+        try:
+            text = await self._provider(name, False).deep_research(question, timeout)
+        except (ProviderError, ValueError) as exc:
+            message = exc.message if isinstance(exc, ProviderError) else str(exc)
+            await self._record(Usage(provider=name), "research", ok=False, error=message, degraded_from=None)
+            raise NoProviderAvailable(message) from exc
+        await self._record(Usage(provider=name), "research", ok=True, error=None, degraded_from=None)
+        return text
+
     async def code(self, workdir: str, request: str, *, timeout: int, model: str = "") -> str:
         """A coding session in her workshop clone (sloane/workshop.py). The Claude CLI
         only: it is the one provider that can edit files and run the checks.

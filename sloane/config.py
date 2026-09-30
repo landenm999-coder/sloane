@@ -227,6 +227,36 @@ class Settings(BaseSettings):
     whoop_token_file: str = ""
     whoop_api_base: str = "https://api.prod.whoop.com"
 
+    # Plug-in tools (MCP) for her lookups and research, never her replies or the
+    # workshop: the servers in MCP_CONFIG (a JSON file on the box in Claude Code's
+    # .mcp.json shape; it may hold the servers' keys, so chmod 600), and only the
+    # tools MCP_TOOLS names (mcp__<server>__<tool>, comma-separated). Nothing asks
+    # him before one runs, so list read-only tools only. Blank = none.
+    mcp_config: str = ""
+    mcp_tools: str = ""
+
+    # Room mode (sloane/room.py): the control room listens and she joins in when she
+    # hears her name, with the last ROOM_WINDOW_SECONDS as context (kept in memory
+    # only). Transcribed on the box by faster-whisper's ROOM_STT_MODEL (downloaded
+    # once, into her models volume); blank uses the voice notes' transcriber instead.
+    room_stt_model: str = "base.en"
+    room_window_seconds: int = 120
+    room_wake_words: str = "sloane,sloan,slone"
+
+    # Research (skills/research.py): a real look into something, with sources.
+    # Each run is minutes of Claude searching and reading on his plan: at most
+    # RESEARCH_DAILY a day, each cut off after RESEARCH_TIMEOUT_SECONDS.
+    research_daily: int = 10
+    research_timeout_seconds: int = 600
+
+    # Monitors (skills/monitors.py): what he asked her to watch for. A question for
+    # the web is a lookup on his plan each time, so at most MONITOR_QUESTIONS of those
+    # at once, each checked every MONITOR_QUESTION_HOURS; any monitor ends after
+    # MONITOR_DAYS if it hasn't happened.
+    monitor_questions: int = 5
+    monitor_question_hours: int = 6
+    monitor_days: int = 30
+
     # Bank (skills/bank.py): his accounts, read-only, through SimpleFIN Bridge.
     # scripts/simplefin_auth.py claims the access URL from his setup token and
     # writes it here. It carries the credentials: a password. Blank = no bank.

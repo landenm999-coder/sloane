@@ -216,7 +216,8 @@ function currentOrb() {
     return { state: forced, label, detail, step: step ?? null };
   }
   if (doing.listening) {
-    return { state: "listening", label: "Listening", detail: call.on ? "On a call. Just talk" : "Recording your voice note" };
+    return { state: "listening", label: "Listening", detail: call.room ? "Room mode: say her name to ask"
+      : call.on ? "On a call. Just talk" : "Recording your voice note" };
   }
   if (doing.speaking) return { state: "speaking", label: "Speaking", detail: call.on ? "Tap the orb to cut in" : "Saying her reply" };
   if (doing.asking) return { state: "thinking", label: "Thinking", detail: "Working on your message" };
@@ -413,11 +414,11 @@ const readAloud = $("#read-aloud");
 
 function scrollDown() { thread.scrollTop = thread.scrollHeight; }
 
-function hisMessage(text, { when = "", forwarded = false, spoken = false, pending = false } = {}) {
+function hisMessage(text, { when = "", forwarded = false, spoken = false, pending = false, room = false } = {}) {
   const item = el("li", { class: `msg him${pending ? " pending" : ""}` },
     when ? el("span", { class: "when", text: when }) : null,
     el("span", { class: "body", text }),
-    spoken ? el("span", { class: "tag", text: "voice" }) : null,
+    room ? el("span", { class: "tag", text: "in the room" }) : spoken ? el("span", { class: "tag", text: "voice" }) : null,
     forwarded ? el("span", { class: "tag", text: "forwarded" }) : null);
   thread.append(item);
   scrollDown();
@@ -887,6 +888,7 @@ document.addEventListener("keydown", (event) => {
 // her off, Esc or End to hang up.
 
 const callButton = $("#call");
+const roomButton = $("#room");
 const callbar = $("#callbar");
 const FRAME_MS = 40;         // how often the level is read
 const START_MS = 160;        // this long above the line: he's talking
@@ -895,7 +897,9 @@ const MIN_TALK_MS = 300;     // less than this is a cough, not a sentence
 const MAX_TURN_MS = 45000;   // one turn at most
 const RECYCLE_MS = 8000;     // this long without a word: start the recording over (it stays small)
 const IDLE_HANGUP_MS = 4 * 60 * 1000;
-const call = { on: false, phase: "off", stream: null, context: null, analyser: null, samples: null, timer: 0,
+const ROOM_IDLE_MS = 30 * 60 * 1000;  // room mode ends after this long with nobody talking
+const FOLLOW_MS = 8000;               // after she answers in the room, this long to follow up without her name
+const call = { on: false, room: false, hotUntil: 0, answered: false, phase: "off", stream: null, context: null, analyser: null, samples: null, timer: 0,
   recorder: null, chunks: [], since: 0, floor: 0.006, voiced: 0, quiet: 0, talked: 0, heardAt: 0,
   pending: false, calmSince: 0, lastWords: 0, hear: null };
 
@@ -905,10 +909,14 @@ function callPhase(phase) {
   const shown = phase === "waiting" ? (doing.speaking ? "speaking" : "thinking") : phase;
   if (callbar.dataset.phase === shown) return;
   callbar.dataset.phase = shown;
-  const [words, hint] = {
+  const [words, hint] = (call.room ? {
+    listening: ["Room mode", Date.now() < call.hotUntil ? "go ahead, she's listening" : "say “Sloane” to ask her"],
+    hearing: ["Hearing the room", call.lastHeard ? `“${call.lastHeard}”` : ""],
+    thinking: ["Thinking", ""], speaking: ["Speaking", "tap the orb to cut in"], off: ["", ""],
+  } : {
     listening: ["Listening", "just talk"], hearing: ["Hearing you", "pause when you're done"],
     thinking: ["Thinking", ""], speaking: ["Speaking", "tap the orb to cut in"], off: ["", ""],
-  }[shown];
+  })[shown];
   $("#call-state").textContent = words;
   $("#call-hint").textContent = hint;
   paintOrb();
@@ -953,11 +961,34 @@ function sendTurn() {
     const blob = new Blob(call.chunks, { type: kind });
     if (!call.on || talked < MIN_TALK_MS || blob.size < 800) { call.pending = false; return; }
     call.lastWords = Date.now();
+    if (call.room) { roomTurn(blob, kind); return; }
     const mine = hisMessage("Listening back…", { spoken: true, pending: true });
     exchange(() => api("/api/voice", { method: "POST", headers: { "X-Sloane": "1", "Content-Type": kind }, body: blob }), mine)
       .finally(() => { call.pending = false; });
   };
   recorder.stop();
+}
+
+// Room mode: every stretch is heard (kept on the box for two minutes, never stored); only one
+// with her name in it, or a follow-up just after she answered, is asked.
+async function roomTurn(blob, kind) {
+  let data = {};
+  try {
+    const response = await api("/api/room/hear", { method: "POST", headers: { "X-Sloane": "1", "Content-Type": kind }, body: blob });
+    data = await response.json().catch(() => ({}));
+    if (!response.ok) { if (data.error) toast(data.error, true); endCall(); return; }
+  } catch {
+    call.pending = false;
+    return;
+  }
+  const heard = (data.heard || "").trim();
+  if (heard) call.lastHeard = heard.length > 70 ? `…${heard.slice(-68)}` : heard;
+  const asked = heard && (data.wake || Date.now() < call.hotUntil);
+  if (!asked || !call.on) { call.pending = false; return; }
+  call.hotUntil = 0;
+  const mine = hisMessage(heard, { room: true });
+  exchange(() => api("/api/room/ask", { method: "POST", headers: HEAD, body: JSON.stringify({ text: heard }) }), mine)
+    .finally(() => { call.pending = false; call.answered = true; });
 }
 
 function level() {
@@ -983,7 +1014,10 @@ function callFrame() {
   if (call.phase === "waiting") {
     // A breath after she stops, so the tail of her voice isn't taken for his.
     call.calmSince ||= Date.now();
-    if (Date.now() - call.calmSince >= 300) listen();
+    if (Date.now() - call.calmSince >= 300) {
+      if (call.room && call.answered) { call.answered = false; call.hotUntil = Date.now() + FOLLOW_MS; }
+      listen();
+    }
     return;
   }
   const now = Date.now();
@@ -998,7 +1032,12 @@ function callFrame() {
       // The room's own noise, followed slowly: a fan is not a voice.
       call.floor = heard < call.floor ? call.floor * 0.9 + heard * 0.1 : call.floor * 0.98 + heard * 0.02;
       if (now - call.since > RECYCLE_MS) record();
-      if (now - Math.max(call.lastWords, call.startedAt) > IDLE_HANGUP_MS) { endCall(); toast("Hung up after a few quiet minutes."); }
+      if (now - Math.max(call.lastWords, call.startedAt) > (call.room ? ROOM_IDLE_MS : IDLE_HANGUP_MS)) {
+        const room = call.room;
+        endCall();
+        toast(room ? "Room mode is off: nobody's talked for half an hour." : "Hung up after a few quiet minutes.");
+      }
+      if (call.room && call.hotUntil && now > call.hotUntil) { call.hotUntil = 0; callPhase("hearing"); callPhase("listening"); }
     }
   } else if (call.phase === "hearing") {
     if (heard > line * 0.7) { call.quiet = 0; call.talked += FRAME_MS; } else call.quiet += FRAME_MS;
@@ -1010,7 +1049,7 @@ function quieted() {
   if (call.on) callFrame();
 }
 
-async function startCall() {
+async function startCall(room = false) {
   if (call.on) return;
   if (recording) stopRecording(true);
   let stream;
@@ -1027,8 +1066,8 @@ async function startCall() {
     const analyser = context.createAnalyser();
     analyser.fftSize = 1024;
     context.createMediaStreamSource(stream).connect(analyser);
-    Object.assign(call, { on: true, stream, context, analyser, samples: new Float32Array(analyser.fftSize),
-      floor: 0.006, startedAt: Date.now(), lastWords: 0, pending: false });
+    Object.assign(call, { on: true, room, stream, context, analyser, samples: new Float32Array(analyser.fftSize),
+      floor: 0.006, startedAt: Date.now(), lastWords: 0, pending: false, hotUntil: 0, answered: false, lastHeard: "" });
   } catch {
     stream.getTracks().forEach((track) => track.stop());
     toast("This browser can't listen hands-free. Use the mic button instead.");
@@ -1037,11 +1076,14 @@ async function startCall() {
   hush();
   if (!wide.matches) show("talk");
   else if (!SOLO && chatMode !== "open") setChat("open");
-  callButton.setAttribute("aria-pressed", "true");
-  callButton.querySelector("span").textContent = "End";
+  const pressed = room ? roomButton : callButton;
+  pressed.setAttribute("aria-pressed", "true");
+  pressed.querySelector("span").textContent = room ? "Leave" : "End";
+  (room ? callButton : roomButton).disabled = true;
   document.body.classList.add("calling");
+  document.body.classList.toggle("room-mode", room);
   callbar.hidden = false;
-  input.placeholder = "On a call. Or type";
+  input.placeholder = room ? "Room mode. Or type" : "On a call. Or type";
   call.timer = setInterval(callFrame, FRAME_MS);
   listen();
 }
@@ -1055,9 +1097,14 @@ function endCall() {
   call.stream.getTracks().forEach((track) => track.stop());
   call.context.close().catch(() => {});
   if (readAloud.getAttribute("aria-pressed") !== "true") hush();
+  if (call.room) api("/api/room/clear", { method: "POST", headers: HEAD, body: "{}" }).catch(() => {});
+  call.room = false;
   callButton.setAttribute("aria-pressed", "false");
   callButton.querySelector("span").textContent = "Talk";
-  document.body.classList.remove("calling");
+  roomButton.setAttribute("aria-pressed", "false");
+  roomButton.querySelector("span").textContent = "Room";
+  callButton.disabled = roomButton.disabled = false;
+  document.body.classList.remove("calling", "room-mode");
   callbar.hidden = true;
   input.placeholder = "Message Sloane";
   callPhase("off");
@@ -1070,6 +1117,7 @@ function cutIn() {
 }
 
 callButton.addEventListener("click", () => (call.on ? endCall() : startCall()));
+roomButton.addEventListener("click", () => (call.on ? endCall() : startCall(true)));
 $("#call-end").addEventListener("click", endCall);
 $(".chat-head .js-orb").addEventListener("click", cutIn);
 $("#orb-talk").addEventListener("click", () => {
@@ -1386,7 +1434,8 @@ $("#day-tomorrow").addEventListener("click", () => setDay(true));
 
 const PANEL_NAMES = {
   weather: "Weather", whoop: "Whoop", workouts: "Workouts", markets: "Markets", inbox: "Inbox", habits: "Habits",
-  news: "News", focus: "Focus", money: "Money", portfolio: "Portfolio", countdowns: "Countdowns", lists: "Lists", birthdays: "Birthdays",
+  news: "News", focus: "Focus", money: "Money", portfolio: "Portfolio", research: "Research", monitors: "Monitors",
+  countdowns: "Countdowns", lists: "Lists", birthdays: "Birthdays",
   clients: "Clients", school: "School", workshop: "Workshop", learned: "Learned today", grades: "Grades",
   week: "This week", colleges: "College", cards: "Flashcards", deca: "DECA practice", engine: "Engine",
   work: "Up next at work", plan: "Tonight's plan", memory: "Loose ends",
@@ -1415,6 +1464,8 @@ const ICONS = {
   focus: '<circle cx="12" cy="13" r="7"/><path d="M12 9.5V13l2.5 1.5M9.5 3.5h5"/>',
   money: '<rect x="3.5" y="6.5" width="17" height="11" rx="2"/><circle cx="12" cy="12" r="2.2"/>',
   portfolio: '<path d="M12 3.5a8.5 8.5 0 1 0 8.5 8.5H12z"/><path d="M14.5 2.8v6.7h6.7a6.8 6.8 0 0 0-6.7-6.7z"/>',
+  research: '<circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5M8 10.5h5M10.5 8v5"/>',
+  monitors: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/>',
   lists: '<path d="M10 7h9.5M10 12h9.5M10 17h9.5"/><path d="M4.5 7l1 1 2-2M4.5 12l1 1 2-2M4.5 17l1 1 2-2"/>',
   countdowns: '<path d="M7 3.5h10M7 20.5h10M8 3.5c0 5 8 5 8 8.5s-8 3.5-8 8.5M16 3.5c0 5-8 5-8 8.5s8 3.5 8 8.5"/>',
   birthdays: '<rect x="4" y="10.5" width="16" height="9.5" rx="2"/><path d="M4 14.5c2.7 1.4 5.3 1.4 8 0s5.3-1.4 8 0M12 10.5V7.5"/><path d="M12 3.8c.9 1 .9 2 0 2.7-.9-.7-.9-1.7 0-2.7z"/>',
@@ -1530,6 +1581,12 @@ const FORMS = {
   command: (v) => v.what && v.when && `/remind ${v.when} ${v.what}` },
   remember: { title: "Tell her something to keep", submit: "Keep it", fields: [{ name: "what", placeholder: "Like: I'm vegetarian now", size: "wide" }],
     command: (v) => v.what && `/remember ${v.what}` },
+  research: { title: "Research something", submit: "Start", fields: [
+    { name: "what", placeholder: "Like: the best laptops for college under $1,000", size: "wide" }],
+  command: (v) => v.what && `/research ${v.what}` },
+  monitor: { title: "Watch for something", submit: "Watch", fields: [
+    { name: "what", placeholder: "Like: NVDA above 150, a page and words, or anything", size: "wide" }],
+  command: (v) => v.what && `/monitor ${v.what}` },
   focus: { title: "Start a focus block", submit: "Start", fields: [
     { name: "what", placeholder: "On what", size: "wide" }, { name: "minutes", placeholder: "Minutes", inputmode: "numeric", value: "25" }],
   command: (v) => `/focus ${Number(v.minutes) || 25} ${v.what}`.trim() },
@@ -2010,6 +2067,60 @@ function portfolioW() {
     actions: [asking("Ask about your portfolio", "How's my portfolio doing?")] }, head, chart, list);
 }
 
+// A research report: web text, so escaped like her replies (markdown()), its bare source links made
+// clickable, and said to be what it is.
+const reader = $("#reader");
+function openReader(title, text, note) {
+  $("#reader-title").textContent = title;
+  $("#reader-note").textContent = note || "";
+  $("#reader-body").innerHTML = markdown(text).replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g,
+    '$1<a href="$2" target="_blank" rel="noopener noreferrer">$2</a>');
+  if (!reader.open) reader.showModal();
+  $("#reader-close").focus();
+}
+$("#reader-close").addEventListener("click", () => reader.close());
+reader.addEventListener("click", (event) => { if (event.target === reader) reader.close(); });
+
+function researchW() {
+  const p = panelOf("research");
+  const items = p?.items || [];
+  if (!items.length) return null;
+  const words = { running: "Researching", done: "Done", failed: "Didn't finish" };
+  const list = el("ul", { class: "fit rs" });
+  for (const r of items) {
+    const pill = el("span", { class: `pill ${r.status === "running" ? "now pulse" : r.status === "failed" ? "bad" : "good"}`,
+      text: words[r.status] || r.status });
+    const row = item({ one: r.question, two: r.status === "failed" ? (r.error || "") : r.when, val: pill,
+      label: `${r.question}: ${words[r.status] || r.status}` });
+    if (r.status === "done" && r.report) {
+      row.classList.add("clickable");
+      row.tabIndex = 0;
+      row.setAttribute("role", "button");
+      const open = () => openReader(r.question, r.report, "From the web: her summary of what the pages say, with their sources.");
+      row.addEventListener("click", open);
+      row.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } });
+    }
+    list.append(row);
+  }
+  return widget("research", { meta: p.running ? "Working on it" : "", metaCls: p.running ? "good" : "",
+    actions: [adding("Research something", FORMS.research)] }, list);
+}
+
+function monitorsW() {
+  const p = panelOf("monitors");
+  const items = p?.items || [];
+  if (!items.length) return null;
+  const list = el("ul", { class: "fit" });
+  for (const m of items) {
+    const drop = m.open && m.n ? careful(tool("x", `Stop watching: ${m.said}`, null, "icon-btn sm hover"), `/monitor stop ${m.n}`,
+      `Press again to stop watching: ${clip(m.said, 40)}`) : null;
+    list.append(item({ one: m.said, two: m.state, cls: m.open ? "" : "done",
+      val: m.open ? null : el("span", { class: `pill ${m.fired ? "now" : ""}`, text: m.state }), tail: drop }));
+  }
+  const open = items.filter((m) => m.open).length;
+  return widget("monitors", { meta: open ? `${open} watching` : "", actions: [adding("Watch for something", FORMS.monitor)] }, list);
+}
+
 let listShown = "";
 function listsW() {
   const lists = panelOf("lists")?.lists || {};
@@ -2249,6 +2360,10 @@ const EMPTY = {
   habits: { text: "The things you mean to do every day. Tick them off here and keep the streak.", form: FORMS.habit, cta: "Track a habit" },
   money: { text: "What you spend each week, against a budget if you set one. Connect your bank and it fills in on its own.",
     note: "Your bank and card, read-only: DEPLOY.md, section 7k.", form: FORMS.spent, cta: "Log spending" },
+  research: { text: "Ask her to look into something properly. She searches, reads and sends you a short report with its sources.",
+    form: FORMS.research, cta: "Research something" },
+  monitors: { text: "Tell her what you're waiting on: a price, a page, a release date. She tells you once, when it happens.",
+    form: FORMS.monitor, cta: "Watch for something" },
   portfolio: { text: "Your Fidelity accounts: what they're worth, today's move, and each holding.",
     note: "Connect it read-only through SimpleFIN: DEPLOY.md, section 7k.", ask: ["How do I connect it?", "How do I connect my bank and Fidelity to you?"] },
   countdowns: { text: "Days to go until the things you're waiting for.", form: FORMS.countdown, cta: "Add a countdown" },
@@ -2274,7 +2389,8 @@ function emptyWidget(id) {
 
 const BUILT = {
   weather: weatherW, whoop: whoopW, workouts: workoutsW, markets: marketsW, inbox: inboxW, habits: habitsW,
-  news: newsW, focus: focusW, money: moneyW, portfolio: portfolioW, lists: listsW, countdowns: countdownsW, birthdays: birthdaysW,
+  news: newsW, focus: focusW, money: moneyW, portfolio: portfolioW, research: researchW, monitors: monitorsW,
+  lists: listsW, countdowns: countdownsW, birthdays: birthdaysW,
   clients: clientsW, school: schoolW, workshop: workshopW, learned: learnedW, grades: gradesW, week: weekW,
   colleges: collegesW, engine: engineW, work: workW,
 };
@@ -2756,6 +2872,7 @@ async function refresh() {
     renderEngine(data);
     mic.hidden = !(data.talk?.hears && canRecord());
     callButton.hidden = mic.hidden;
+    roomButton.hidden = mic.hidden;
     $("#orb-talk").disabled = mic.hidden;
   } catch (error) {
     if (error.message === "signed out") return;

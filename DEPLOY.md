@@ -327,7 +327,11 @@ everything she runs. The bare address, `/`, opens it too.
   money and portfolio (with your bank, 7k), countdowns, lists, birthdays,
   clients, one small **School** widget, the workshop, and what she learned today.
   Each grows what's in it with its box. When there are more than fit, they go on
-  pages (the dots at the bottom). Every widget does something: tick a habit (again to untick), check
+  pages (the dots at the bottom). **Room**, next to Talk, is room mode: she listens
+  and joins in only when she hears "Sloane" in a sentence, using the last two
+  minutes as context, and answers out loud. It's transcribed on the box (the first
+  time downloads a small speech model, about 150 MB), kept in memory for two
+  minutes only, and she can only talk in it, never act. **Leave** ends it. Every widget does something: tick a habit (again to untick), check
   off a list item, start or stop a focus block, log a workout or spending, add a
   ticker, topic, countdown, birthday, client or reminder with its **+**, open an
   email in Gmail or a headline, mark school work handed in (press twice), or ask
@@ -511,6 +515,41 @@ categories by rule; transfers between your accounts and card payments aren't
 spending. `BANK_LOW_BALANCE` (default 50) is the checking-and-savings level
 she tells you about, once a day; 0 turns it off. If she ever says SimpleFIN
 refused her, make a new setup token and run step 3 again.
+
+## 7l. Optional: your own plug-in tools (MCP)
+
+Her lookups and research can use tools you run, through MCP (the Model Context
+Protocol): your Home Assistant's states, what Spotify is playing, your Notion
+pages. Only for finding things out: she never gets them in a reply that acts, and
+the workshop never gets them at all. **Nothing asks you before one runs**, so name
+only tools that read.
+
+1. Write the servers into a file on the box, in Claude Code's `.mcp.json` shape,
+   and keep it private (it can hold the servers' keys):
+
+   ```bash
+   nano /opt/sloane/mcp.json && chmod 600 /opt/sloane/mcp.json
+   ```
+
+   ```json
+   {"mcpServers": {"ha": {"command": "npx", "args": ["-y", "some-home-assistant-mcp"],
+                          "env": {"HA_URL": "http://homeassistant.local:8123", "HA_TOKEN": "..."}}}}
+   ```
+
+   The server runs inside her container, so it needs what it runs on there
+   (`npx` means Node). Use servers you trust: each is someone's code with the
+   keys you give it.
+2. In `.env`, point at it (the path inside the container) and name the tools she
+   may use, `mcp__<server>__<tool>`, comma-separated (or `mcp__<server>` for all
+   of one server's):
+
+   ```
+   MCP_CONFIG=/opt/sloane/mcp.json
+   MCP_TOOLS=mcp__ha__get_state
+   ```
+
+3. `sudo systemctl restart sloane`, then `doctor.py`: the `mcp` line checks the
+   file and that every tool you named is from a server in it.
 
 ## 8. Run her
 

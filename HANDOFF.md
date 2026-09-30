@@ -427,6 +427,39 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
 
 ## In flight
 
+- **A Jarvis upgrade, from four open-source Jarvis repos** (this branch, after #29's dashboard work). Landen sent
+  OpenJarvis (Stanford, Apache 2.0), isair/jarvis (non-commercial licence, desktop app), Microsoft's JARVIS
+  (HuggingGPT, 2023, unmaintained) and Advanced-Jarvis (a Windows hobby project), and chose "keep Sloane,
+  add the best" over rebuilding on OpenJarvis. Their ideas are rebuilt here, not their code copied. Phase 1:
+  - *Research* (`skills/research.py`, `sql/037`): OpenJarvis's deep_research, on the lookup path she already
+    has (`claude -p` with WebSearch and WebFetch only; `providers/claude_code.DEEP_SYSTEM`, `Router.deep_research`).
+    A run in the background, the report sent tainted (`Bot.say(tainted=True)`) and kept; the control room's
+    Research widget and a reader dialog (escaped, source links clickable). One at a time, `RESEARCH_DAILY`.
+  - *Monitors* (`skills/monitors.py`, `sql/038`, the `monitors` job): OpenJarvis's scheduled monitor. Price
+    lines (markets' quotes), public pages (words or any change; `public()` refuses private addresses, each
+    redirect checked, usual ports only), and questions for the web (her lookup, yes or no). Said once, held
+    by quiet hours and focus; the Monitors widget.
+  - *Secrets out* (`sloane/redact.py`): isair's redaction. Outside text (`safe_field`, `unfence`), the
+    conversation log (`Store.log_message`), his words before a model (`Bot.respond`, and she says what she
+    left out), and every log line (`LogScrubber`, installed in `main.py`).
+  - She may start research and monitors for him when he asks in words (`actions.SKILLS`, never stopping one).
+  - Phase 2, *room mode* (`sloane/room.py`, `/api/room/hear|ask|clear`, the Room button): isair's "third
+    person in the room". The page's call VAD sends stretches of speech; the box transcribes them
+    (faster-whisper `ROOM_STT_MODEL`, new in requirements, aarch64 wheels; else the voice-note transcriber);
+    two minutes kept in memory only; her name (`ROOM_WAKE_WORDS`) makes a stretch the question and the rest
+    INGESTED context; `Bot.respond_room` answers talking only (can_act False, persist False, quick), the
+    question logged `kind='room'` untrusted; eight seconds to follow up without her name; off after 30
+    quiet minutes. Tested with a fake transcriber (`test_room.py`) and in Chromium with a fake microphone;
+    not yet with the real model on the box (this sandbox can't reach Hugging Face).
+  - Phase 3, so far: *several lookups at once* (Microsoft's task planning, lean: "look" may be a list of up
+    to three, `contract.MAX_LOOKUPS`; run together, each fenced, a failed one named) and *his plug-in tools*
+    (MCP, from both OpenJarvis and isair: `MCP_CONFIG` + `MCP_TOOLS`, read-only, lookups and research only,
+    `--strict-mcp-config` so nothing else loads; doctor's `mcp` line). Acting MCP tools would need an
+    approval step (Agency) she doesn't have for them yet: not built.
+  - Left in Phase 3: new connectors (Google Tasks, Spotify, Strava, Notion). Each needs an app and a login
+    of his; asked him which he actually uses before building any. `sloane/redact.py`, `skills/bank.py` and `scripts/simplefin_auth.py` belong on
+    `deploy/protected.txt` (her safety and credentials); that file is Landen's to change.
+
 - **The dashboard, filled; the bank and Fidelity; Whoop's rings** (this branch's PR). Landen, 2026-09-29: fill
   every box ("I don't want a bunch of empty space sitting around"); Whoop as three circles (sleep, recovery,
   strain) with HRV and resting heart rate as bars against his averages; workouts really from Whoop, centered;

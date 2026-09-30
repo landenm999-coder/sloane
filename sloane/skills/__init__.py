@@ -130,8 +130,9 @@ class SkillContext:
     config: Settings
     router: Any = None  # sloane.router.Router
     embedder: Any = None
-    # Plain text to Landen's chat. None until the bot exists (or with no owner).
-    say: Callable[[str], Awaitable[None]] | None = None
+    # Plain text to Landen's chat. None until the bot exists (or with no owner). Takes
+    # `tainted=True` for text built from outside text (a research report).
+    say: Callable[..., Awaitable[None]] | None = None
     # What time it is. None means the real clock; tests pin it.
     clock: Callable[[], datetime] | None = None
 

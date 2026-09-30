@@ -25,6 +25,7 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 from sloane.config import Settings, settings as default_settings
+from sloane.redact import redact
 
 log = logging.getLogger(__name__)
 
@@ -1359,7 +1360,7 @@ class Store:
                      "list_items", "countdowns", "cards", "habits", "habit_log",
                      "clients", "client_notes", "focus_sessions", "expenses", "skill_settings",
                      "colleges", "college_tasks", "roleplays", "workshop_items", "dashboard_prefs",
-                     "workouts", "watchlist", "bank_accounts", "bank_history")
+                     "workouts", "watchlist", "bank_accounts", "bank_history", "research_reports", "monitors")
 
     async def restore_rows(self, table: str, rows: Sequence[Row]) -> int:
         """Merge backed-up rows back in. Existing rows win; returns rows inserted.
@@ -1696,8 +1697,10 @@ class Store:
     ) -> bool:
         """Record one transport event. False if this update_id was already seen.
 
-        `trusted` is False for a reply built from outside text (sql/025).
+        `trusted` is False for a reply built from outside text (sql/025). Secrets never
+        reach the log: a password, card number or key in `body` is replaced (sloane/redact.py).
         """
+        body = redact(body) if body else body
         row = await self._one(
             """
             insert into messages
@@ -1712,7 +1715,7 @@ class Store:
 
     async def set_message_body(self, update_id: int, body: str) -> None:
         """A voice note's transcript, once there is one, so the log reads as said."""
-        await self._exec("update messages set body = %s where update_id = %s", (body, update_id))
+        await self._exec("update messages set body = %s where update_id = %s", (redact(body), update_id))
 
     async def recent_messages(self, chat_id: int, since: datetime, limit: int = 20) -> list[Row]:
         """The recent exchange with him, oldest first: his words and hers.
@@ -2704,6 +2707,91 @@ class Store:
              order by h.on_day
             """,
             (since,),
+        )
+
+    # -- research (sql/037) -------------------------------------------------------------------
+
+    async def start_research(self, question: str) -> Row:
+        row = await self._one("insert into research_reports (question) values (%s) returning *", (question,))
+        assert row is not None
+        return row
+
+    async def finish_research(self, research_id: str, report: str) -> None:
+        await self._exec(
+            "update research_reports set status = 'done', report = %s, finished_at = now() where id = %s",
+            (report, research_id),
+        )
+
+    async def fail_research(self, research_id: str, error: str) -> None:
+        await self._exec(
+            "update research_reports set status = 'failed', error = %s, finished_at = now() where id = %s",
+            (error, research_id),
+        )
+
+    async def interrupt_research(self, started_before: datetime) -> int:
+        """Runs a restart cut short: failed, so none waits forever."""
+        rows = await self._fetch(
+            """
+            update research_reports set status = 'failed', error = 'interrupted by a restart', finished_at = now()
+             where status = 'running' and started_at < %s returning id
+            """,
+            (started_before,),
+        )
+        return len(rows)
+
+    async def running_research(self) -> Row | None:
+        return await self._one(
+            "select * from research_reports where status = 'running' order by started_at desc limit 1")
+
+    async def research_since(self, since: datetime) -> int:
+        row = await self._one("select count(*) as n from research_reports where started_at >= %s", (since,))
+        return int(row["n"]) if row else 0
+
+    async def research_reports(self, limit: int = 10) -> list[Row]:
+        """The latest, newest first."""
+        return await self._fetch("select * from research_reports order by started_at desc limit %s", (limit,))
+
+    # -- monitors (sql/038) -------------------------------------------------------------------
+
+    async def add_monitor(self, *, said: str, kind: str, spec: dict, every_minutes: int, created_at: datetime,
+                          last_value: str | None = None) -> Row:
+        row = await self._one(
+            """
+            insert into monitors (said, kind, spec, every_minutes, last_value, created_at)
+            values (%s, %s, %s, %s, %s, %s) returning *
+            """,
+            (said, kind, Jsonb(spec), every_minutes, last_value, created_at),
+        )
+        assert row is not None
+        return row
+
+    async def open_monitors(self) -> list[Row]:
+        return await self._fetch("select * from monitors where ended_at is null order by created_at")
+
+    async def recent_monitors(self, since: datetime) -> list[Row]:
+        """Open ones, and ones that ended since `since`: oldest first."""
+        return await self._fetch(
+            "select * from monitors where ended_at is null or ended_at >= %s order by created_at", (since,))
+
+    async def checked_monitor(self, monitor_id: str, *, at: datetime, value: str | None = None,
+                              error: str | None = None) -> None:
+        await self._exec(
+            """
+            update monitors set checked_at = %s, last_value = coalesce(%s, last_value), last_error = %s
+             where id = %s
+            """,
+            (at, value, error, monitor_id),
+        )
+
+    async def end_monitor(self, monitor_id: str, *, at: datetime, why: str, fired_text: str | None = None) -> Row | None:
+        """Over: it happened (`fired_text`, what she said), he stopped it, or it ran out. Once."""
+        return await self._one(
+            """
+            update monitors set ended_at = %s, ended_why = %s, fired_text = %s,
+                   fired_at = case when %s = 'fired' then %s else fired_at end
+             where id = %s and ended_at is null returning *
+            """,
+            (at, why, fired_text, why, at, monitor_id),
         )
 
 

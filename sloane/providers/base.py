@@ -77,6 +77,10 @@ class Provider(abc.ABC):
         """Search the web and summarise, with sources. Most providers can't."""
         raise ProviderError(self.name, "no web lookup on this provider")
 
+    async def deep_research(self, question: str, timeout: int) -> str:
+        """Research a question across several sources and write a report with them. Most providers can't."""
+        raise ProviderError(self.name, "no research on this provider")
+
     async def prewarm(self, system: str) -> None:
         """Get ready to answer with this system prompt. Most providers need nothing."""
         return None

@@ -21,6 +21,8 @@ from __future__ import annotations
 import re
 import unicodedata
 
+from sloane.redact import redact
+
 # C0/C1 controls and the Unicode line/paragraph separators, all of which can
 # break a line in some renderer even when \n has been handled.
 _CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f  ]")
@@ -46,7 +48,7 @@ def safe_field(text: object, *, limit: int = DEFAULT_LIMIT) -> str:
     if text is None:
         return ""
     raw = text if isinstance(text, str) else str(text)
-    raw = unicodedata.normalize("NFC", raw)
+    raw = redact(unicodedata.normalize("NFC", raw))
     raw = raw.translate(_BIDI)
     raw = _CONTROL.sub(" ", raw)
     raw = _WS.sub(" ", raw).strip()
@@ -65,7 +67,7 @@ def unfence(text: object) -> str:
     if text is None:
         return ""
     raw = text if isinstance(text, str) else str(text)
-    raw = raw.translate(_BIDI)
+    raw = redact(raw.translate(_BIDI))
     return raw.replace("<<<", "‹‹‹").replace(">>>", "›››")
 
 

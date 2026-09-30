@@ -30,6 +30,7 @@ EXPECTED_TABLES = {
     "clients", "client_notes", "focus_sessions", "expenses", "skill_settings",
     "colleges", "college_tasks", "roleplays", "capture_refs", "workshop_items", "dashboard_prefs",
     "workouts", "watchlist", "bank_accounts", "bank_transactions", "bank_holdings", "bank_history",
+    "research_reports", "monitors",
 }
 
 PASS, FAIL, SKIP, WARN = "PASS", "FAIL", "SKIP", "WARN"
@@ -455,6 +456,40 @@ def check_timezone(config: Settings) -> None:
     record("timezone", PASS, config.timezone)
 
 
+def check_mcp(config: Settings) -> None:
+    """His plug-in tools for lookups (MCP_CONFIG, MCP_TOOLS): the file, and each tool's server in it."""
+    import json
+    import stat
+    from pathlib import Path
+
+    from sloane.providers.claude_code import mcp_tools
+
+    named = mcp_tools(config.mcp_tools)
+    if not config.mcp_config.strip():
+        if named:
+            record("mcp", WARN, "MCP_TOOLS names tools but MCP_CONFIG is blank, so none are used")
+        else:
+            record("mcp", SKIP, "no plug-in tools (MCP_CONFIG unset)")
+        return
+    path = Path(config.mcp_config.strip())
+    try:
+        servers = (json.loads(path.read_text()).get("mcpServers") or {})
+    except (OSError, ValueError, AttributeError) as exc:
+        record("mcp", FAIL, f"can't read {path}: {type(exc).__name__}. It should be a JSON file with \"mcpServers\"")
+        return
+    if not named:
+        record("mcp", WARN, f"{len(servers)} server(s) in {path.name}, but MCP_TOOLS names no tools, so none are used")
+        return
+    unknown = [t for t in named if t.split("__")[1] not in servers]
+    if unknown:
+        record("mcp", FAIL, f"{', '.join(unknown)}: no such server in {path.name} ({', '.join(servers) or 'none'})")
+        return
+    loose = stat.S_IMODE(path.stat().st_mode) & 0o077
+    record("mcp", WARN if loose else PASS,
+           f"{len(named)} tool(s) from {len(servers)} server(s) for her lookups"
+           + (f"; chmod 600 {path} (it can hold the servers' keys)" if loose else ""))
+
+
 def check_extras(config: Settings) -> None:
     """The post-v1 settings: Capture, backups and voice briefs."""
     from pathlib import Path
@@ -474,6 +509,8 @@ def check_extras(config: Settings) -> None:
                    "/capture; add its address, e.g. CORS_ORIGINS=https://<your-capture-app>.vercel.app (DEPLOY §7d)")
         else:
             record("capture: cors", PASS, f"/capture answers {config.cors_origins.strip()}")
+
+    check_mcp(config)
 
     from sloane import web
 

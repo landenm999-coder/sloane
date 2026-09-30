@@ -34,6 +34,11 @@ def check(label: str, got, want) -> None:
 check("the contract carries a lookup", parse('{"speech": "Checking.", "look": "  bitcoin   price "}').lookup,
       "bitcoin price")
 check("a non-string lookup is none", parse('{"speech": "x", "look": 5}').lookup, "")
+several = parse('{"speech": "Checking.", "look": ["Broncos game time Sunday", " Parker weather  Sunday", '
+                '"Broncos game time Sunday", "taco places open late Parker", "a fourth", 7]}')
+check("several at once: tidied, repeats dropped, three at most, the first is still `lookup`",
+      (several.lookups, several.lookup),
+      (("Broncos game time Sunday", "Parker weather Sunday", "taco places open late Parker"), "Broncos game time Sunday"))
 
 
 class Store:
@@ -146,6 +151,40 @@ async def main() -> None:
     check("a failed lookup says so", failed.speech, "I tried to look that up and couldn't get through.")
     await agent.settle()
 
+    # One question, several facts: the searches run together, and she answers from all of them.
+    class Planner(Scripted):
+        running = 0
+        most = 0
+
+        async def complete(self, system, prompt, *, max_tokens=1024):
+            self.calls.append((system, prompt))
+            first = '{"speech": "Checking.", "look": ["Broncos kickoff Sunday", "Parker weather Sunday", "tacos open late"]}'
+            second = '{"speech": "Kickoff is at 2, it\'s sunny, and Taco Loco is open till 11.", "detail": "Plan..."}'
+            return Completion(text=first if len(self.calls) == 1 else second, usage=Usage(provider=self.name))
+
+        async def research(self, query):
+            Planner.running += 1
+            Planner.most = max(Planner.most, Planner.running)
+            await asyncio.sleep(0.01)
+            Planner.running -= 1
+            self.looked.append(query)
+            if "tacos" in query:
+                raise ProviderError(self.name, "timed out")
+            return f"results for {query}"
+
+    model = Planner()
+    agent, _ = agent_with(model)
+    plan = await agent.answer("plan my Sunday around the Broncos game", can_act=True)
+    ingested = model.calls[1][1].split("INGESTED", 1)[1]
+    check("all three searched, at the same time", (sorted(model.looked), Planner.most),
+          (["Broncos kickoff Sunday", "Parker weather Sunday", "tacos open late"], 3))
+    check("each result fenced on its own, the failed one named",
+          (ingested.count("<<<"), "results for Parker weather Sunday" in ingested,
+           "These searches failed: tacos open late" in ingested), (2, True, True))
+    check("and she answers from them, marked as from the web", (plan.speech.startswith("Kickoff is at 2"), plan.tainted),
+          (True, True))
+    await agent.settle()
+
     # The CLI lookup: search tools only, the scrubbed environment, the query on stdin.
     cli = FakeCli("Oct 3 (collegeboard.org)")
     real = cc.asyncio.create_subprocess_exec
@@ -160,7 +199,20 @@ async def main() -> None:
     check("search tools and nothing else", (argv[argv.index("--tools") + 1], argv[argv.index("--allowedTools") + 1]),
           ("WebSearch,WebFetch", "WebSearch,WebFetch"))
     check("no MCP, scrubbed env, the query on stdin",
-          ("--strict-mcp-config" in argv, kw["env"] == cc._cli_env(), cli.procs[-1].received), (True, True, b"SAT dates"))
+          ("--strict-mcp-config" in argv, "--mcp-config" in argv, kw["env"] == cc._cli_env(), cli.procs[-1].received),
+          (True, False, True, b"SAT dates"))
+
+    # His plug-in tools: only with a config file and tools named, only the ones named, still strict.
+    check("MCP_TOOLS: tool names Claude Code takes; wildcards and stray words dropped",
+          cc.mcp_tools("mcp__ha__get_state, mcp__spotify, mcp__*, Bash, mcp__ha__get_state, rm -rf"),
+          ("mcp__ha__get_state", "mcp__spotify"))
+    mcp = cc.build_research_argv("claude", mcp_config="/opt/sloane/mcp.json", mcp=("mcp__ha__get_state",))
+    check("his tools join the web for a lookup, from his file alone",
+          (mcp[mcp.index("--tools") + 1], mcp[mcp.index("--allowedTools") + 1], mcp[mcp.index("--mcp-config") + 1],
+           "--strict-mcp-config" in mcp, "mcp__" in mcp[mcp.index("--system-prompt") + 1]),
+          ("WebSearch,WebFetch", "WebSearch,WebFetch,mcp__ha__get_state", "/opt/sloane/mcp.json", True, True))
+    check("tools named but no file: none", "--mcp-config" in cc.build_research_argv("claude", mcp=("mcp__ha__x",)), False)
+    check("the workshop's builder never gets them", "--mcp-config" in cc.build_code_argv("claude", workdir="/tmp/x"), False)
 
 
 asyncio.run(main())
