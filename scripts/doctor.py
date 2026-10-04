@@ -484,6 +484,13 @@ def check_extras(config: Settings) -> None:
     else:
         record("control room", PASS, "/app is on (open it over Tailscale: https://<box>.<tailnet>.ts.net/app)")
 
+    if not config.desktop_token:
+        record("desktop", SKIP, "DESKTOP_TOKEN unset, so the Jarvis desktop app can't reach /api (DEPLOY §7i)")
+    elif not web.desktop_enabled(config):
+        record("desktop", FAIL, f"DESKTOP_TOKEN is under {web.MIN_TOKEN} characters, so the desktop app stays out")
+    else:
+        record("desktop", PASS, "the desktop app may use /api with its bearer token (reach it over Tailscale)")
+
     folder = config.backup_dir or (str(Path(config.embed_cache_dir) / "backups")
                                    if config.embed_cache_dir else "")
     if not folder:

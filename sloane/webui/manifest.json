@@ -1,7 +1,7 @@
 {
-  "name": "Sloane",
-  "short_name": "Sloane",
-  "description": "Talk to Sloane and run everything she does.",
+  "name": "Jarvis",
+  "short_name": "Jarvis",
+  "description": "Talk to Jarvis and run everything he does.",
   "start_url": "/app",
   "scope": "/app",
   "display": "standalone",

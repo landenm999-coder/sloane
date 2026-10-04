@@ -258,7 +258,10 @@ async def integration() -> None:
               "University of Denver said no. I'm sorry.")
         # How news actually arrives: a greeting, emoji, an emoticon.
         await store._exec("update colleges set status = 'applying'")
-        check("with emoji and a greeting", (await route("Sloane, I got into Denver!!! 🎉")).speech,
+        check("with emoji and a greeting", (await route("Jarvis, I got into Denver!!! 🎉")).speech,
+              "Admitted to University of Denver. Congratulations.")
+        await store._exec("update colleges set status = 'applying'")
+        check("the old name still works", (await route("Sloane, I got into Denver!!! 🎉")).speech,
               "Admitted to University of Denver. Congratulations.")
         check("with an emoticon", (await route("omg Boulder deferred me :(")).speech,
               "CU Boulder deferred you. That isn't a no; it goes to the next round.")

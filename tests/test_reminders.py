@@ -180,6 +180,7 @@ TIMERS = {
     "start a timer for an hour": ("11:00:00", ""),
     "timer for 90 seconds": ("10:01:30", ""),
     "Sloane, set a timer for 5 min to flip the chicken": ("10:05:00", "flip the chicken"),
+    "Jarvis, set a timer for 5 min to flip the chicken": ("10:05:00", "flip the chicken"),
     # Lengths added up, and a polite ending (these used to fall through to the model).
     "set a timer for 1 hour 30 minutes": ("11:30:00", ""),
     "timer 1h30m": ("11:30:00", ""),

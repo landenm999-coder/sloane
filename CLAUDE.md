@@ -2,7 +2,9 @@
 
 Sloane is Landen's always-on personal assistant: FastAPI + Telegram long polling, Postgres/pgvector memory,
 read-only Canvas/calendar sync, scheduled briefs, voice, approval-gated actions, Gmail triage, reminders.
-She is meant to feel like a partner, not a help desk (he asked for "JARVIS"): the persona in `persona.py`, the
+Everything the user sees calls her **Jarvis**, in the manner of the film character (`persona.py`, `NAME`); the code,
+repo and service keep the name `sloane`, and a message that opens with either name has it set aside.
+She is meant to feel like a partner, not a help desk: the persona in `persona.py`, the
 running CONVERSATION tier, a warm streamed `claude -p` (`providers/claude_code.py`), actions on request, web
 lookups, and nightly learning (`memory/learn.py`). Keep her fast and in character when you change anything.
 **Start with `HANDOFF.md`.** It has what's built, what's in flight, the backlog, and what only Landen can do.
@@ -59,6 +61,9 @@ Dates from his words go through `sloane/dates.py`, times through `sloane/reminde
   through `Bot.respond` and log to the same `messages`. A new way to talk to her is an `Outlet`, never a
   copy of the reply pipeline. Every `/api` change route needs the session and the `X-Sloane` header
   (`tests/test_web.py` checks each one); `tests/test_capture.py` pins the list of POST routes.
+  The desktop app's bearer `DESKTOP_TOKEN` is the one other way in, and only on the routes in
+  `web.DESKTOP_ROUTES` (opted in per route with `desktop=True`; a new route starts closed, and `tests/test_web.py`
+  fails if the set that accepts the token differs from that list). Never widen it to an administrative route.
 - A new default for a setting that `.env.example` spells out doesn't reach an installed box (its `.env`
   pins the old one): add the old→new pair to `scripts/env_migrate.py`.
 - Every bug fix gets a regression test that fails on the old code. Confirm that by stashing the fix and rerunning.

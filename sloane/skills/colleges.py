@@ -115,7 +115,7 @@ _GOT_DECISION = re.compile(
 )
 # Around the news, not part of it: a greeting or her name before, emoji,
 # emoticons and punctuation after.
-_LEADING = re.compile(r"^\s*(?:(?:hey|yo|ok|okay|so|omg|guess what|well)\b[\s,!.]*)*(?:sloane\b[\s,:!.-]*)?", re.I)
+_LEADING = re.compile(r"^\s*(?:(?:hey|yo|ok|okay|so|omg|guess what|well)\b[\s,!.]*)*(?:(?:jarvis|sloane)\b[\s,:!.-]*)?", re.I)
 
 
 def _trim(text: str) -> str:
@@ -615,7 +615,7 @@ class Colleges(Skill):
     async def _did(self, text: str) -> Answer | None:
         """He says he did something the tracker records: rules, not a model, so
         it is recorded every time. Only when a school of his is named."""
-        # How news actually arrives: "Sloane, I got into Boulder!!! 🎉".
+        # How news actually arrives: "Jarvis, I got into Boulder!!! 🎉".
         text = _trim(_LEADING.sub("", text, count=1))
         found = _FINISHED.match(text)
         if found:

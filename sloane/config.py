@@ -166,6 +166,11 @@ class Settings(BaseSettings):
     # Reach it the way Capture does: tailscale serve (DEPLOY section 7e).
     #   python3 -c "import secrets; print(secrets.token_urlsafe(32))"
     dashboard_token: str = ""
+    # A bearer token for the desktop app (Jarvis on his PC): `Authorization: Bearer ...` on the
+    # few /api routes sloane/web.py DESKTOP_ROUTES lists, and nowhere else. Unset, or shorter
+    # than 32 characters, and it's off. Reach the box the same way (tailscale serve).
+    #   python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+    desktop_token: str = ""
 
     # --- telegram ------------------------------------------------------------
     telegram_bot_token: str = ""

@@ -24,6 +24,7 @@ from typing import Any
 
 from sloane.config import Settings, settings as default_settings
 from sloane.ingest import planted
+from sloane.persona import NAME
 from sloane.providers.base import Usage
 
 Row = dict[str, Any]
@@ -195,7 +196,7 @@ def conversation_that_fits(rows: Sequence[Row], budget: int, *, tz: str = "UTC")
 def _conversation_line(r: Row, tz: str, name: str) -> str:
     from sloane.ingest import safe_field
 
-    who = name if r.get("direction") == "in" else "Sloane"
+    who = name if r.get("direction") == "in" else NAME
     text = safe_field(r.get("body"), limit=CONVERSATION_LINE)
     if r.get("trusted") is False and r.get("direction") == "in":
         # Something he forwarded or showed her: someone else's words.

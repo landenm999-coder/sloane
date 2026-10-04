@@ -76,9 +76,9 @@ END_COMMAND = "end"
 _AS_OF: ContextVar[datetime | None] = ContextVar("sloane_skill_as_of", default=None)
 
 
-# "Sloane, add milk to the list": her name in front is how he talks to her, not
+# "Jarvis, add milk to the list" (or "Sloane,", its old name): its name in front is how he talks to it, not
 # part of what he asked, and no skill's rule should have to know it.
-_ADDRESSED = re.compile(r"^\s*(?:(?:hey|hi|ok|okay|yo)[\s,!]+)?sloane\b[\s,:!.-]*", re.I)
+_ADDRESSED = re.compile(r"^\s*(?:(?:hey|hi|ok|okay|yo)[\s,!]+)?(?:jarvis|sloane)\b[\s,:!.-]*", re.I)
 
 
 _TOLD = re.compile(r"^\s*(?:please\s+)?(?:remember|don'?t\s+forget|keep\s+in\s+mind)\s+(?:that\s+)?(?P<rest>(?!to\b).+)$",
@@ -86,7 +86,7 @@ _TOLD = re.compile(r"^\s*(?:please\s+)?(?:remember|don'?t\s+forget|keep\s+in\s+m
 
 
 def unaddressed(text: str) -> str:
-    """The message without "Sloane," (or "hey Sloane,") in front."""
+    """The message without "Jarvis," (or "hey Jarvis,") in front. "Sloane" still works."""
     stripped = _ADDRESSED.sub("", text, count=1)
     return stripped if stripped.strip() else text
 

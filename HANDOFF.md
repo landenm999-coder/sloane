@@ -1,8 +1,8 @@
-# Sloane — handoff
+# Jarvis (code name Sloane) — handoff
 
 **Read this first if you are a new Claude Code session picking up Sloane.**
 This file records what exists, what's verified, what's in flight and what's left.
-It's kept up to date at the end of every work session. Last updated: 2026-09-29.
+It's kept up to date at the end of every work session. Last updated: 2026-10-04.
 
 - Repo: `github.com/landenm999-coder/sloane`, branch `main` (CI runs on push).
 - landenm999-coder/sloane#12 (skills, partner, colleges, DECA), landenm999-coder/sloane#13 (capture recall,
@@ -427,6 +427,34 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
 
 ## In flight
 
+- **Becoming Jarvis, and the desktop outlet (phase 1 of merging with the Jarvis desktop app).** Landen,
+  2026-10-04: the always-on box stays the brain; the Jarvis desktop app (`landenm999-coder/jarvis`, Windows,
+  `docs/HANDOFF.md` there) becomes its face on the PC. One memory, one assistant on phone and PC; **named Jarvis
+  everywhere, with the film character's manner, Telegram included.** Done on this branch:
+  - *Persona*: `persona.py` `NAME = "Jarvis"` and the character rewritten in the film's register (composed,
+    dry, courteous, "very good" / "shall I", candid, never a servant); the FACTS/INGESTED/output-contract
+    paragraphs are untouched. The CONVERSATION speaker label follows `NAME`. User-visible strings renamed: the
+    control room (title, wordmark, composer placeholder, login, manifest, icon label), `/tv`, the hello, the
+    workshop PR line. Internal names stay `sloane` (package, repo, service, cookie, `X-Sloane`, `ADDRESS_AS`).
+    A message opening with "Jarvis," or "Sloane," (or "hey ...") has the name set aside by every rule that
+    strips it (`skills.unaddressed`, reminders, timers, colleges), and `ingest.planted` treats both as addressing
+    her. The default `ADDRESS_AS=Landen` is unchanged; `ADDRESS_AS=sir` in `.env` is the film touch if he wants it.
+  - *Desktop outlet auth*: `DESKTOP_TOKEN` (32+ characters, off otherwise) is a bearer token the desktop app
+    sends to `/api`. `web.DESKTOP_ROUTES` is the whole list it opens: `GET /api/overview|activity|history`,
+    `POST /api/chat|voice|speak|do`, `/api/reminders/{id}/cancel`, `/api/followups/{id}/close`,
+    `/api/proposals/{id}/{decision}`. Each is opted in with `desktop=True` (a new route starts closed);
+    prefs, trust, forget, jobs, the workshop and `/app` stay browser-only. A bearer request needs no cookie and no
+    `X-Sloane` (both defend against other *sites*, which can't send the header), and a wrong bearer is a flat 401.
+    It works on a box with no `DASHBOARD_TOKEN` too. `tests/test_web.py` probes every `/api` route with no
+    credential, a wrong token and the right one, and fails if the accepted set differs from `DESKTOP_ROUTES`.
+    `doctor.py` has a `desktop` line; `secret_values` (the workshop's credential guard) covers the token;
+    `.env.example`, DEPLOY §7i, README and `CLAUDE.md` are in step. `scripts/env_migrate.py` needed no pair: no
+    default changed (the token is new and blank).
+  - *Next (phase 2, in the jarvis repo)*: Settings → Home (box URL + token), a Python-side client that proxies
+    these routes, the dashboard port, and a `home` tool that asks `/api/chat`. Mirroring desktop turns uses
+    `POST /capture` with `act: false`. If phase 2 needs another route, add it to `DESKTOP_ROUTES` and the
+    handler's `desktop=True` in the same commit; the test will tell you if the two disagree.
+
 - **The dashboard, filled; the bank and Fidelity; Whoop's rings** (this branch's PR). Landen, 2026-09-29: fill
   every box ("I don't want a bunch of empty space sitting around"); Whoop as three circles (sleep, recovery,
   strain) with HRV and resting heart rate as bars against his averages; workouts really from Whoop, centered;
@@ -551,6 +579,12 @@ HTTP (loopback only, or your tailnet via `tailscale serve`): `/health /usage /st
 ## Only Landen can do (the whole list; see DEPLOY.md)
 
 Done: the Oracle box, the installer, the workshop's GitHub token, the control room, the British voice, Whoop.
+
+New (2026-10-04):
+- In Telegram → **@BotFather**: `/setname` to **Jarvis** and `/setuserpic` for a photo. The bot's display name and
+  picture can't be changed from code.
+- The desktop app: on the box, `python3 -c "import secrets; print('DESKTOP_TOKEN=' + secrets.token_urlsafe(32))" >> .env`
+  and restart, Tailscale on the PC, then the app's Settings → Home (DEPLOY §7i). Optional: `ADDRESS_AS=sir`.
 
 0. After each merge to `main`, upgrade the box: in PowerShell,
    `ssh -i "C:\Users\lande\Downloads\ssh-key-2026-09-27.key" ubuntu@<the box's IP>`, then

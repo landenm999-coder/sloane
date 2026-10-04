@@ -84,7 +84,7 @@ _OVERRIDE = re.compile(
     re.I,
 )
 _OVERRIDE_WHICH = {"previous", "prior", "above", "earlier", "preceding", "all", "any", "your", "system", "existing"}
-_ADDRESSED = re.compile(r"\b(?:landen|sloane|assistant|ai|chatbot|language\s+model|you\s+are|you\s+must)\b"
+_ADDRESSED = re.compile(r"\b(?:landen|jarvis|sloane|assistant|ai|chatbot|language\s+model|you\s+are|you\s+must)\b"
                         r"|(?:^|\s)/[a-z]+\b", re.I)
 _UNMISTAKABLE = re.compile(
     r"\bsystem\s+prompt\b|\bjailbreak|\byou\s+are\s+now\b|\bnew\s+instructions\s*:"
