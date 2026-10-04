@@ -170,7 +170,7 @@ def render(data: dict) -> str:
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="refresh" content="{REFRESH_SECONDS}">
-<title>Sloane</title>
+<title>Jarvis</title>
 <style>
 :root {{
   --bg: #0d1117; --panel: #161b22; --line: #30363d; --text: #e6edf3; --muted: #8b949e;

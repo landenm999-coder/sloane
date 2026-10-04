@@ -80,7 +80,7 @@ _TRAIL = re.compile(r"(?:\s|,|:|-|\bto\b)+$", re.I)
 # "Remind me at 5 to call Keegan", as typed, spoken or captured. Group 1 is the
 # rest. Shared by the chat and the Capture intake so both read it the same way.
 REMIND_ME = re.compile(
-    r"^\s*(?:hey\s+)?(?:sloane[,\s]+)?(?:please\s+)?remind\s+me\b[,:]?\s*(.*)$", re.I | re.S
+    r"^\s*(?:hey\s+)?(?:(?:jarvis|sloane)[,\s]+)?(?:please\s+)?remind\s+me\b[,:]?\s*(.*)$", re.I | re.S
 )
 
 
@@ -639,7 +639,7 @@ _TIME_UNIT = r"(?:s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?)"
 # "1h30m", "an hour and a half", "2 hours and 15 min".
 _LENGTH = (rf"{_AMOUNT}[\s-]*{_TIME_UNIT}(?:\s*(?:,|and)?\s*(?:a\s+half|{_AMOUNT}[\s-]*{_TIME_UNIT}))*")
 TIMER = re.compile(
-    r"^\s*(?:hey\s+)?(?:sloane[,\s]+)?(?:(?:please|can\s+you|could\s+you)\s+)?"
+    r"^\s*(?:hey\s+)?(?:(?:jarvis|sloane)[,\s]+)?(?:(?:please|can\s+you|could\s+you)\s+)?"
     r"(?:(?:set|start)\s+(?:a|an|the|me\s+a)?\s*|(?:a|an)\s+(?=\d))?"
     rf"(?:timer\s+(?:for\s+)?(?P<l1>{_LENGTH})|(?P<l2>{_LENGTH})\s+timer)"
     r"(?:\s+(?:for|to|on)\s+(?P<what>.+?))?"

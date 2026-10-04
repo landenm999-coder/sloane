@@ -41,7 +41,7 @@ rows = [msg("in", "what's due tomorrow?", 0), msg("out", "Two things: the lab an
 block, _ = render_conversation(rows, 500, tz="America/Denver")
 check("oldest first, who said it, in his time", block.splitlines()[1:], [
     "- Thu Sep 24 3 PM Landen: what's due tomorrow?",
-    "- Thu Sep 24 3:01 PM Sloane: Two things: the lab and the essay.",
+    "- Thu Sep 24 3:01 PM Jarvis: Two things: the lab and the essay.",
     "- Thu Sep 24 3:02 PM Landen: which is worse",
 ])
 check("labelled as context, not evidence", "not evidence for dates" in block.splitlines()[0], True)

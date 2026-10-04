@@ -33,6 +33,7 @@ EXTERNAL: dict[str, object] = {
     "gmail_token_url": "",
     "gmail_api_base": "",
     "capture_token": "",
+    "desktop_token": "",
     "weather_location": "",
 }
 

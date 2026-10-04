@@ -361,7 +361,8 @@ phone, use **Add to Home Screen** (iPhone: Share → Add to Home Screen) and it
 opens like an app, with her icon. The first time you tap the microphone the
 browser asks to use it; say yes. It is reachable only
 from your own tailnet devices, and even there it needs the password. Changing
-`DASHBOARD_TOKEN` (and restarting) signs every device out.
+`DASHBOARD_TOKEN` (and restarting) signs every device out. The desktop app doesn't use
+this password: it has its own token (7i).
 
 **No Tailscale on this computer?** Use an SSH tunnel instead. In PowerShell (or
 any terminal), with your key and the box's IP:
@@ -439,6 +440,43 @@ nothing else:
 the upgrader is installed. Also on Telegram: `/idea <what you want>` and
 `/workshop`. Settings: `WORKSHOP_MODEL`, `WORKSHOP_NIGHTLY`, `NIGHTLY_BUILDS`,
 `NIGHTLY_OWN_IDEAS` (`.env.example`).
+
+## 7i. The desktop app: Jarvis on your PC (2 minutes)
+
+The Jarvis desktop app (its own repo, Windows) is this assistant's face on your PC: the
+same memory and conversation as Telegram and the control room, plus the voice, the HUD and
+PC control. It reaches the box over Tailscale with its own bearer token, `DESKTOP_TOKEN`.
+That token opens only the routes the app needs (`web.DESKTOP_ROUTES`: the dashboard's
+reads, the chat, the voice and the Today buttons). The administrative ones (panel choices,
+trust, forgetting, jobs, the workshop) and `/app` itself still need the browser password.
+
+1. Make a token and put it in `.env`, then restart:
+
+   ```bash
+   python3 -c "import secrets; print('DESKTOP_TOKEN=' + secrets.token_urlsafe(32))" >> .env
+   sudo systemctl restart sloane
+   ```
+
+2. Reach the box from the PC the way Capture does (7d step 2): Tailscale on the box
+   and on the PC, `sudo tailscale serve --bg 8000`, **never `funnel`**. The address is
+   `https://<box-name>.<your-tailnet>.ts.net`.
+
+3. In the desktop app: **Settings → Home**, enter that address and the token. To test
+   from any device on your tailnet:
+
+   ```bash
+   curl -s https://<box>.<tailnet>.ts.net/api/activity -H "Authorization: Bearer $DESKTOP_TOKEN"
+   ```
+
+   You should get JSON (`{"state": "idle", ...}`); without the header you get `401`.
+
+`python3 scripts/doctor.py` shows a `desktop` line. To revoke the PC, change or remove the
+token and restart; nothing else is signed out.
+
+**The name.** She is **Jarvis** everywhere now (the persona, the control room, Telegram's
+replies), with the film character's manner. The code, the repo and the service keep the
+name `sloane`. "Sloane, …" still works when you address him by the old name. Telegram's
+display name and photo are set only in BotFather: `/setname`, `/setuserpic`.
 
 ## 7j. Optional: Whoop (about 5 minutes, once)
 

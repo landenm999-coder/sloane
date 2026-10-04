@@ -57,7 +57,7 @@ def data(**over) -> dict:
 
 
 page = dashboard.render(data())
-check("a doctype and a title", page.startswith("<!doctype html>") and "<title>Sloane</title>" in page, True)
+check("a doctype and a title", page.startswith("<!doctype html>") and "<title>Jarvis</title>" in page, True)
 check("an ingested title cannot run", "<script>alert(1)</script>" in page, False)
 check("it is shown escaped", "Lab &lt;script&gt;alert(1)&lt;/script&gt;" in page, True)
 check("today's shift", "WORK 3:00 PM–7:00 PM" in page, True)

@@ -20,7 +20,7 @@ log = logging.getLogger(__name__)
 PACKAGE = Path(__file__).resolve().parent
 PREFIX = "hello:"
 
-FIRST = ("Sloane here, up and running. I'll brief you at 6:35 each morning, check in before and after your "
+FIRST = ("Jarvis here, up and running. I'll brief you at 6:35 each morning, check in before and after your "
          "shifts, and nudge you ahead of deadlines. Say hi, or try \"what's due tomorrow?\", "
          "/college add CU Boulder EA nov 1, or /roleplay. /help lists everything.")
 UPDATED = "Updated and back up. /help lists everything; /status says if anything needs you."

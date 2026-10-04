@@ -29,6 +29,15 @@ site can't send without a CORS preflight this app never grants: that is the
 cross-site-request defence, on top of SameSite. Wrong guesses from one
 address are slowed after five.
 
+The desktop app (Jarvis on his PC, a separate repo) is the other way in: a bearer
+DESKTOP_TOKEN, 32+ characters, on `Authorization: Bearer ...`. It is accepted only
+on DESKTOP_ROUTES below (what the app's dashboard and voice need: the reads, the
+conversation, and the Today panels' buttons), never on the admin routes
+(preferences, trust, forgetting, jobs, the workshop) and never on /app itself.
+A bearer request skips the cookie and the `X-Sloane` header: both exist to
+stop another *site* riding his browser, and a page on another site can't send
+this header at all. Unset or short, the token is off.
+
 Reach it like Capture: on the box's loopback, published to his own devices
 with `tailscale serve` (DEPLOY section 7e). The page loads nothing from
 outside (CSP 'self'), so it works on a tailnet with no internet.
@@ -82,6 +91,14 @@ FONTS = frozenset({"onest-400.woff2", "onest-500.woff2", "onest-600.woff2"})
 BUTTONS = frozenset({"did", "habit", "list", "focus", "watch", "unwatch", "workout", "spent", "budget",
                      "countdown", "birthday", "client", "news", "done", "remind", "remember", "bank"})
 MAX_BUTTON = 300
+# The routes the desktop app's bearer token opens (each passes desktop=True to refuse() or act()),
+# as (method, path). tests/test_web.py pins this list and checks every other /api route refuses it.
+DESKTOP_ROUTES = frozenset({
+    ("GET", "/api/overview"), ("GET", "/api/activity"), ("GET", "/api/history"),
+    ("POST", "/api/chat"), ("POST", "/api/voice"), ("POST", "/api/speak"),
+    ("POST", "/api/do"), ("POST", "/api/reminders/{reminder_id}/cancel"),
+    ("POST", "/api/followups/{item_id}/close"), ("POST", "/api/proposals/{proposal_id}/{decision}"),
+})
 _BUTTON = re.compile(r"^/([a-z]+)(?:\s|$)", re.I)
 # What a browser's recorder makes (Chrome and Firefox: WebM or Ogg; Safari: MP4),
 # as the extension the transcriber reads the format from.
@@ -108,6 +125,20 @@ HEADERS = {
 
 def enabled(config) -> bool:  # noqa: ANN001
     return len(config.dashboard_token or "") >= MIN_TOKEN
+
+
+def desktop_enabled(config) -> bool:  # noqa: ANN001
+    return len(config.desktop_token or "") >= MIN_TOKEN
+
+
+def desktop_authorized(config, header: str | None) -> bool:  # noqa: ANN001
+    """A valid `Authorization: Bearer <DESKTOP_TOKEN>`, compared in constant time."""
+    if not desktop_enabled(config):
+        return False
+    scheme, _, token = (header or "").partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        return False
+    return hmac.compare_digest(token.strip().encode(), config.desktop_token.encode())
 
 
 def _sign(token: str, issued: int) -> str:
@@ -708,8 +739,18 @@ def install(app: FastAPI, state: dict, store, config) -> None:  # noqa: ANN001, 
     def signed_in(request: Request) -> bool:
         return enabled(config) and valid_session(config.dashboard_token, request.cookies.get(COOKIE), time.time())
 
-    def refuse(request: Request, *, change: bool) -> Response | None:
-        """None if this request may go ahead; else the answer that stops it."""
+    def refuse(request: Request, *, change: bool, desktop: bool = False) -> Response | None:
+        """None if this request may go ahead; else the answer that stops it.
+
+        `desktop` marks a route the desktop app's bearer token may use (DESKTOP_ROUTES). A bearer
+        request there is decided on the token alone: right, it goes ahead (no cookie, no X-Sloane);
+        wrong, or the token is off, 401. Anywhere else a bearer header is simply not a credential."""
+        if desktop:
+            header = request.headers.get("authorization") or ""
+            if header.partition(" ")[0].lower() == "bearer":
+                if desktop_authorized(config, header):
+                    return None
+                return JSONResponse({"error": "unauthorized"}, status_code=401)
         if not enabled(config):
             return JSONResponse({"error": "the dashboard is off (set DASHBOARD_TOKEN)"}, status_code=404)
         if not signed_in(request):
@@ -794,7 +835,7 @@ def install(app: FastAPI, state: dict, store, config) -> None:  # noqa: ANN001, 
 
     @app.get("/api/overview")
     async def api_overview(request: Request) -> Response:
-        stop = refuse(request, change=False)
+        stop = refuse(request, change=False, desktop=True)
         if stop is not None:
             return stop
         body = await overview(store, config, state, datetime.now(ZoneInfo(config.timezone)))
@@ -803,7 +844,7 @@ def install(app: FastAPI, state: dict, store, config) -> None:  # noqa: ANN001, 
     @app.get("/api/activity")
     async def api_activity(request: Request) -> Response:
         """What she's doing right now, for the orb. Polled every 5 s while the page is open."""
-        stop = refuse(request, change=False)
+        stop = refuse(request, change=False, desktop=True)
         if stop is not None:
             return stop
         body = await activity(store, state, config, datetime.now(ZoneInfo(config.timezone)))
@@ -826,7 +867,7 @@ def install(app: FastAPI, state: dict, store, config) -> None:  # noqa: ANN001, 
 
     @app.get("/api/history")
     async def api_history(request: Request) -> Response:
-        stop = refuse(request, change=False)
+        stop = refuse(request, change=False, desktop=True)
         if stop is not None:
             return stop
         zone = ZoneInfo(config.timezone)
@@ -840,7 +881,7 @@ def install(app: FastAPI, state: dict, store, config) -> None:  # noqa: ANN001, 
 
     @app.post("/api/chat")
     async def api_chat(request: Request) -> Response:
-        stop = refuse(request, change=True)
+        stop = refuse(request, change=True, desktop=True)
         if stop is not None:
             return stop
         try:
@@ -863,7 +904,7 @@ def install(app: FastAPI, state: dict, store, config) -> None:  # noqa: ANN001, 
         """A voice note from the page's microphone: words by the Telegram voice path's
         transcriber, then the same conversation as a typed message. The audio is
         never stored or logged; the transcript is, like a Telegram voice note's."""
-        stop = refuse(request, change=True)
+        stop = refuse(request, change=True, desktop=True)
         if stop is not None:
             return stop
         bot = state.get("responder")
@@ -901,7 +942,7 @@ def install(app: FastAPI, state: dict, store, config) -> None:  # noqa: ANN001, 
         The page asks sentence by sentence as her reply streams in, so she starts
         talking before she's finished writing. Accounted as "talk", apart from the
         Telegram voice notes DAILY_SPEAK_BUDGET rations."""
-        stop = refuse(request, change=True)
+        stop = refuse(request, change=True, desktop=True)
         if stop is not None:
             return stop
         router = state.get("router")
@@ -953,8 +994,8 @@ def install(app: FastAPI, state: dict, store, config) -> None:  # noqa: ANN001, 
         return StreamingResponse(events(), media_type="application/x-ndjson",
                                  headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
 
-    async def act(request: Request, doing):  # noqa: ANN001, ANN202
-        stop = refuse(request, change=True)
+    async def act(request: Request, doing, *, desktop: bool = False):  # noqa: ANN001, ANN202
+        stop = refuse(request, change=True, desktop=desktop)
         if stop is not None:
             return stop
         try:
@@ -973,7 +1014,7 @@ def install(app: FastAPI, state: dict, store, config) -> None:  # noqa: ANN001, 
             if row is None:
                 return "That one already went out.", False
             return (f"Stopped: {row['text']}. It won't repeat." if row.get("repeat") else f"Cancelled: {row['text']}."), True
-        return await act(request, doing)
+        return await act(request, doing, desktop=True)
 
     @app.post("/api/proposals/{proposal_id}/{decision}")
     async def decide(proposal_id: str, decision: str, request: Request) -> Response:
@@ -985,7 +1026,7 @@ def install(app: FastAPI, state: dict, store, config) -> None:  # noqa: ANN001, 
                 return "No such decision.", False
             outcome = await agency.decide(proposal_id, decision)
             return outcome.message, outcome.status not in ("stale", "ignored")
-        return await act(request, doing)
+        return await act(request, doing, desktop=True)
 
     @app.post("/api/trust/revoke")
     async def revoke(request: Request) -> Response:
@@ -1017,7 +1058,7 @@ def install(app: FastAPI, state: dict, store, config) -> None:  # noqa: ANN001, 
                 return "No such loose end.", False
             row = await store.close_follow_up(item_id)
             return (f"Closed: {row['summary']}.", True) if row else ("That one's already closed.", False)
-        return await act(request, doing)
+        return await act(request, doing, desktop=True)
 
     @app.post("/api/do")
     async def do_command(request: Request) -> Response:
@@ -1038,7 +1079,7 @@ def install(app: FastAPI, state: dict, store, config) -> None:  # noqa: ANN001, 
             if reply is None:
                 return "Nothing answers that.", False
             return reply.speech, True
-        return await act(request, doing)
+        return await act(request, doing, desktop=True)
 
     @app.post("/api/jobs/{name}/run")
     async def run_job(name: str, request: Request) -> Response:

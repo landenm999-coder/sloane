@@ -190,7 +190,7 @@ def create_app() -> FastAPI:
             ClaudeCodeProvider.close_all()
             await store.close()
 
-    app = FastAPI(title="Sloane", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="Jarvis", version="0.1.0", lifespan=lifespan)
     # Browser apps (Capture) may call the token-checked endpoints, and only those.
     app.add_middleware(ScopedCORS, origins=cors_origins(config.cors_origins), paths=CORS_PATHS)
     # The control room: /app and /api (sloane/web.py). Off without DASHBOARD_TOKEN.

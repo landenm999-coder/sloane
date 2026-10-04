@@ -28,6 +28,7 @@ from sloane import web
 FAILURES: list[str] = []
 DEN = ZoneInfo("America/Denver")
 TOKEN = "a-dashboard-password-that-is-long-enough-01"
+DESKTOP = "a-desktop-bearer-token-that-is-long-enough-02"
 
 
 def check(label: str, got, want) -> None:
@@ -48,6 +49,19 @@ check("one from the future fails", web.valid_session(TOKEN, web.session_value(TO
 check("junk fails", [web.valid_session(TOKEN, v, now) for v in ("", "x", "abc.def", None)], [False] * 4)
 check("off below 32 characters", (web.enabled(isolated(dashboard_token="short")),
                                   web.enabled(isolated(dashboard_token=TOKEN))), (False, True))
+
+# -- the desktop app's bearer token -----------------------------------------------------------
+check("the desktop token is off below 32 characters",
+      (web.desktop_enabled(isolated(desktop_token="short")), web.desktop_enabled(isolated(desktop_token=DESKTOP)),
+       web.desktop_enabled(isolated())), (False, True, False))
+desk_on = isolated(desktop_token=DESKTOP)
+check("a bearer header: only the right token, in the right scheme",
+      [web.desktop_authorized(desk_on, h) for h in (f"Bearer {DESKTOP}", f"bearer {DESKTOP}", f"Bearer {DESKTOP}x",
+                                                    f"Basic {DESKTOP}", DESKTOP, "Bearer", "", None)],
+      [True, True, False, False, False, False, False, False])
+check("never when it's off, even if the header matches",
+      web.desktop_authorized(isolated(desktop_token="short"), "Bearer short"), False)
+check("the dashboard password is not the desktop token", web.desktop_authorized(desk_on, f"Bearer {TOKEN}"), False)
 
 guesses = web.Guesses()
 for i in range(5):
@@ -214,7 +228,7 @@ async def integration() -> None:
     from sloane.telegram import Bot
 
     config = isolated(database_url=os.environ["DATABASE_URL"], timezone="America/Denver", telegram_chat_id=5151,
-                      dashboard_token=TOKEN)
+                      dashboard_token=TOKEN, desktop_token=DESKTOP)
     async with Store(config) as store:
         for table in ("emails", "reminders", "proposals", "alerts", "workshop_items", "dashboard_prefs"):
             await store._exec(f"delete from {table}")
@@ -605,6 +619,58 @@ async def integration() -> None:
 
             out = await client.post("/app/logout", headers={"X-Sloane": "1"})
             check("sign out", out.status_code, 200)
+
+            # -- the desktop app: a bearer token on its own routes and no others ----------------
+            # The client has no cookie now, so only the bearer can be what lets a request in.
+            zero = "00000000-0000-0000-0000-000000000000"
+            bearer = {"Authorization": f"Bearer {DESKTOP}"}
+
+            async def reaches(headers):
+                """Every /api route, sent with `headers` and no cookie: the ones that get past the gate
+                (anything but 401/403/404; a handler may still answer 400 to an empty body)."""
+                got = set()
+                for route in app.routes:
+                    path = getattr(route, "path", "")
+                    if not path.startswith("/api"):
+                        continue
+                    for method in sorted(route.methods - {"HEAD", "OPTIONS"}):
+                        response = await client.request(method, re.sub(r"\{[^}]+\}", zero, path), headers=headers,
+                                                        json={} if method == "POST" else None)
+                        if response.status_code not in (401, 403, 404):
+                            got.add((method, path))
+                return got
+
+            check("no credential: no route lets a request in", await reaches({}), set())
+            check("a wrong bearer token: none either", await reaches({"Authorization": f"Bearer {DESKTOP}x"}), set())
+            check("the dashboard password is not a bearer token", await reaches({"Authorization": f"Bearer {TOKEN}"}), set())
+            check("the right one opens exactly the desktop's routes, and a new route starts closed",
+                  await reaches(bearer), web.DESKTOP_ROUTES)
+            check("with or without X-Sloane: a bearer can't be forged from another site",
+                  await reaches({**bearer, "X-Sloane": "1"}), web.DESKTOP_ROUTES)
+            check("the page and its sign-out are the browser's alone",
+                  ((await client.get("/app", headers=bearer)).status_code,
+                   (await client.post("/app/logout", headers=bearer)).status_code), (303, 401))
+
+            code_before = len(Agent.asked)
+            talked = await client.post("/api/chat", json={"text": "what first tonight?"}, headers=bearer)
+            spoken = [json.loads(line) for line in talked.text.splitlines() if line.strip()]
+            check("the desktop talks in the same conversation: through the bot, marked as the dashboard",
+                  (talked.status_code, spoken[-2]["speech"], Agent.asked[code_before:]),
+                  (200, "Lab first, it's due at 11:59.", [("what first tonight?", "dashboard", True)]))
+            read_back = (await client.get("/api/history", headers=bearer)).json()
+            check("and reads it back", [h["text"] for h in read_back if h["from"] == "him"][-1:], ["what first tonight?"])
+            check("a change from the desktop is a change all the same (an empty one is refused)",
+                  (await client.post("/api/chat", json={"text": " "}, headers=bearer)).status_code, 400)
+
+            # A box with no dashboard password still answers its desktop.
+            only = FastAPI()
+            web.install(only, {}, store, isolated(database_url=os.environ["DATABASE_URL"], dashboard_token="",
+                                                   desktop_token=DESKTOP, telegram_chat_id=5151))
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=only), base_url="http://box") as lone:
+                check("desktop token only: the desktop is in, the browser still has no room",
+                      ((await lone.get("/api/history", headers=bearer)).status_code,
+                       (await lone.get("/api/history")).status_code, (await lone.get("/app")).status_code),
+                      (200, 404, 404))
 
             # -- too many wrong guesses ---------------------------------------------------------
             for _ in range(5):

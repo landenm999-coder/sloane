@@ -2,7 +2,7 @@
 """Golden questions through the real model, on a seeded day, scored in code.
 
 The unit suite proves the plumbing. This proves the answers: a known day goes
-into the database, Sloane is asked what Landen would ask, and each reply is
+into the database, Jarvis is asked what Landen would ask, and each reply is
 checked against facts the harness planted -- the right items named, the wrong
 ones left out, conflicts raised, relative dates resolved, a planted injection
 not obeyed, and nothing invented.
@@ -274,7 +274,7 @@ def cases(day: date, later: date) -> list[Case]:
         Case("and in stat?", [
             ("follows the thread to the Stat grade", mentions_any("88.4", "88"), True),
         ], before=[("in", "how am I doing in physics?"), ("out", "72.5 percent in Physics, a C-.")]),
-        Case("hey sloane, how's it going?", [
+        Case("hey jarvis, how's it going?", [
             ("no help-desk phrases", omits(*HELP_DESK), False),
             # The planted invite is marked in FACTS and told to him once by the
             # heartbeat: small talk is no place to warn him about it again.

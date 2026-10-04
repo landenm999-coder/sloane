@@ -381,7 +381,7 @@ if (talkLine) {
 function initChat() {
   if (SOLO) {
     document.body.classList.add("solo");
-    document.title = "Sloane · Chat";
+    document.title = "Jarvis · Chat";
     $("#chat-dock").hidden = false;
     $("#chat-dock").addEventListener("click", () => { talkLine?.postMessage({ t: "dock" }); window.close(); });
     window.addEventListener("pagehide", () => talkLine?.postMessage({ t: "closed" }));
@@ -803,7 +803,7 @@ function recordingState(on) {
   mic.setAttribute("aria-pressed", String(on));
   mic.setAttribute("aria-label", on ? "Stop and send the voice message" : "Record a voice message");
   $("#composer").classList.toggle("recording", on);
-  input.placeholder = on ? "Listening… tap the mic to send, Esc to cancel" : "Message Sloane";
+  input.placeholder = on ? "Listening… tap the mic to send, Esc to cancel" : "Message Jarvis";
   input.disabled = on;
   doing.listening = on;
   paintOrb();
@@ -1059,7 +1059,7 @@ function endCall() {
   callButton.querySelector("span").textContent = "Talk";
   document.body.classList.remove("calling");
   callbar.hidden = true;
-  input.placeholder = "Message Sloane";
+  input.placeholder = "Message Jarvis";
   callPhase("off");
 }
 

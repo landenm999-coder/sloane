@@ -215,9 +215,9 @@ def secret_values(config) -> list[str]:  # noqa: ANN001
     """Every credential she holds, as it would appear in a file (and a URL's password)."""
     values = []
     for name in ("telegram_bot_token", "database_url", "groq_api_key", "anthropic_api_key", "canvas_token",
-                 "canvas_feed_url", "calendar_ics_url", "capture_token", "dashboard_token", "gmail_client_secret",
-                 "gmail_refresh_token", "github_token", "local_api_key", "whoop_client_secret", "whoop_refresh_token",
-                 "simplefin_access_url"):
+                 "canvas_feed_url", "calendar_ics_url", "capture_token", "dashboard_token", "desktop_token",
+                 "gmail_client_secret", "gmail_refresh_token", "github_token", "local_api_key", "whoop_client_secret",
+                 "whoop_refresh_token", "simplefin_access_url"):
         value = str(getattr(config, name, "") or "")
         if len(value) >= 8:
             values.append(value)
@@ -707,7 +707,7 @@ class Workshop:
                       f"Workshop: {row['title']}\n\n{safe_field(summary, limit=1500)}")
         sha = (await git.run("rev-parse", "HEAD")).strip()
         await git.run("push", "--quiet", "--force", "origin", f"HEAD:refs/heads/{branch}", timeout=600)
-        body = (f"**{'Landen asked' if row['origin'] == 'him' else 'Sloane’s own idea'}:** "
+        body = (f"**{'Landen asked' if row['origin'] == 'him' else 'Jarvis’s own idea'}:** "
                 f"{safe_field(row['request'], limit=1500)}\n\n**What she built:** {safe_field(summary, limit=2000)}\n\n"
                 f"Built in the workshop. Nothing here goes live until Landen presses Accept.")
         number, url = await self.github.open_pr(branch, f"Workshop: {row['title']}", body)
